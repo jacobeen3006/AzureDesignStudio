@@ -2,7 +2,7 @@
 @using Blazor.Diagrams.Core
 @using Blazor.Diagrams.Core.Models
 
-<Form Model="@sqlServer" LabelColSpan="6" WrapperColSpan="18" Size="@AntSizeLDSType.Small">
+<Form Model="@sqlServer" LabelCol="@(new ColLayoutParam { Span = 6 })" WrapperCol="@(new ColLayoutParam { Span = 18 })" Size="@FormSize.Small">
     <NameAndLocation Node="@context" />
 </Form>
 

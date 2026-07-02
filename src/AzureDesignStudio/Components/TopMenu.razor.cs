@@ -42,7 +42,7 @@ namespace AzureDesignStudio.Components
         {
             // Deselect the ant menu item. A bit strange way.
             // Tracked here: https://github.com/ant-design-blazor/ant-design-blazor/issues/2159
-            topMenu?.SelectItem(new MenuItem());
+            if (topMenu != null) topMenu.SelectedKeys = Array.Empty<string>();
             drawerRef = null;
             openedDrawer = string.Empty;
             return Task.CompletedTask;
@@ -54,7 +54,7 @@ namespace AzureDesignStudio.Components
             var drawerOptions = new DrawerOptions()
             {
                 Title = title,
-                Width = width,
+                Width = width.ToString(),
             };
             if (bodyNoPadding)
                 drawerOptions.BodyStyle = "padding:0px;";
@@ -99,7 +99,7 @@ namespace AzureDesignStudio.Components
 
                 if (adsContext.Diagram.Groups.Count == 0 && adsContext.Diagram.Nodes.Count == 0)
                 {
-                    await messageService.Warn("There is nothing to export.");
+                    messageService.Warn("There is nothing to export.");
                     return;
                 }
 
@@ -141,7 +141,7 @@ namespace AzureDesignStudio.Components
             }
             catch (Exception ex)
             {
-                await messageService.Error($"{ex.Message}");
+                messageService.Error($"{ex.Message}");
                 return (null, null);
             }
 
@@ -181,7 +181,7 @@ namespace AzureDesignStudio.Components
             if (!string.IsNullOrEmpty(bicep.Error))
             {
                 logger.LogError("Decompile Bicep failed: {BicepError}", bicep.Error);
-                await messageService.Error($"{bicep.Error}");
+                messageService.Error($"{bicep.Error}");
                 return;
             }
 
@@ -220,8 +220,8 @@ namespace AzureDesignStudio.Components
             var options = new DrawerOptions
             {
                 Title = title,
-                Placement = "bottom",
-                Height = currentWindowSize.Height
+                Placement = DrawerPlacement.Bottom,
+                Height = currentWindowSize.Height.ToString()
             };
 
             await drawerService.CreateAsync<CodeDrawerTemplate, CodeDrawerContent, string>(options, content);
@@ -281,7 +281,7 @@ namespace AzureDesignStudio.Components
             var diagramGraph = await DataModelFactory.SaveDiagramToDto(adsContext.Diagram, mapper);
             if (diagramGraph == null)
             {
-                await messageService.Warn("There is nothing to save.");
+                messageService.Warn("There is nothing to save.");
                 return;
             }
             var graph = JsonSerializer.Serialize(diagramGraph);
@@ -289,11 +289,11 @@ namespace AzureDesignStudio.Components
             var statusCode = await designService.SaveDesign(designName, graph);
             if (statusCode >= 200 && statusCode <= 299)
             {
-                await messageService.Success("The design is saved successfully.");
+                messageService.Success("The design is saved successfully.");
             }
             else
             {
-                await messageService.Error($"Failed to save the design. Error code: {statusCode}");
+                messageService.Error($"Failed to save the design. Error code: {statusCode}");
             }
         }
 
@@ -310,7 +310,7 @@ namespace AzureDesignStudio.Components
             adsContext.Diagram.Links.Clear();
             adsContext.Diagram.RemoveAllGroups();
 
-            var loadingTask = messageService.Loading("Loading the design ...", 0);
+            messageService.Loading("Loading the design ...", 0);
 
             DiagramGraph? diagramGraph = null;
             var (status, designData) = await designService.LoadDesign(designName);
@@ -321,7 +321,7 @@ namespace AzureDesignStudio.Components
 
             if (diagramGraph == null)
             {
-                await messageService.Error("Cannot load the diagram.");
+                messageService.Error("Cannot load the diagram.");
             }
             else
             {
@@ -329,7 +329,6 @@ namespace AzureDesignStudio.Components
                 adsContext.CurrentDesignName = designName;
             }
 
-            loadingTask.Start();
-        }
+    }
     }
 }

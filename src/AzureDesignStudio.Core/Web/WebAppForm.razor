@@ -2,10 +2,10 @@
 @using Blazor.Diagrams.Core
 @using Blazor.Diagrams.Core.Models
 
-<Form Model="@webApp" LabelColSpan="6" WrapperColSpan="18" Size="@AntSizeLDSType.Small">
+<Form Model="@webApp" LabelCol="@(new ColLayoutParam { Span = 6 })" WrapperCol="@(new ColLayoutParam { Span = 18 })" Size="@FormSize.Small">
     <NameAndLocation Node="@context" />
     <FormItem>
-        <RadioGroup @bind-Value="@context.Publish" ButtonStyle="@RadioButtonStyle.Solid" Size="small">
+        <RadioGroup @bind-Value="@context.Publish" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
             <Radio RadioButton Value="@("code")">Code</Radio>
             <Radio RadioButton Value="@("docker")">Docker container</Radio>
         </RadioGroup>
@@ -18,7 +18,7 @@
         </FormItem>
     }
     <FormItem>
-        <RadioGroup @bind-Value="@context.ServicePlanOS" ButtonStyle="@RadioButtonStyle.Solid" Size="small">
+        <RadioGroup @bind-Value="@context.ServicePlanOS" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
             <Radio RadioButton Value="@("linux")" Disabled="@DisableLinuxOption">Linux</Radio>
             <Radio RadioButton Value="@("windows")" Disabled="@DisableWindowsOption">Windows</Radio>
         </RadioGroup>

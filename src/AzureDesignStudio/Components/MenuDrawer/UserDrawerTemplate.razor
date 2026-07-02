@@ -17,7 +17,7 @@
             <Spin Spinning="@_spinning">
         @if(_showLinkSubscription)
         {
-            <AntList Bordered DataSource="@_linkedSubscriptions" Size="small">
+            <AntList Bordered DataSource="@_linkedSubscriptions" Size="@ListSize.Small">
                 <Header><b>Your linked subscriptions</b></Header>
                 <ChildContent Context="item">
                     <ListItem>@item.SubscriptionName</ListItem>
@@ -34,7 +34,7 @@
     <NotAuthorized>
         <p>Please sign in with your user account.</p>
         <br />
-        <Button Type="primary" OnClick="BeginLogin">Sign in</Button>
+        <Button Type="@ButtonType.Primary" OnClick="BeginLogin">Sign in</Button>
     </NotAuthorized>
 </AuthorizeView>
 
@@ -93,25 +93,25 @@
         int azSubDrawerWidth = 450;
 
         DrawerRef<string> userDrawer = (FeedbackRef as DrawerRef<string>)!;
-        userDrawer.Config.Width += azSubDrawerWidth;
+        userDrawer.Config.Width = (int.Parse(userDrawer.Config.Width) + azSubDrawerWidth).ToString();
         await userDrawer.UpdateConfigAsync();
 
         var drawerOptions = new DrawerOptions()
             {
                 Title = "Link your Azure subscription",
-                Width = azSubDrawerWidth,
+                Width = azSubDrawerWidth.ToString(),
             };
 
         var azSubDrawer = await _drawerService.CreateAsync<AzSubscriptionDrawerTemplate, string, string>(drawerOptions, "");
         azSubDrawer.OnClose = async () =>
         {
-            userDrawer.Config.Width -= azSubDrawerWidth;
+            userDrawer.Config.Width = (int.Parse(userDrawer.Config.Width) - azSubDrawerWidth).ToString();
             await userDrawer.UpdateConfigAsync();
         };
 
         azSubDrawer.OnClosed = async result =>
         {
-            userDrawer.Config.Width -= azSubDrawerWidth;
+            userDrawer.Config.Width = (int.Parse(userDrawer.Config.Width) - azSubDrawerWidth).ToString();
             await userDrawer.UpdateConfigAsync();
 
             if (result != "completed")

@@ -2,7 +2,7 @@
 @using Blazor.Diagrams.Core
 @using Blazor.Diagrams.Core.Models
 
-<Form Model="@_appGateway" LabelColSpan="8" WrapperColSpan="16" Size="@AntSizeLDSType.Small">
+<Form Model="@_appGateway" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
     <Collapse DefaultActiveKey="@(new[]{"1"})" Accordion>
         <Panel Header="Basics" Key="1">
             <NameAndLocation Node="@context" />

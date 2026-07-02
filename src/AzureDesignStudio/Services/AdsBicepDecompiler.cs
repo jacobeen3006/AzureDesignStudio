@@ -1,8 +1,5 @@
-﻿using Bicep.Core.FileSystem;
-using Bicep.Core.Registry;
-using Bicep.Decompiler;
+﻿using Bicep.Decompiler;
 using System.Collections.Immutable;
-using System.IO.Abstractions;
 
 namespace AzureDesignStudio.Services;
 
@@ -13,33 +10,23 @@ public interface IAdsBicepDecompiler
 
 public record DecompileResult(string? BicepFile, string? Error);
 
-public class EmptyModuleRegistryProvider : IModuleRegistryProvider
-{
-    public ImmutableArray<IModuleRegistry> Registries(Uri _) => ImmutableArray<IModuleRegistry>.Empty;
-}
-
 public class AdsBicepDecompiler : IAdsBicepDecompiler
 {
-    private readonly IFileSystem _fileSystem;
     private readonly BicepDecompiler _decompiler;
 
-    public AdsBicepDecompiler(IFileSystem fileSystem, BicepDecompiler decompiler)
+    public AdsBicepDecompiler(BicepDecompiler decompiler)
     {
-        _fileSystem = fileSystem;
         _decompiler = decompiler;
     }
 
     public async Task<DecompileResult> Decompile(string jsonContent)
     {
-        var jsonUri = new Uri("file:///main.json");
-        await _fileSystem.File.WriteAllTextAsync(jsonUri.LocalPath, jsonContent);
-
         try
         {
-            var bicepUri = PathHelper.ChangeToBicepExtension(jsonUri);
-            var (entrypointUri, filesToSave) = await _decompiler.Decompile(jsonUri, bicepUri);
+            var bicepUri = new Uri("file:///main.bicep");
+            var result = await _decompiler.Decompile(bicepUri, jsonContent);
 
-            return new DecompileResult(filesToSave[entrypointUri], null);
+            return new DecompileResult(result.FilesToSave[result.EntrypointUri], null);
         }
         catch (Exception exception)
         {

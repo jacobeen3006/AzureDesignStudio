@@ -11,7 +11,7 @@
     <div class="ads-azure-node-label">@Node.Name</div>
     @if (!Node.IsValid)
     {
-        <Icon Type="exclamation-circle" Theme="fill" Class="ads-node-status"/>
+        <Icon Type="exclamation-circle" Theme="@IconThemeType.Fill" Class="ads-node-status"/>
     }
     @foreach (var port in Node.Ports)
     {

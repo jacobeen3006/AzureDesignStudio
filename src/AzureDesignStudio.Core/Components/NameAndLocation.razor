@@ -4,13 +4,13 @@
         @bind-Value="@Node.Name"></Input>
 </FormItem>
 <FormItem>
-    <Switch @bind-Value="@Node.UseResourceGroupLocation" Size="small"
+    <Switch @bind-Value="@Node.UseResourceGroupLocation" Size="@InputSize.Small"
     CheckedChildren="Parameter" UnCheckedChildren="Select"></Switch>
         @if (!Node.UseResourceGroupLocation)
         {
             <Select DataSource="AzureRegions.AllRegions" @bind-Value="@Node.Location"
                 LabelName="@nameof(Region.Name)" ValueName="@nameof(Region.Value)"
-                Placeholder="Select the region" DefaultActiveFirstItem="false" Size="small"
+                Placeholder="Select the region" DefaultActiveFirstItem="false" Size="@InputSize.Small"
                 EnableSearch>
             </Select>
         }

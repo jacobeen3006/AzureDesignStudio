@@ -15,7 +15,7 @@
         <span class="title">@Group.Name</span>
         @if (!Group.IsValid)
         {
-            <Icon Type="exclamation-circle" Theme="fill" Class="ads-node-status"/>
+            <Icon Type="exclamation-circle" Theme="@IconThemeType.Fill" Class="ads-node-status"/>
         }
         @foreach (var port in Group.Ports)
         {

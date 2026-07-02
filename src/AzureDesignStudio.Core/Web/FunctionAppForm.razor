@@ -12,7 +12,7 @@
         funcApp = (Node as FunctionAppModel)!;
 
         ChildContent = 
-            @<FormItem LabelColSpan="null" WrapperColSpan="null">
+            @<FormItem>
                 <SimpleSelect @bind-Value="@funcApp.HostingPlan" OnSelectedItemChanged="@(_ => funcApp.CreateHostingPlan())">
                     <SelectOptions>
                         <SimpleSelectOption Label="Consumption" Value="@("consumption")" 

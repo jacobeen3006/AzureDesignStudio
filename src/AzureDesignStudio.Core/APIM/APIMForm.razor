@@ -3,7 +3,7 @@
 @using Blazor.Diagrams.Core
 @using Blazor.Diagrams.Core.Models
 
-<Form Model="@apim" LabelColSpan="8" WrapperColSpan="16" Size="@AntSizeLDSType.Small">
+<Form Model="@apim" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
     <NameAndLocation Node="@context" />
     <FormItem>
         <SimpleSelect @bind-Value="@context.SkuName" OnSelectedItemChanged="OnSelectedSkuNameChanged">
@@ -24,16 +24,16 @@
                      Min="1" Max="@(MaxSkuCapacity(context.SkuName))"></InputNumber>
         </FormItem>
     }
-    <FormItem LabelColSpan="@null" WrapperColSpan="@null">
+    <FormItem>
         <Input @bind-Value="@context.PublisherName"></Input>
     </FormItem>
-    <FormItem LabelColSpan="@null" WrapperColSpan="@null">
+    <FormItem>
         <Input @bind-Value="@context.PublisherEmail"></Input>
     </FormItem>
     @if (context.Group is SubnetModel)
     {
         <FormItem>
-            <RadioGroup @bind-Value="@context.VnetType" ButtonStyle="@RadioButtonStyle.Solid" Size="small" DefaultValue="@("External")">
+            <RadioGroup @bind-Value="@context.VnetType" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small" DefaultValue="@("External")">
                 <Radio RadioButton Value="@("External")">External</Radio>
                 <Radio RadioButton Value="@("Internal")">Internal</Radio>
             </RadioGroup>

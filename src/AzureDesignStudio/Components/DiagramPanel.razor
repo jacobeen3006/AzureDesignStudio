@@ -30,7 +30,7 @@
     private void ConfirmDelete()
     {
         RenderFragment icon =
-    @<Icon Type="exclamation-circle" Theme="outline"></Icon>
+    @<Icon Type="exclamation-circle" Theme="@IconThemeType.Outline"></Icon>
     ;
 
         modalService.Confirm(new ConfirmOptions()
@@ -48,7 +48,7 @@
                 RefreshDiagram();
                 return Task.CompletedTask;
             },
-            OkType = "danger",
+            OkType = ButtonType.Primary,
         });
     }
 }

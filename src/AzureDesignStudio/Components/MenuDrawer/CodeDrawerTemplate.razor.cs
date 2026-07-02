@@ -8,7 +8,7 @@ using System.Text;
 
 namespace AzureDesignStudio.Components.MenuDrawer
 {
-    internal record StepsStatus
+    internal record DeployStepStatus
     {
         public int CurrentStep { get; set; }
         public string Status { get; set; } = "starting";
@@ -16,6 +16,13 @@ namespace AzureDesignStudio.Components.MenuDrawer
     }
     public partial class CodeDrawerTemplate
     {
+        private static AntDesign.StepsStatus GetStepsStatus(string status) => status switch
+        {
+            "started" or "process" => AntDesign.StepsStatus.Process,
+            "finish" => AntDesign.StepsStatus.Finish,
+            "error" => AntDesign.StepsStatus.Error,
+            _ => AntDesign.StepsStatus.Wait
+        };
         private CodeDrawerContent _drawerContent = null!;
         private string _codeClass = "line-numbers language-json";
         private const string upperRight = "position:absolute;top:90px;right:41px;z-index:10";
@@ -28,7 +35,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private IList<string> _resourceGroupNames = null!;
         private bool _paramFormLoading = true;
         private bool _showDeployStatus = false;
-        private StepsStatus _stepsStatus = new();
+        private DeployStepStatus _stepsStatus = new();
 
         #region Button style and download
         protected override async Task OnInitializedAsync()

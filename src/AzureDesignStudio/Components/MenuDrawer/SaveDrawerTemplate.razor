@@ -10,14 +10,14 @@
         <Collapse DefaultActiveKey="@(new[]{"1"})" Accordion>
             <Panel Header="Save the design" Key="1">
                 <Form @ref="@_form" Model="@_designName" Context="formContext" ValidateMode="@FormValidateMode.Complex"
-                      LabelColSpan="24" WrapperColSpan="24">
+                      LabelCol="@(new ColLayoutParam { Span = 24 })" WrapperCol="@(new ColLayoutParam { Span = 24 })">
                     <FormItem Label="Design name" Rules="@designNameRules">
                         <Input @bind-Value="@formContext.Name" Placeholder="azure design studio" />
                     </FormItem>
                 </Form>
                 <br />
                 <br />
-                <Button Type="primary" OnClick="SaveButtonClick" Disabled="@(_savedDesignCount >= 10)">Save</Button>
+                <Button Type="@ButtonType.Primary" OnClick="SaveButtonClick" Disabled="@(_savedDesignCount >= 10)">Save</Button>
                 <br />
                 <br />
                 <Alert Type="@AlertType.Info" ShowIcon="true">
@@ -29,14 +29,14 @@
             <Panel Header="Load the design" Key="2">
                 <Table DataSource="@_allDesignRecords" @bind-SelectedRows="@_selectedRows"
                        Context="tableCtx" Loading="@_loadingDesigns" HidePagination Bordered Size="@TableSize.Small">
-                    <Selection Key="@tableCtx.Key" Type="radio" />
+                    <Selection Key="@tableCtx.Key" Type="@SelectionType.Radio" />
                     <PropertyColumn Property="c => c.DesignName" Title="Your saved designs">
                         <span style="vertical-align: middle"><IconComponent IconPath="assets/azure/reference-arch.svg" /></span>
                         <span style="margin-left: 4px;">@tableCtx.DesignName</span>
                     </PropertyColumn>
                 </Table>
                 <div style="padding-left: 48px;padding-top: 12px;">
-                    <Button Type="primary" Disabled="@((_selectedRows?.Count() ?? 0) == 0)" OnClick="LoadButtonClick">Load</Button>
+                    <Button Type="@ButtonType.Primary" Disabled="@((_selectedRows?.Count() ?? 0) == 0)" OnClick="LoadButtonClick">Load</Button>
                     <Button Disabled="@((_selectedRows?.Count() ?? 0) == 0)" OnClick="HandleDelete">Delete</Button>
                 </div>
             </Panel>
@@ -46,7 +46,7 @@
         <div style="padding: 24px;">
             <div>Please sign in with your user account first.</div>
             <br />
-            <Button Type="primary" OnClick="BeginLogin">Sign in</Button>
+            <Button Type="@ButtonType.Primary" OnClick="BeginLogin">Sign in</Button>
         </div>
     </NotAuthorized>
 </AuthorizeView>

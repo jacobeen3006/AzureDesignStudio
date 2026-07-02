@@ -89,7 +89,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
             var status = await _designService.DeleteDesign(designName);
             if (status != 200)
             {
-                await _messageService.Error($"Failed to delete {designName}");
+                _messageService.Error($"Failed to delete {designName}");
                 return;
             }
 

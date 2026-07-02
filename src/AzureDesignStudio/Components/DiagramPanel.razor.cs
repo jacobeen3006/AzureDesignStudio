@@ -100,7 +100,7 @@ namespace AzureDesignStudio.Components
                     var (result, message) = ((IAzureNode)node).IsDrappable(overlappedGroup!);
                     if (!result)
                     {
-                        await messageService.Error(message);
+                        messageService.Error(message);
                         return;
                     }
                     diagram.Batch(() =>
@@ -124,7 +124,7 @@ namespace AzureDesignStudio.Components
             }
             catch (NotImplementedException)
             {
-                await messageService.Info("The component is not implemented yet.");
+                messageService.Info("The component is not implemented yet.");
             }
         }
 
@@ -135,7 +135,7 @@ namespace AzureDesignStudio.Components
             adsContext.Diagram.Links.Clear();
             adsContext.Diagram.RemoveAllGroups();
 
-            var loadingTask = messageService.Loading("Loading the design ...", 0);
+            messageService.Loading("Loading the design ...", 0);
             try
             {
                 var httpClient = _clientFactory.CreateClient("AzureDesignStudio.ResourceAccess");
@@ -152,10 +152,6 @@ namespace AzureDesignStudio.Components
             catch
             {
                 throw new NotImplementedException();
-            }
-            finally
-            {
-                loadingTask.Start();
             }
         }
         #endregion
@@ -183,7 +179,7 @@ namespace AzureDesignStudio.Components
                 var options = new DrawerOptions()
                 {
                     Title = n.ServiceName,
-                    Width = 350,
+                    Width = "350",
                     Visible = true,
                     ChildContent = child,
                 };
