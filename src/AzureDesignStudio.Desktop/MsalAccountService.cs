@@ -15,6 +15,9 @@ public sealed class MsalAccountService
 {
     private readonly IPublicClientApplication _pca;
     private readonly string[] _scopes;
+
+    /// <summary>ARM scope acquired through the same PCA (WAM interactive path) for Azure SDK clients.</summary>
+    public const string ArmScope = "https://management.azure.com/.default";
     private readonly ILogger<MsalAccountService> _logger;
 
     /// <summary>Raised after sign-in/sign-out with the new user (null = anonymous).</summary>
@@ -88,6 +91,65 @@ public sealed class MsalAccountService
         }
     }
 
+    /// <summary>ARM management token from the serialized cache only; never prompts.</summary>
+    public async Task<string?> GetArmTokenSilentAsync()
+    {
+        if (!IsConfigured)
+            return null;
+        try
+        {
+            var account = (await _pca.GetAccountsAsync()).FirstOrDefault();
+            if (account is null)
+                return null;
+            var result = await _pca.AcquireTokenSilent(new[] { ArmScope }, account)
+                .ExecuteAsync();
+            return result.AccessToken;
+        }
+        catch (MsalException)
+        {
+            return null; // cache miss / consent required; the broker chain moves on
+        }
+    }
+
+    /// <summary>
+    /// Interactive ARM token: WAM broker first, device-code fallback - the same UX as
+    /// server-API sign-in. Null when the user cancels or MSAL is unconfigured.
+    /// </summary>
+    public async Task<string?> GetArmTokenInteractiveAsync()
+    {
+        if (!IsConfigured)
+            return null;
+        AuthenticationResult? result = null;
+        try
+        {
+            var accounts = await _pca.GetAccountsAsync();
+            result = await _pca.AcquireTokenInteractive(new[] { ArmScope })
+                .WithAccount(accounts.FirstOrDefault())
+                .WithParentActivityOrWindow(GetWindowHandle())
+                .ExecuteAsync();
+        }
+        catch (MsalClientException e) when (e.ErrorCode == "authentication_canceled")
+        {
+            _logger.LogInformation("Interactive ARM consent canceled by user");
+            return null;
+        }
+        catch (MsalException e)
+        {
+            _logger.LogWarning(e, "Interactive ARM acquisition failed, falling back to device code flow");
+            try
+            {
+                result = await _pca.AcquireTokenWithDeviceCode(new[] { ArmScope }, ShowDeviceCodeAsync)
+                    .ExecuteAsync();
+            }
+            catch (MsalException e2)
+            {
+                ReportSignInFailure(e2);
+                return null;
+            }
+        }
+        return result?.AccessToken;
+    }
+
     /// <summary>
     /// Interactive sign-in: WAM broker first, device-code fallback (browser-less
     /// hosts / broker failures). Returns true when a token was obtained.
@@ -108,7 +170,7 @@ public sealed class MsalAccountService
             var interactive = _pca.AcquireTokenInteractive(_scopes)
                 .WithAccount(accounts.FirstOrDefault())
                 .WithPrompt(Prompt.SelectAccount)
-                .WithParentActivityOrWindow(GetWindowHandle);
+                .WithParentActivityOrWindow(GetWindowHandle());
             result = await interactive.ExecuteAsync();
         }
         catch (MsalClientException e) when (e.ErrorCode == "authentication_canceled")

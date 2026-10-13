@@ -1,6 +1,7 @@
 using AzureDesignStudio.SharedModels.Protos;
 using Grpc.Core;
 using Grpc.Net.ClientFactory;
+using AzureDesignStudio.Core.Common;
 using System.Net;
 
 namespace AzureDesignStudio.Services

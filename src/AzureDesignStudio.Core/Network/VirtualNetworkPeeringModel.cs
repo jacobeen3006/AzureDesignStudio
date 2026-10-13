@@ -36,12 +36,13 @@ namespace AzureDesignStudio.Core.Network
 
         public IDictionary<string, Parameter> GetArmParameters()
         {
-            throw new NotImplementedException();
+            // Peering takes the remote VNet id literally; no template parameters.
+            return new Dictionary<string, Parameter>();
         }
 
         public IList<ResourceBase> GetArmResources()
         {
-            throw new NotImplementedException();
+            return new List<ResourceBase> { _virtualNetworkPeerings };
         }
     }
 }

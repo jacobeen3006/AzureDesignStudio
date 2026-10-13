@@ -36,6 +36,7 @@ AzureDesignStudio/
 │   ├── AzureDesignStudio.SharedModels/ # Protobuf definitions (design_view_model, deploy_model)
 │   ├── AzureDesignStudio.SourceGeneration/ # Roslyn source generator (Scriban templates)
 │   ├── AzureDesignStudio.Core.Tests/   # xUnit tests (offline + live-Azure categories)
+│   ├── AzureDesignStudio.Workspace/    # SQLite workspace (EF Core): designs/scans/snapshots/cost cache/plans/audit
 │   └── AzureDesignStudio.Desktop/      # MAUI BlazorWebView host (reuses App.razor; EnableTelemetry=false)
 ├── .github/workflows/                  # CI: build + CodeQL
 └── assets/ docs/                       # Screenshots, documentation
@@ -50,6 +51,7 @@ AzureDesignStudio/
 | Add gRPC service | Server/Services/ + SharedModels/*.proto | Define proto, implement service, register in Server/Program.cs |
 | Add UI drawer/modal | AzureDesignStudio/Components/MenuDrawer/ | Follow existing drawer template pattern |
 | Modify diagram behavior | Core/Components/AzureNodeComponent.razor | Core renders diagram; WASM client hosts it |
+| Local persistence (offline) | AzureDesignStudio.Workspace/ | EF Core SQLite `workspace.db`; `SqliteDesignOfflineStore` = pending-design contract |
 | Fix build/packages | root csproj files | No Directory.Build.props — version per-project |
 | CI/CD | .github/workflows/build.yml + Server/Dockerfile | Docker build via DockerBuild.ps1 |
 

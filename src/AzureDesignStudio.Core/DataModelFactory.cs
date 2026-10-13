@@ -47,6 +47,7 @@ public static partial class DataModelFactory
         diagram.RegisterComponent<AppServicePlanModel, AzureGroupComponent>(replace: true);
         diagram.RegisterComponent<ContainerAppsEnvironmentModel, AzureGroupComponent>(replace: true);
         diagram.RegisterComponent<AvailabilitySetModel, AzureGroupComponent>(replace: true);
+        diagram.RegisterComponent<UnknownNodeModel, AzureNodeComponent>(replace: true);
     }
     public static NodeModel CreateNodeModelFromKey(string key, string name, string imagePath)
     {
@@ -99,7 +100,7 @@ public static partial class DataModelFactory
             AdsConstants.TrafficManagerProfile => new TrafficManagerProfileModel(),
             AdsConstants.ExpressRouteCircuit => new ExpressRouteCircuitModel(),
             AdsConstants.NetworkSecurityGroup => new NetworkSecurityGroupModel(),
-            _ => throw new NotImplementedException(),
+            _ => new UnknownNodeModel(),
         };
 
         if (result is IAzureNode n)
@@ -235,8 +236,7 @@ public static partial class DataModelFactory
             if (node is JsonElement je)
             {
                 var typeKey = je.GetProperty("TypeKey").GetString() ?? string.Empty;
-                var returnType = GetDtoTypeFromKey(typeKey) 
-                    ?? throw new Exception($"Cannot find the deserialization type from the type key: {typeKey}.");
+                var returnType = GetDtoTypeFromKey(typeKey) ?? typeof(AzureNodeDto);
 
                 var g = JsonSerializer.Deserialize(je, returnType);
                 if (g is AzureNodeDto d)

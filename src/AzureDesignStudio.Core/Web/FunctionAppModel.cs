@@ -103,19 +103,19 @@ namespace AzureDesignStudio.Core.Web
                     {
                         "v6.0" => "DOTNET|6.0",
                         "v3.1" => "DOTNET|3.1",
-                        _ => throw new NotImplementedException(),
+                        _ => RuntimeStack,
                     },
                     "java" => stacks[1] switch
                     {
                         "11" => "JAVA|11",
                         "1.8" => "JAVA|8",
-                        _ => throw new NotImplementedException(),
+                        _ => RuntimeStack,
                     },
                     "node" => stacks[1] switch
                     {
                         "~14" => "NODE|14",
                         "~12" => "NODE|12",
-                        _ => throw new NotImplementedException(),
+                        _ => RuntimeStack,
                     },
                     _ => RuntimeStack,
                 };

@@ -10,6 +10,7 @@
   <ItemGroup>
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
     <PackageReference Include="Azure.ResourceManager.Resources" Version="1.12.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
     <PackageReference Include="Azure.ResourceManager.Resources.Deployments" Version="1.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
@@ -25,6 +26,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AzureDesignStudio.Core\AzureDesignStudio.Core.csproj" />
+    <ProjectReference Include="..\AzureDesignStudio.Workspace\AzureDesignStudio.Workspace.csproj" />
   </ItemGroup>
 
   <ItemGroup>

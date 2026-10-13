@@ -61,6 +61,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <PackageReference Include="Azure.Identity" Version="1.21.0" />
         <PackageReference Include="Microsoft.Identity.Client" Version="4.91.0" />
         <PackageReference Include="Microsoft.Identity.Client.Broker" Version="4.91.0" />
         <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
@@ -70,6 +71,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\AzureDesignStudio\AzureDesignStudio.csproj" />
+        <ProjectReference Include="..\AzureDesignStudio.Workspace\AzureDesignStudio.Workspace.csproj" />
     </ItemGroup>
 
     <ItemGroup>

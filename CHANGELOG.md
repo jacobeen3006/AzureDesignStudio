@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 - **Monthly cost estimation** per node and per design (Azure Retail Prices API with bundled snapshot fallback when offline).
 - **Design validation** drawer: naming rules, placement rules (SQL DB, Container App, subnet, availability set), SKU-region availability, subnet delegation, required children, per-node checks.
 - **Windows desktop app** (.NET MAUI): native window, native gRPC (HTTP/2) to the server, MSAL sign-in via the Windows broker (WAM) with device-code fallback, offline design cache (designs saved while the server is unreachable are stored locally and sync on reconnect), configurable server endpoint via `appsettings.json`.
+- **Desktop credential chain** (`AdsTokenBroker`, single `Azure.Core.TokenCredential` seam for the gRPC bearer handler and Azure SDK clients): cached MSAL account → `az login` CLI → managed identity → service principal → interactive WAM/device-code last; service-principal secrets live in Windows Credential Manager, never in config files.
+- **SQLite workspace** (desktop): designs, scans, snapshots, cost cache, plans and audit records in a single EF Core SQLite database (`AzureDesignStudio.Workspace`) - the app stays fully readable with the network down; the v1 file-based pending-design cache imports into it automatically on first start.
 - **Entra authentication** end to end: MSAL in the browser client, JWT + Microsoft.Identity.Web on the server, scoped server key.
 - **CI**: solution build plus offline test gate on every push/PR (`Category!=LiveAzure`), CodeQL analysis, Docker image build; `publish.yml` produces release artifacts (WASM site zip, server Docker image, signed-optional Windows MSIX) on version tags.
 
@@ -17,6 +19,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 - Diagram engine moved from the vendored Blazor.Diagrams fork to the upstream **Z.Blazor.Diagrams 3.0.4.1** NuGet package; fork-only editor behavior (grouping drag, save-on-exit prompt, center-on-load) reimplemented in app code (`AdsDiagram`, `AzurePort`, `SnappingDragBehavior`).
 - Editor UX: alignment guides + grid snapping, minimap navigator, Ctrl+Z/Y/Shift+Z undo-redo, Ctrl+C/V copy-paste, context-menu delete with confirmation.
 - ARM generation pins exact `type@apiVersion` per resource; 73 offline contract/regression tests.
+- Virtual network peering now exports its ARM resource (`GetArmResources`/`GetArmParameters` implemented) — previously the link drew but any export containing it threw.
+- Unknown catalog keys and future runtime-stack versions degrade gracefully (placeholder node, passthrough values) instead of crashing the designer or export; unknown ARM resource types are reported with the offending type name.
 
 ### Removed
 - Blazor.Diagrams git submodule and its local net10 patch — no submodule step needed to build; a clean clone now builds with a single `dotnet build`.

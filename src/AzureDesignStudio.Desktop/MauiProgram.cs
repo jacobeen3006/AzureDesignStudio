@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using BlazorApplicationInsights;
 using AzureDesignStudio.Core.DTO;
 using AzureDesignStudio.Services;
+using AzureDesignStudio.Workspace;
 using AzureDesignStudio.SharedModels.Protos;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.Configuration;
@@ -46,9 +47,14 @@ public static class MauiProgram
         // Grpc.Net.Client.Web shim from the WASM host is not needed here.
         // Client names match the shared service wrappers' GrpcClientFactory lookups;
         // the [Authorize] endpoints get their bearer token from the MSAL handler.
-        // Designs saved while the server is unreachable are kept under AppData
-        // and flushed on the next successful server interaction.
-        builder.Services.AddSingleton<IDesignOfflineStore, FileSystemDesignOfflineStore>();
+        // SQLite workspace (plan 6.3): designs, scans, snapshots, cost cache, plans and audit
+        // records in one file - everything readable with the network down. Designs saved while
+        // the server is unreachable stay pending until a successful sync clears them; the v1
+        // per-file pending cache is imported once on startup.
+        var workspaceDb = new WorkspaceDb(System.IO.Path.Combine(FileSystem.Current.AppDataDirectory, "workspace.db"));
+        LegacyDesignImporter.ImportIfNeeded(workspaceDb, System.IO.Path.Combine(FileSystem.Current.AppDataDirectory, "designs"));
+        builder.Services.AddSingleton(workspaceDb);
+        builder.Services.AddSingleton<AzureDesignStudio.Core.Common.IDesignOfflineStore, SqliteDesignOfflineStore>();
         builder.Services.AddScoped<DesignGrpcService>();
         builder.Services.AddGrpcClient<Design.DesignClient>("DesignClientWithAuth", o => o.Address = new Uri(serverUrl))
             .AddHttpMessageHandler<MsalAuthTokenHandler>();
@@ -62,6 +68,11 @@ public static class MauiProgram
         // Native MSAL (plan 4.2): work + personal accounts via the Windows broker
         // (WAM) with device-code fallback; state mirrors the serialized cache.
         builder.Services.AddSingleton<MsalAccountService>();
+
+        // Single token seam (plan 6.2): the broker serves the gRPC bearer handler and is the
+        // Azure.Identity TokenCredential for every direct Azure SDK client.
+        builder.Services.AddSingleton<AdsTokenBroker>();
+        builder.Services.AddSingleton<Azure.Core.TokenCredential>(sp => sp.GetRequiredService<AdsTokenBroker>());
         builder.Services.AddTransient<MsalAuthTokenHandler>();
         builder.Services.AddScoped<AuthenticationStateProvider, DesktopAuthenticationStateProvider>();
         builder.Services.AddAuthorizationCore();

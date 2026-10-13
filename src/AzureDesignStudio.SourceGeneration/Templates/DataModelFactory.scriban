@@ -24,7 +24,7 @@ public static partial class DataModelFactory
 			{{ if !(map.TypeKey | string.empty) ~}}
 			{{ map.TypeKey }} => typeof({{ map.DestinationType }}),
 			{{ end; end ~}}
-            _ => throw new NotImplementedException(),
+            _ => null,
         };
     }
 
@@ -36,7 +36,7 @@ public static partial class DataModelFactory
 			{{ if !(map.TypeKey | string.empty) ~}}
 			{{ map.TypeKey }} => mapper.Map<{{ map.SourceType }}>(dto),
 			{{ end; end ~}}
-            _ => throw new NotImplementedException(),
+            _ => new AzureDesignStudio.Core.Models.UnknownNodeModel { StencilKey = dto.TypeKey, Name = dto.Name },
         };
     }
 }

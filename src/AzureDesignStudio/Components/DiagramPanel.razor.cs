@@ -111,6 +111,11 @@ namespace AzureDesignStudio.Components
                 if (stencil.Category != Models.StencilCategory.Gallery)
                 {
                     var node = DataModelFactory.CreateNodeModelFromKey(adsContext.DraggedStencilKey, stencil.Name, stencil.IconPath);
+                    if (node is UnknownNodeModel)
+                    {
+                        messageService.Info($"'{stencil.Name}' has no editor implementation in this version.");
+                        return;
+                    }
                     node.SetPosition(position.X, position.Y);
                     var overlappedGroup = GetOverlappedGroup(node);
 
@@ -158,7 +163,8 @@ namespace AzureDesignStudio.Components
                 var diagramGraph = await httpClient.GetFromJsonAsync<DiagramGraph>(refArchPath);
                 if (diagramGraph == null)
                 {
-                    throw new NotImplementedException();
+                    messageService.Error("The reference architecture file could not be read.");
+                    return;
                 }
 
                 // Programmatic replace: never recorded, and prior history belongs to the old design.
@@ -171,9 +177,9 @@ namespace AzureDesignStudio.Components
                 });
                 adsContext.Diagram.History.Clear();
             }
-            catch
+            catch (Exception ex)
             {
-                throw new NotImplementedException();
+                messageService.Error($"Failed to load the reference architecture: {ex.Message}");
             }
         }
         #endregion
