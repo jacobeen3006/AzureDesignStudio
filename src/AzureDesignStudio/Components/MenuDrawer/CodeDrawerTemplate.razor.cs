@@ -138,12 +138,21 @@ namespace AzureDesignStudio.Components.MenuDrawer
         {
             _showDeployParams = false;
 
+            try
+            {
+                System.Text.Json.JsonDocument.Parse(_deployParams.ParametersJson);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                _messageService.Error("Parameters must be valid JSON.");
+                return;
+            }
+
             _stepsStatus.Status = "started";
             _showDeployStatus = true;
 
-            // TODO: work on the parameters.
             await _deployService.CreateDeployment(_linkedSubscription!.SubscriptionId,
-                _deployParams.ResourceGroup, _drawerContent.Content, "{}",
+                _deployParams.ResourceGroup, _drawerContent.Content, _deployParams.ParametersJson,
                 async (deploymentStatus, errorMessage) => 
                 {
                     var stateHasChanged = false;

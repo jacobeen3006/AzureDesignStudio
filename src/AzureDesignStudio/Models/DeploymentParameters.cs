@@ -10,6 +10,6 @@ namespace AzureDesignStudio.Models
     {
         [Required]
         public string ResourceGroup { get; set; } = default!;
-        public IDictionary<string, string> Parameters { get; set; } = null!;
+        public string ParametersJson { get; set; } = "{}";
     }
 }

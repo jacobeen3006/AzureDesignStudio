@@ -52,7 +52,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
             await base.OnInitializedAsync();
         }
 
-        async void SaveButtonClick()
+        async Task SaveButtonClick()
         {
             if (!_form.Validate())
                 return;

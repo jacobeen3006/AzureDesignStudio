@@ -157,7 +157,7 @@ namespace AzureDesignStudio.Components
         #endregion
 
         #region Drawer
-        private async void OpenNodeDrawer()
+        private async Task OpenNodeDrawer()
         {
             var node = diagram.GetSelectedModels().FirstOrDefault();
             if (node is IAzureNode n && n.DataFormType != null)

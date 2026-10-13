@@ -4,6 +4,7 @@
 @inherits FeedbackComponent<CodeDrawerContent, string>
 @inject IJSRuntime JS
 @inject DeployGrpcService _deployService
+@inject MessageService _messageService
 
 <Affix TargetSelector=".ant-drawer-body" OnChange="HandleAffixChange">
     <div style="@_buttonStyle">
@@ -26,6 +27,9 @@
           Loading="@_paramFormLoading" OnFinish="ParamsFormFinish">
         <FormItem Label="Resource Group">
             <SimpleSelect DataSource="@_resourceGroupNames" @bind-Value="@context.ResourceGroup" SortByLabel="@SortDirection.Ascending" />
+        </FormItem>
+        <FormItem Label="Template parameters (JSON)">
+            <InputTextArea rows="6" @bind-Value="@context.ParametersJson" />
         </FormItem>
     </Form>
 </Modal>

@@ -29,7 +29,7 @@
 @code {
     string style = "display:block;height:30px;line-height:30px;font-size:16px;";
     string exportType = "arm";
-    async void HandleButtonClick()
+    async Task HandleButtonClick()
     {
         DrawerRef<string> dr = (base.FeedbackRef as DrawerRef<string>)!;
         await dr!.CloseAsync(exportType);
