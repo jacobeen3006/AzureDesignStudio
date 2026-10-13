@@ -7,14 +7,15 @@ using Microsoft.EntityFrameworkCore;
 using Azure.Identity;
 using Google.Protobuf.WellKnownTypes;
 using Azure.ResourceManager;
-using Azure.ResourceManager.Resources;
+using SubscriptionResource = Azure.ResourceManager.Resources.SubscriptionResource;
 using Azure;
-using Azure.ResourceManager.Resources.Models;
+using Azure.ResourceManager.Resources.Deployments;
+using Azure.ResourceManager.Resources.Deployments.Models;
 
 namespace AzureDesignStudio.Server.Services
 {
     [Authorize]
-    [RequiredScope(RequiredScopesConfigurationKey = "AzureAdB2C:Scopes")]
+    [RequiredScope(RequiredScopesConfigurationKey = "AzureAd:Scopes")]
     public class DeployService : Deploy.DeployBase
     {
         private readonly DesignDbContext _designContext;
@@ -259,8 +260,10 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var rgNames = subResource.GetResourceGroups()?.Select(rg => rg.Data.Name);
-            response.ResourceGroupName.AddRange(rgNames);
+            await foreach (var rg in subResource.GetResourceGroups())
+            {
+                response.ResourceGroupName.Add(rg.Data.Name);
+            }
             response.StatusCode = StatusCodes.Status200OK;
 
             return response;

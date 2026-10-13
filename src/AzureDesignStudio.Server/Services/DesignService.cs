@@ -9,7 +9,7 @@ using Microsoft.Identity.Web.Resource;
 namespace AzureDesignStudio.Server.Services
 {
     [Authorize]
-    [RequiredScope(RequiredScopesConfigurationKey = "AzureAdB2C:Scopes")]
+    [RequiredScope(RequiredScopesConfigurationKey = "AzureAd:Scopes")]
     public class DesignService : Design.DesignBase
     {
         private readonly DesignDbContext designContext = null!;
