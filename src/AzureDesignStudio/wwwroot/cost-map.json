@@ -1,0 +1,302 @@
+[
+  {
+    "stencilKey": "virtual-machine",
+    "serviceLabel": "Virtual Machines",
+    "serviceName": "Virtual Machines",
+    "skuNormalize": "vm",
+    "meterHint": "",
+    "unitPolicy": "hourly",
+    "defaultSku": "Standard_D2s_v3",
+    "excludeProductContains": ["Windows", "Spot", "Low Priority"]
+  },
+  {
+    "stencilKey": "appservice-plan",
+    "serviceLabel": "App Service Plan",
+    "serviceName": "Azure App Service",
+    "skuNormalize": "none",
+    "meterHint": "App",
+    "unitPolicy": "hourly",
+    "defaultSku": "F1",
+    "excludeProductContains": ["Windows Server Pricing"]
+  },
+  {
+    "stencilKey": "sql-database",
+    "serviceLabel": "Azure SQL Database",
+    "serviceName": "SQL Database",
+    "skuNormalize": "none",
+    "meterHint": "DTU",
+    "unitPolicy": "daily",
+    "defaultSku": "S0",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "azure-redis",
+    "serviceLabel": "Azure Redis Cache",
+    "serviceName": "Redis Cache",
+    "skuNormalize": "none",
+    "meterHint": "Instance",
+    "unitPolicy": "hourly",
+    "defaultSku": "BasicEnt1",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "container-registry",
+    "serviceLabel": "Container Registry",
+    "serviceName": "Container Registry",
+    "skuNormalize": "none",
+    "meterHint": "Registry Unit",
+    "unitPolicy": "daily",
+    "defaultSku": "Basic",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "event-hubs",
+    "serviceLabel": "Event Hubs",
+    "serviceName": "Event Hubs",
+    "skuNormalize": "none",
+    "meterHint": "Throughput",
+    "unitPolicy": "hourly",
+    "defaultSku": "Basic",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "service-bus",
+    "serviceLabel": "Service Bus",
+    "serviceName": "Service Bus",
+    "skuNormalize": "none",
+    "meterHint": "Operations",
+    "unitPolicy": "usage",
+    "defaultSku": "Basic",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "key-vault",
+    "serviceLabel": "Key Vault",
+    "serviceName": "Key Vault",
+    "skuNormalize": "none",
+    "meterHint": "Operations",
+    "unitPolicy": "usage",
+    "defaultSku": "Standard",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "storage-account",
+    "serviceLabel": "Storage Account",
+    "serviceName": "Storage",
+    "skuNormalize": "storage",
+    "meterHint": "Data Stored",
+    "unitPolicy": "usage",
+    "defaultSku": "Standard_LRS",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "azure-firewall",
+    "serviceLabel": "Azure Firewall",
+    "serviceName": "Azure Firewall",
+    "skuNormalize": "none",
+    "meterHint": "Deployment",
+    "unitPolicy": "hourly",
+    "defaultSku": "Basic",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "app-gateway",
+    "serviceLabel": "Application Gateway",
+    "serviceName": "Application Gateway",
+    "skuNormalize": "none",
+    "meterHint": "Gateway",
+    "unitPolicy": "hourly",
+    "defaultSku": "Standard",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "apim",
+    "serviceLabel": "API Management",
+    "serviceName": "API Management",
+    "skuNormalize": "none",
+    "meterHint": "Unit",
+    "unitPolicy": "hourly",
+    "defaultSku": "Developer",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "load-balancer",
+    "serviceLabel": "Load Balancer",
+    "serviceName": "Load Balancer",
+    "skuNormalize": "none",
+    "meterHint": "Data Processed",
+    "unitPolicy": "usage",
+    "defaultSku": "Standard",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "container-app",
+    "serviceLabel": "Container Apps",
+    "serviceName": "Azure Container Apps",
+    "skuNormalize": "none",
+    "meterHint": "vCPU",
+    "unitPolicy": "usage",
+    "defaultSku": "Standard",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "event-grid",
+    "serviceLabel": "Event Grid",
+    "serviceName": "Event Grid",
+    "skuNormalize": "none",
+    "meterHint": "Operations",
+    "unitPolicy": "usage",
+    "defaultSku": "Basic",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "dns-zone",
+    "serviceLabel": "DNS Zone",
+    "serviceName": "Azure DNS",
+    "skuNormalize": "none",
+    "meterHint": "Zone",
+    "unitPolicy": "usage",
+    "defaultSku": "Public",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "aks-cluster",
+    "serviceLabel": "AKS",
+    "serviceName": "Azure Kubernetes Service",
+    "skuNormalize": "none",
+    "meterHint": "",
+    "unitPolicy": "free",
+    "defaultSku": "",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "web-app",
+    "serviceLabel": "Web App",
+    "serviceName": "",
+    "skuNormalize": "none",
+    "meterHint": "billed through its App Service plan",
+    "unitPolicy": "free",
+    "defaultSku": "",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "function-app",
+    "serviceLabel": "Function App",
+    "serviceName": "",
+    "skuNormalize": "none",
+    "meterHint": "billed through its hosting plan",
+    "unitPolicy": "free",
+    "defaultSku": "",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "sql-server",
+    "serviceLabel": "SQL Server",
+    "serviceName": "",
+    "skuNormalize": "none",
+    "meterHint": "no extra charge for logical server",
+    "unitPolicy": "free",
+    "defaultSku": "",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "availability-set",
+    "serviceLabel": "Availability Set",
+    "serviceName": "",
+    "skuNormalize": "none",
+    "meterHint": "no extra charge",
+    "unitPolicy": "free",
+    "defaultSku": "",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "virtual-network",
+    "serviceLabel": "Virtual Network",
+    "serviceName": "",
+    "skuNormalize": "none",
+    "meterHint": "no extra charge",
+    "unitPolicy": "free",
+    "defaultSku": "",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "subnet",
+    "serviceLabel": "Subnet",
+    "serviceName": "",
+    "skuNormalize": "none",
+    "meterHint": "no extra charge",
+    "unitPolicy": "free",
+    "defaultSku": "",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "public-ip",
+    "serviceLabel": "Public IP",
+    "serviceName": "",
+    "skuNormalize": "none",
+    "meterHint": "",
+    "unitPolicy": "unavailable",
+    "defaultSku": "",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "azure-openai",
+    "serviceLabel": "Azure OpenAI",
+    "serviceName": "",
+    "skuNormalize": "none",
+    "meterHint": "",
+    "unitPolicy": "unavailable",
+    "defaultSku": "",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "fabric-capacity",
+    "serviceLabel": "Fabric Capacity",
+    "serviceName": "",
+    "skuNormalize": "none",
+    "meterHint": "",
+    "unitPolicy": "unavailable",
+    "defaultSku": "",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "container-apps-environment",
+    "serviceLabel": "Container Apps Environment",
+    "serviceName": "",
+    "skuNormalize": "none",
+    "meterHint": "",
+    "unitPolicy": "unavailable",
+    "defaultSku": "",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "container-apps-job",
+    "serviceLabel": "Container Apps Job",
+    "serviceName": "Azure Container Apps",
+    "skuNormalize": "none",
+    "meterHint": "vCPU",
+    "unitPolicy": "usage",
+    "defaultSku": "Standard",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "private-endpoint",
+    "serviceLabel": "Private Endpoint",
+    "serviceName": "Private Endpoint",
+    "skuNormalize": "none",
+    "meterHint": "Endpoint",
+    "unitPolicy": "usage",
+    "defaultSku": "Standard",
+    "excludeProductContains": []
+  },
+  {
+    "stencilKey": "azure-bastions",
+    "serviceLabel": "Azure Bastion",
+    "serviceName": "Azure Bastion",
+    "skuNormalize": "none",
+    "meterHint": "Deployment",
+    "unitPolicy": "usage",
+    "defaultSku": "Basic",
+    "excludeProductContains": []
+  }
+]

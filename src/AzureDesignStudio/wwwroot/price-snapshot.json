@@ -1,0 +1,1631 @@
+[
+ {
+  "serviceName": "Virtual Machines",
+  "skuName": "D2s v3",
+  "meterName": "D2s v3",
+  "productName": "Virtual Machines DSv3 Series",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.096,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Virtual Machines",
+  "skuName": "D2s v3",
+  "meterName": "D2s v3",
+  "productName": "Virtual Machines DSv3 Series Windows",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.188,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure App Service",
+  "skuName": "F1",
+  "meterName": "F1 App",
+  "productName": "Azure App Service Free Plan",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.0,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure App Service",
+  "skuName": "F1",
+  "meterName": "F1 App",
+  "productName": "Azure App Service Free Plan",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.0,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure App Service",
+  "skuName": "F1",
+  "meterName": "F1 App",
+  "productName": "Azure App Service Free Plan - Linux",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.0,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "SQL Database",
+  "skuName": "S0",
+  "meterName": "S0 DTUs",
+  "productName": "SQL Database Single Standard",
+  "unitOfMeasure": "1/Day",
+  "retailPrice": 0.4839,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Container Registry",
+  "skuName": "Basic",
+  "meterName": "Task vCPU Duration",
+  "productName": "Container Registry",
+  "unitOfMeasure": "1 Second",
+  "retailPrice": 0.0,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Container Registry",
+  "skuName": "Basic",
+  "meterName": "Task vCPU Duration",
+  "productName": "Container Registry",
+  "unitOfMeasure": "1 Second",
+  "retailPrice": 0.0001,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Container Registry",
+  "skuName": "Basic",
+  "meterName": "Basic Registry Unit",
+  "productName": "Container Registry",
+  "unitOfMeasure": "1/Day",
+  "retailPrice": 0.1666,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Container Registry",
+  "skuName": "Basic",
+  "meterName": "Data Stored",
+  "productName": "Container Registry",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.1,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Event Hubs",
+  "skuName": "Basic",
+  "meterName": "Basic Throughput Unit",
+  "productName": "Event Hubs",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.015,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Event Hubs",
+  "skuName": "Basic",
+  "meterName": "Basic Ingress Events",
+  "productName": "Event Hubs",
+  "unitOfMeasure": "1M",
+  "retailPrice": 0.028,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Service Bus",
+  "skuName": "Basic",
+  "meterName": "Basic Messaging Operations",
+  "productName": "Service Bus",
+  "unitOfMeasure": "1M",
+  "retailPrice": 0.05,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Key Vault",
+  "skuName": "Standard",
+  "meterName": "Operations",
+  "productName": "Key Vault",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.03,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Key Vault",
+  "skuName": "Standard",
+  "meterName": "Secret Renewal",
+  "productName": "Key Vault",
+  "unitOfMeasure": "1",
+  "retailPrice": 1.0,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Key Vault",
+  "skuName": "Standard",
+  "meterName": "Certificate Renewal Request",
+  "productName": "Key Vault",
+  "unitOfMeasure": "1",
+  "retailPrice": 3.0,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Key Vault",
+  "skuName": "Standard",
+  "meterName": "Standard Instance",
+  "productName": "Azure Dedicated HSM",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 4.85,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Key Vault",
+  "skuName": "Standard",
+  "meterName": "Advanced Key Operations",
+  "productName": "Key Vault",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.15,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Key Vault",
+  "skuName": "Standard",
+  "meterName": "Automated Key Rotation",
+  "productName": "Key Vault",
+  "unitOfMeasure": "1 Rotation",
+  "retailPrice": 1.0,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Index",
+  "productName": "Azure Data Lake Storage Gen2 Hierarchical Namespace",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.0263,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Read Operations",
+  "productName": "General Block Blob v2 Hierarchical Namespace",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.005,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "LRS Metadata",
+  "productName": "Files v2",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.0263,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "All Other Operations",
+  "productName": "Blob Storage",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.004,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Read Operations",
+  "productName": "Blob Storage",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.004,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Other Operations",
+  "productName": "Files v2",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.0052,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Write Operations",
+  "productName": "Azure Data Lake Storage Gen2 Flat Namespace",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.05,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Iterative Write Operations",
+  "productName": "Azure Data Lake Storage Gen2 Hierarchical Namespace",
+  "unitOfMeasure": "100",
+  "retailPrice": 0.065,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "Azure Data Lake Storage Gen2 Hierarchical Namespace",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.0184,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "Azure Data Lake Storage Gen2 Hierarchical Namespace",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.0177,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "Azure Data Lake Storage Gen2 Hierarchical Namespace",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.0169,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Write Operations",
+  "productName": "Azure Data Lake Storage Gen2 Hierarchical Namespace",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.065,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Write Operations",
+  "productName": "General Block Blob v2 Hierarchical Namespace",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.065,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Delete Operations",
+  "productName": "Azure Data Lake Storage Gen2 Hierarchical Namespace",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.0,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "Azure Data Lake Storage Gen2 Flat Namespace",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.0184,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "Azure Data Lake Storage Gen2 Flat Namespace",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.0177,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "Azure Data Lake Storage Gen2 Flat Namespace",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.0169,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Iterative Read Operations",
+  "productName": "Azure Data Lake Storage Gen2 Hierarchical Namespace",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.065,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "LRS List and Create Container Operations",
+  "productName": "General Block Blob v2",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.05,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Iterative Read Operations",
+  "productName": "Azure Data Lake Storage Gen2 Flat Namespace",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.05,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Other Operations",
+  "productName": "General Block Blob v2 Hierarchical Namespace",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.005,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Write Operations",
+  "productName": "General Block Blob v2",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.05,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Blob Inventory",
+  "productName": "General Block Blob v2 Hierarchical Namespace",
+  "unitOfMeasure": "1M",
+  "retailPrice": 0.00325,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Named Encryption Scopes",
+  "productName": "Blob Features",
+  "unitOfMeasure": "1/Month",
+  "retailPrice": 1.0,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Data Scanned for Query Acceleration",
+  "productName": "Azure Data Lake Storage Gen2 Hierarchical Namespace",
+  "unitOfMeasure": "1 GB",
+  "retailPrice": 0.002,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "General Block Blob v2",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.0184,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "General Block Blob v2",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.017664,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "General Block Blob v2",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.016928,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Delete Operations",
+  "productName": "General Block Blob v2 Hierarchical Namespace",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.0,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Write Operations",
+  "productName": "Files v2",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.065,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Blob Inventory",
+  "productName": "General Block Blob v2",
+  "unitOfMeasure": "1M",
+  "retailPrice": 0.0025,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Other Operations",
+  "productName": "Azure Data Lake Storage Gen2 Hierarchical Namespace",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.0052,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Iterative Write Operations",
+  "productName": "Azure Data Lake Storage Gen2 Flat Namespace",
+  "unitOfMeasure": "100",
+  "retailPrice": 0.05,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "LRS List and Create Container Operations",
+  "productName": "Blob Storage",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.05,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Index Tags",
+  "productName": "Blob Storage",
+  "unitOfMeasure": "10K/Month",
+  "retailPrice": 0.03,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Read Operations",
+  "productName": "General Block Blob v2",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.004,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Data Returned for Query Acceleration",
+  "productName": "Azure Data Lake Storage Gen2 Hierarchical Namespace",
+  "unitOfMeasure": "1 GB",
+  "retailPrice": 0.0007,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "Files v2",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.0255,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Read Operations",
+  "productName": "Azure Data Lake Storage Gen2 Hierarchical Namespace",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.0052,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "General Block Blob v2 Hierarchical Namespace",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.018,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "General Block Blob v2 Hierarchical Namespace",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.0173,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "General Block Blob v2 Hierarchical Namespace",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.0166,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Read Operations",
+  "productName": "Azure Data Lake Storage Gen2 Flat Namespace",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.004,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Delete Operations",
+  "productName": "Azure Data Lake Storage Gen2 Flat Namespace",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.0,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS List Operations",
+  "productName": "Files v2",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.065,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Write Operations",
+  "productName": "Blob Storage",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.05,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Index Tags",
+  "productName": "General Block Blob v2",
+  "unitOfMeasure": "10K/Month",
+  "retailPrice": 0.03,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Read Operations",
+  "productName": "Files v2",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.0052,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Data Returned for Query Acceleration",
+  "productName": "Azure Data Lake Storage Gen2 Flat Namespace",
+  "unitOfMeasure": "1 GB",
+  "retailPrice": 0.0007,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "Blob Storage",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.0184,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "Blob Storage",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.017664,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot LRS Data Stored",
+  "productName": "Blob Storage",
+  "unitOfMeasure": "1 GB/Month",
+  "retailPrice": 0.016928,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Data Scanned for Query Acceleration",
+  "productName": "Azure Data Lake Storage Gen2 Flat Namespace",
+  "unitOfMeasure": "1 GB",
+  "retailPrice": 0.002,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "All Other Operations",
+  "productName": "General Block Blob v2",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.004,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Storage",
+  "skuName": "Hot LRS",
+  "meterName": "Hot Other Operations",
+  "productName": "Azure Data Lake Storage Gen2 Flat Namespace",
+  "unitOfMeasure": "10K",
+  "retailPrice": 0.004,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Firewall",
+  "skuName": "Basic",
+  "meterName": "Basic Data Processed",
+  "productName": "Azure Firewall",
+  "unitOfMeasure": "1 GB",
+  "retailPrice": 0.065,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Firewall",
+  "skuName": "Basic",
+  "meterName": "Basic Deployment",
+  "productName": "Azure Firewall",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.395,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Application Gateway",
+  "skuName": "Standard",
+  "meterName": "Standard Fixed Cost",
+  "productName": "Application Gateway WAF v2 - Discounted",
+  "unitOfMeasure": "1/Hour",
+  "retailPrice": 0.2,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Application Gateway",
+  "skuName": "Standard",
+  "meterName": "Standard Fixed Cost",
+  "productName": "Application Gateway Standard v2",
+  "unitOfMeasure": "1/Hour",
+  "retailPrice": 0.2,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Application Gateway",
+  "skuName": "Standard",
+  "meterName": "Standard Captcha Sessions",
+  "productName": "Application Gateway WAF v2",
+  "unitOfMeasure": "1K",
+  "retailPrice": 0.4,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Application Gateway",
+  "skuName": "Standard",
+  "meterName": "Standard Capacity Units",
+  "productName": "Application Gateway WAF v2 - Discounted",
+  "unitOfMeasure": "1/Hour",
+  "retailPrice": 0.008,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Application Gateway",
+  "skuName": "Standard",
+  "meterName": "Standard Frontend",
+  "productName": "Application Gateway for Containers WAF",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.018,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Application Gateway",
+  "skuName": "Standard",
+  "meterName": "Standard Fixed Cost",
+  "productName": "Application Gateway WAF v2",
+  "unitOfMeasure": "1/Hour",
+  "retailPrice": 0.36,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Application Gateway",
+  "skuName": "Standard",
+  "meterName": "Standard Capacity Units",
+  "productName": "Application Gateway WAF v2",
+  "unitOfMeasure": "1/Hour",
+  "retailPrice": 0.0144,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Application Gateway",
+  "skuName": "Standard",
+  "meterName": "Standard Capacity Units",
+  "productName": "Application Gateway Standard v2",
+  "unitOfMeasure": "1/Hour",
+  "retailPrice": 0.008,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Application Gateway",
+  "skuName": "Standard",
+  "meterName": "Standard AGC",
+  "productName": "Application Gateway for Containers WAF",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.031,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Application Gateway",
+  "skuName": "Standard",
+  "meterName": "Standard Association",
+  "productName": "Application Gateway for Containers WAF",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.216,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Application Gateway",
+  "skuName": "Standard",
+  "meterName": "Standard Capacity Units",
+  "productName": "Application Gateway for Containers WAF",
+  "unitOfMeasure": "1/Hour",
+  "retailPrice": 0.014,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "API Management",
+  "skuName": "Developer",
+  "meterName": "Developer Workspace Pack",
+  "productName": "API Management",
+  "unitOfMeasure": "1/Hour",
+  "retailPrice": 0.0,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "API Management",
+  "skuName": "Developer",
+  "meterName": "Developer Unit",
+  "productName": "API Management",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.0658,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Container Apps",
+  "skuName": "Standard",
+  "meterName": "Standard vCPU Active Usage",
+  "productName": "Azure Container Apps",
+  "unitOfMeasure": "1 Second",
+  "retailPrice": 3.4e-05,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Container Apps",
+  "skuName": "Standard",
+  "meterName": "Standard Memory Active Usage",
+  "productName": "Azure Container Apps",
+  "unitOfMeasure": "1 GiB Second",
+  "retailPrice": 4e-06,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Container Apps",
+  "skuName": "Standard",
+  "meterName": "Standard Memory Idle Usage",
+  "productName": "Azure Container Apps",
+  "unitOfMeasure": "1 GiB Second",
+  "retailPrice": 4e-06,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Container Apps",
+  "skuName": "Standard",
+  "meterName": "Standard vCPU Idle Usage",
+  "productName": "Azure Container Apps",
+  "unitOfMeasure": "1 Second",
+  "retailPrice": 4e-06,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Container Apps",
+  "skuName": "Standard",
+  "meterName": "Standard NC A100 v4 GPU Usage",
+  "productName": "Azure Container Apps",
+  "unitOfMeasure": "1 Second",
+  "retailPrice": 0.000529,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Container Apps",
+  "skuName": "Standard",
+  "meterName": "Standard Requests",
+  "productName": "Azure Container Apps",
+  "unitOfMeasure": "1M",
+  "retailPrice": 0.4,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Container Apps",
+  "skuName": "Standard",
+  "meterName": "Standard NC T4 v3 GPU Usage",
+  "productName": "Azure Container Apps",
+  "unitOfMeasure": "1 Second",
+  "retailPrice": 7.3e-05,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Container Apps",
+  "skuName": "Standard",
+  "meterName": "Standard vCPU Active Usage",
+  "productName": "Azure Container Apps",
+  "unitOfMeasure": "1 Second",
+  "retailPrice": 3.4e-05,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Container Apps",
+  "skuName": "Standard",
+  "meterName": "Standard Memory Active Usage",
+  "productName": "Azure Container Apps",
+  "unitOfMeasure": "1 GiB Second",
+  "retailPrice": 4e-06,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Container Apps",
+  "skuName": "Standard",
+  "meterName": "Standard Memory Idle Usage",
+  "productName": "Azure Container Apps",
+  "unitOfMeasure": "1 GiB Second",
+  "retailPrice": 4e-06,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Container Apps",
+  "skuName": "Standard",
+  "meterName": "Standard vCPU Idle Usage",
+  "productName": "Azure Container Apps",
+  "unitOfMeasure": "1 Second",
+  "retailPrice": 4e-06,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Container Apps",
+  "skuName": "Standard",
+  "meterName": "Standard NC A100 v4 GPU Usage",
+  "productName": "Azure Container Apps",
+  "unitOfMeasure": "1 Second",
+  "retailPrice": 0.000529,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Container Apps",
+  "skuName": "Standard",
+  "meterName": "Standard Requests",
+  "productName": "Azure Container Apps",
+  "unitOfMeasure": "1M",
+  "retailPrice": 0.4,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Container Apps",
+  "skuName": "Standard",
+  "meterName": "Standard NC T4 v3 GPU Usage",
+  "productName": "Azure Container Apps",
+  "unitOfMeasure": "1 Second",
+  "retailPrice": 7.3e-05,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Bastion",
+  "skuName": "Basic",
+  "meterName": "Basic Data Transfer Out",
+  "productName": "Azure Bastion",
+  "unitOfMeasure": "1 GB",
+  "retailPrice": 0.0,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Bastion",
+  "skuName": "Basic",
+  "meterName": "Basic Data Transfer Out",
+  "productName": "Azure Bastion",
+  "unitOfMeasure": "1 GB",
+  "retailPrice": 0.083,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Bastion",
+  "skuName": "Basic",
+  "meterName": "Basic Data Transfer Out",
+  "productName": "Azure Bastion",
+  "unitOfMeasure": "1 GB",
+  "retailPrice": 0.05,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Bastion",
+  "skuName": "Basic",
+  "meterName": "Basic Data Transfer Out",
+  "productName": "Azure Bastion",
+  "unitOfMeasure": "1 GB",
+  "retailPrice": 0.087,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Bastion",
+  "skuName": "Basic",
+  "meterName": "Basic Data Transfer Out",
+  "productName": "Azure Bastion",
+  "unitOfMeasure": "1 GB",
+  "retailPrice": 0.07,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Azure Bastion",
+  "skuName": "Basic",
+  "meterName": "Basic Gateway",
+  "productName": "Azure Bastion",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.19,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "X150",
+  "meterName": "X150 Cache Instance",
+  "productName": "Azure Managed Redis - Compute Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 6.994,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "C1",
+  "meterName": "C1 Cache",
+  "productName": "Azure Redis Cache Standard",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.138,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "B1000",
+  "meterName": "B1000 Cache Instance",
+  "productName": "Azure Managed Redis - Balanced",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 19.968,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "B150",
+  "meterName": "B150 Cache Instance",
+  "productName": "Azure Managed Redis - Balanced",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 3.77,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "M350",
+  "meterName": "M350 Cache Instance",
+  "productName": "Azure Managed Redis - Memory Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 5.184,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "C5",
+  "meterName": "C5 Cache",
+  "productName": "Azure Redis Cache Basic",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.42,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "A4500",
+  "meterName": "A4500 Cache Instance",
+  "productName": "Azure Managed Redis - Flash Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 24.954,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "M1000",
+  "meterName": "M1000 Cache Instance",
+  "productName": "Azure Managed Redis - Memory Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 13.824,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "C6",
+  "meterName": "C6 Cache Instance",
+  "productName": "Azure Redis Cache Standard",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 1.05,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "P1",
+  "meterName": "P1 Cache",
+  "productName": "Azure Redis Cache Premium",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.555,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "C4",
+  "meterName": "C4 Cache",
+  "productName": "Azure Redis Cache Standard",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.525,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "M1500",
+  "meterName": "M1500 Cache Instance",
+  "productName": "Azure Managed Redis - Memory Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 20.736,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "E200",
+  "meterName": "E200 Cache",
+  "productName": "Azure Redis Cache Enterprise",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 7.538,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "E100",
+  "meterName": "E100 Cache",
+  "productName": "Azure Redis Cache Enterprise",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 3.769,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "X50",
+  "meterName": "X50 Cache Instance",
+  "productName": "Azure Managed Redis - Compute Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 2.331,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "X20",
+  "meterName": "X20 Cache Instance",
+  "productName": "Azure Managed Redis - Compute Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 1.166,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "M500",
+  "meterName": "M500 Cache Instance",
+  "productName": "Azure Managed Redis - Memory Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 6.912,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "M2000",
+  "meterName": "M2000 Cache Instance",
+  "productName": "Azure Managed Redis - Memory Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 27.648,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "A250",
+  "meterName": "A250 Cache Instance",
+  "productName": "Azure Managed Redis - Flash Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 1.56,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "X5",
+  "meterName": "X5 Cache Instance",
+  "productName": "Azure Managed Redis - Compute Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.291,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "B3",
+  "meterName": "B3 Cache Instance",
+  "productName": "Azure Managed Redis - Balanced",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.065,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "B50",
+  "meterName": "B50 Cache Instance",
+  "productName": "Azure Managed Redis - Balanced",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 1.257,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "C3",
+  "meterName": "C3 Cache",
+  "productName": "Azure Redis Cache Basic",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.18,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "M250",
+  "meterName": "M250 Cache Instance",
+  "productName": "Azure Managed Redis - Memory Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 3.456,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "P3",
+  "meterName": "P3 Cache",
+  "productName": "Azure Redis Cache Premium",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 2.219,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "B250",
+  "meterName": "B250 Cache Instance",
+  "productName": "Azure Managed Redis - Balanced",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 5.04,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "E400",
+  "meterName": "E400 Cache",
+  "productName": "Azure Redis Cache Enterprise",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 15.076,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "E10",
+  "meterName": "E10 Cache",
+  "productName": "Azure Redis Cache Enterprise",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.481,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "X700",
+  "meterName": "X700 Cache Instance",
+  "productName": "Azure Managed Redis - Compute Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 23.314,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "B500",
+  "meterName": "B500 Cache Instance",
+  "productName": "Azure Managed Redis - Balanced",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 9.984,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "M150",
+  "meterName": "M150 Cache Instance",
+  "productName": "Azure Managed Redis - Memory Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 2.592,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "A1000",
+  "meterName": "A1000 Cache Instance",
+  "productName": "Azure Managed Redis - Flash Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 6.24,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "B0",
+  "meterName": "B0 Cache Instance",
+  "productName": "Azure Managed Redis - Balanced",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.016,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "C0",
+  "meterName": "C0 Cache",
+  "productName": "Azure Redis Cache Basic",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.022,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "B350",
+  "meterName": "B350 Cache Instance",
+  "productName": "Azure Managed Redis - Balanced",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 7.54,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "F700",
+  "meterName": "F700 Cache",
+  "productName": "Azure Redis Cache Enterprise Flash",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 4.011,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "B10",
+  "meterName": "B10 Cache Instance",
+  "productName": "Azure Managed Redis - Balanced",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.315,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "P2",
+  "meterName": "P2 Cache",
+  "productName": "Azure Redis Cache Premium",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 1.11,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "B20",
+  "meterName": "B20 Cache Instance",
+  "productName": "Azure Managed Redis - Balanced",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.629,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "X1",
+  "meterName": "X1 Cache Instance",
+  "productName": "Azure Managed Redis - Compute Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.146,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "F1500",
+  "meterName": "F1500 Cache",
+  "productName": "Azure Redis Cache Enterprise Flash",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 8.023,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "A2000",
+  "meterName": "A2000 Cache Instance",
+  "productName": "Azure Managed Redis - Flash Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 12.477,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "E1",
+  "meterName": "E1 Cache",
+  "productName": "Azure Redis Cache Enterprise",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.04,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "P5",
+  "meterName": "P5 Cache",
+  "productName": "Azure Redis Cache Premium",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 10.05,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "E1 Internal",
+  "meterName": "E1 Internal Cache",
+  "productName": "Azure Redis Cache Enterprise",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.0156,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "B5",
+  "meterName": "B5 Cache Instance",
+  "productName": "Azure Managed Redis - Balanced",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.156,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "M50",
+  "meterName": "M50 Cache Instance",
+  "productName": "Azure Managed Redis - Memory Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.862,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "A700",
+  "meterName": "A700 Cache Instance",
+  "productName": "Azure Managed Redis - Flash Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 4.68,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "X500",
+  "meterName": "X500 Cache Instance",
+  "productName": "Azure Managed Redis - Compute Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 18.651,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "C2",
+  "meterName": "C2 Cache",
+  "productName": "Azure Redis Cache Standard",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.225,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "B100",
+  "meterName": "B100 Cache Instance",
+  "productName": "Azure Managed Redis - Balanced",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 2.496,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "M20",
+  "meterName": "M20 Cache Instance",
+  "productName": "Azure Managed Redis - Memory Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.431,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "E20",
+  "meterName": "E20 Cache",
+  "productName": "Azure Redis Cache Enterprise",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.96,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "P4",
+  "meterName": "P4 Cache Instance",
+  "productName": "Azure Redis Cache Premium",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 2.22,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "X350",
+  "meterName": "X350 Cache Instance",
+  "productName": "Azure Managed Redis - Compute Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 13.989,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "A500",
+  "meterName": "A500 Cache Instance",
+  "productName": "Azure Managed Redis - Flash Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 3.12,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "X10",
+  "meterName": "X10 Cache Instance",
+  "productName": "Azure Managed Redis - Compute Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.583,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "X3",
+  "meterName": "X3 Cache Instance",
+  "productName": "Azure Managed Redis - Compute Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.219,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "B700",
+  "meterName": "B700 Cache Instance",
+  "productName": "Azure Managed Redis - Balanced",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 14.976,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "E50",
+  "meterName": "E50 Cache",
+  "productName": "Azure Redis Cache Enterprise",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 1.885,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "I100",
+  "meterName": "I100 VM",
+  "productName": "Azure Redis Cache Isolated",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 20.26,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "M100",
+  "meterName": "M100 Cache Instance",
+  "productName": "Azure Managed Redis - Memory Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 1.724,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "X250",
+  "meterName": "X250 Cache Instance",
+  "productName": "Azure Managed Redis - Compute Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 9.326,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "X100",
+  "meterName": "X100 Cache Instance",
+  "productName": "Azure Managed Redis - Compute Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 4.663,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "B1",
+  "meterName": "B1 Cache Instance",
+  "productName": "Azure Managed Redis - Balanced",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.032,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "F300",
+  "meterName": "F300 Cache",
+  "productName": "Azure Redis Cache Enterprise Flash",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 2.006,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "A1500",
+  "meterName": "A1500 Cache Instance",
+  "productName": "Azure Managed Redis - Flash Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 9.358,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "M10",
+  "meterName": "M10 Cache Instance",
+  "productName": "Azure Managed Redis - Memory Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.216,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "E5",
+  "meterName": "E5 Cache",
+  "productName": "Azure Redis Cache Enterprise",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 0.241,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Redis Cache",
+  "skuName": "M700",
+  "meterName": "M700 Cache Instance",
+  "productName": "Azure Managed Redis - Memory Optimized",
+  "unitOfMeasure": "1 Hour",
+  "retailPrice": 10.368,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Load Balancer",
+  "skuName": "Standard",
+  "meterName": "Standard Data Processed",
+  "productName": "Load Balancer",
+  "unitOfMeasure": "1 GB",
+  "retailPrice": 0.005,
+  "currencyCode": "USD"
+ },
+ {
+  "serviceName": "Event Grid",
+  "skuName": "Standard",
+  "meterName": "Standard Operations",
+  "productName": "Event Grid",
+  "unitOfMeasure": "100K",
+  "retailPrice": 0.0,
+  "currencyCode": "USD"
+ }
+]

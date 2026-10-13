@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+option csharp_namespace = "AzureDesignStudio.SharedModels.Protos";
+
+service Cost {
+	rpc GetRetailPrices(RetailPriceRequest) returns(RetailPriceResponse);
+}
+
+message RetailPriceRequest {
+	string service_name = 1;
+	string arm_region_name = 2;
+	string sku_name = 3;
+	string meter_name = 4;
+	string currency_code = 5;
+}
+
+message RetailPriceItem {
+	string service_name = 1;
+	string sku_name = 2;
+	string meter_name = 3;
+	string product_name = 4;
+	string unit_of_measure = 5;
+	double retail_price = 6;
+	string currency_code = 7;
+	string arm_region_name = 8;
+}
+
+message RetailPriceResponse {
+	int32 status_code = 1;
+	repeated RetailPriceItem prices = 2;
+}

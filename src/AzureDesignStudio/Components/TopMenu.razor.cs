@@ -1,5 +1,6 @@
 ﻿using AntDesign;
 using AzureDesignStudio.Core;
+using AzureDesignStudio.Core.Cost;
 using AzureDesignStudio.Core.DTO;
 using AzureDesignStudio.Core.Models;
 using Microsoft.JSInterop;
@@ -23,6 +24,12 @@ namespace AzureDesignStudio.Components
             {
                 case "export":
                     await OpenExportDrawer();
+                    break;
+                case "validate":
+                    await OpenValidationDrawer();
+                    break;
+                case "cost":
+                    await OpenCostDrawer();
                     break;
                 case "save":
                     await OpenSaveDrawer();
@@ -117,6 +124,38 @@ namespace AzureDesignStudio.Components
                 };
             };
         }
+        private async Task OpenValidationDrawer()
+        {
+            if (!await ResetDrawerRef("validate"))
+                return;
+
+            var issues = AzureDesignStudio.Core.Validation.DesignValidator
+                .Validate(adsContext.Diagram.Nodes.Concat(adsContext.Diagram.Groups));
+            var options = System.Text.Json.JsonSerializer.Serialize(issues, AzureDesignStudio.Core.Validation.ValidationJson.Options);
+
+            drawerRef = await OpenDrawer<ValidationDrawerTemplate>("Validate the design", options, width: 480);
+            drawerRef.OnClosed = async result =>
+            {
+                await CloseDrawer();
+            };
+        }
+
+        private async Task OpenCostDrawer()
+        {
+            if (!await ResetDrawerRef("cost"))
+                return;
+
+            var inputs = adsContext.Diagram.Nodes.Concat(adsContext.Diagram.Groups)
+                .Select(n => new CostNodeInput(n is IAzureResource r ? r.Name : n.Id, DataModelFactory.GetStencilKey(n), CostSkuResolver.Resolve(n)))
+                .ToList();
+            var options = System.Text.Json.JsonSerializer.Serialize(inputs, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
+
+            drawerRef = await OpenDrawer<CostDrawerTemplate>("Estimate monthly cost", options, width: 560);
+            drawerRef.OnClosed = async result =>
+            {
+                await CloseDrawer();
+            };
+        }
         private async Task<(string?, IArmTemplate?)> GetArmJson()
         {
             var armTemplate = new ArmTemplate();
@@ -155,7 +194,7 @@ namespace AzureDesignStudio.Components
                 return;
             }
 
-            var modalRef = await modalService.CreateModalAsync(new ModalOptions
+            var modalRef = modalService.CreateModal(new ModalOptions
             {
                 Centered = true,
                 Footer = null,
