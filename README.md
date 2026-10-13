@@ -235,8 +235,8 @@ This eliminates manual DTO boilerplate when adding new Azure resource types.
 # Full solution build (Windows; includes the MAUI desktop app)
 dotnet build src/AzureDesignStudio.sln
 
-# Server-side + WASM + tests only (builds on Linux; same set CI uses)
-dotnet build src/ci.slnf
+# Everything except the MAUI desktop app (same set CI builds; Linux-safe)
+dotnet build src/AzureDesignStudio.Server -c Release && dotnet build src/AzureDesignStudio -c Release && dotnet build src/AzureDesignStudio.Core.Tests -c Release
 
 # Run unit tests
 dotnet test src/AzureDesignStudio.Core.Tests --filter "Category!=LiveAzure"

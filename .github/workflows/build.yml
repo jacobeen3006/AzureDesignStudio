@@ -24,7 +24,14 @@ jobs:
         dotnet-version: '10.0.x'
 
     - name: Build
-      run: dotnet build src/ci.slnf -c Release
+      # Explicit project set instead of the full solution: the MAUI desktop
+      # project targets net10.0-windows and cannot build on ubuntu runners.
+      # Server + WASM + Tests transitively cover Core, AzureResources,
+      # SharedModels and SourceGeneration.
+      run: |
+        dotnet build src/AzureDesignStudio.Server -c Release
+        dotnet build src/AzureDesignStudio -c Release
+        dotnet build src/AzureDesignStudio.Core.Tests -c Release
 
     - name: Test (offline)
       run: dotnet test src/AzureDesignStudio.Core.Tests -c Release --no-build --filter "Category!=LiveAzure"
