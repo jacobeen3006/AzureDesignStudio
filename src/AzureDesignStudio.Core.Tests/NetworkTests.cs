@@ -6,6 +6,7 @@ using Xunit;
 
 namespace AzureDesignStudio.Core.Tests
 {
+    [Trait("Category", "LiveAzure")]
     public class NetworkTests : TestBase
     {
         public NetworkTests() : base() { }

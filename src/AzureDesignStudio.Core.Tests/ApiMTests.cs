@@ -7,6 +7,7 @@ using Xunit;
 
 namespace AzureDesignStudio.Core.Tests
 {
+    [Trait("Category", "LiveAzure")]
     public class ApiMTests : TestBase
     {
         public ApiMTests() : base() { }

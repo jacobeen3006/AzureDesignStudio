@@ -8,6 +8,7 @@ using Xunit;
 
 namespace AzureDesignStudio.Core.Tests
 {
+    [Trait("Category", "LiveAzure")]
     public class SqlDatabaseTests : TestBase
     {
         public SqlDatabaseTests() : base() { }

@@ -6,6 +6,7 @@ using AzureDesignStudio.Core.Network;
 
 namespace AzureDesignStudio.Core.Tests
 {
+    [Trait("Category", "LiveAzure")]
     public class WebTests : TestBase
     {
         public WebTests() : base() { }

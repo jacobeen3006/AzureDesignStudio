@@ -1,7 +1,7 @@
 ﻿using Azure.Identity;
 using Azure.ResourceManager;
-using Azure.ResourceManager.Resources;
-using Azure.ResourceManager.Resources.Models;
+using Azure.ResourceManager.Resources.Deployments;
+using Azure.ResourceManager.Resources.Deployments.Models;
 using AzureDesignStudio.Core.Models;
 using System;
 using System.Threading.Tasks;
@@ -9,6 +9,7 @@ using Xunit;
 
 namespace AzureDesignStudio.Core.Tests
 {
+    [Trait("Category", "LiveAzure")]
     public class TestBase
     {
         const string _testRgName = "ads-arm-test-rg";
