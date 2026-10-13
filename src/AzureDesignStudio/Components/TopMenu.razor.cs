@@ -37,6 +37,10 @@ namespace AzureDesignStudio.Components
                 case "user":
                     await OpenUserDrawer();
                     break;
+                case "scan":
+                    if (features.OpenTenantScan is { } openScan)
+                        await openScan(Services);
+                    break;
                 default:
                     {
                         await ResetDrawerRef(string.Empty);

@@ -101,6 +101,17 @@ public sealed class WorkspaceScans(WorkspaceDb db)
         var scans = await ctx.Scans.ToListAsync();
         return scans.OrderByDescending(s => s.StartedAt).ToList();
     }
+
+    /// <summary>All snapshot rows of one scan (browse source); a resumed scan may hold
+    /// duplicate resource rows from re-run query groups - readers deduplicate.</summary>
+    public async Task<IReadOnlyList<ResourceSnapshotRecord>> GetSnapshotsAsync(string scanId)
+    {
+        await using var ctx = db.CreateContext();
+        return await ctx.ResourceSnapshots
+            .Where(s => s.ScanId == scanId)
+            .OrderBy(s => s.ResourceType).ThenBy(s => s.Name)
+            .ToListAsync();
+    }
 }
 
 internal readonly record struct ScanCheckpointView(int Rows, string? Hash)

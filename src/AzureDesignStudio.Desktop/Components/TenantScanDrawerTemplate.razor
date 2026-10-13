@@ -1,0 +1,408 @@
+@inherits FeedbackComponent<string, string>
+@using System.Text.Json
+@using AntDesign
+@using AzureDesignStudio.Discovery.Analysis
+@using AzureDesignStudio.Discovery.Arm
+@using AzureDesignStudio.Discovery.Inventory
+@using AzureDesignStudio.Discovery.Preflight
+@using AzureDesignStudio.Workspace
+@implements IDisposable
+@inject TenantScanSession Session
+
+@* Tenant discovery drawer (plan 7.8): scan a tenant, browse the snapshot with facets,
+   read the orphan/retirement report. Desktop-only; opened through AdsHostFeatures. *@
+
+<div style="padding:0 4px;">
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+        @foreach (var (key, label) in new[] { ("scan", "Scan"), ("browse", "Inventory"), ("report", "Report") })
+        {
+            <Button Type="@(activeTab == key ? ButtonType.Primary : ButtonType.Default)"
+                    Size="ButtonSize.Small" OnClick="@(() => SwitchTabAsync(key))">@label</Button>
+        }
+    </div>
+
+    @if (activeTab == "scan")
+    {
+        @if (loading)
+        {
+            <span>Loading subscriptions…</span>
+        }
+        else if (subscriptions.Count == 0)
+        {
+            <span>No subscriptions visible to this account. @loadError</span>
+        }
+        else
+        {
+            <div style="max-height:220px;overflow:auto;border:1px solid #f0f0f0;padding:8px;">
+                <div style="margin-bottom:4px;">
+                    <label><input type="checkbox" checked="@(selected.Count == enabledCount)"
+                                  @onchange="ToggleAll" /> <b>all (@enabledCount enabled)</b></label>
+                </div>
+                @foreach (var sub in subscriptions)
+                {
+                    <div>
+                        <label>
+                            <input type="checkbox" checked="@selected.Contains(sub.SubscriptionId)"
+                                   @onchange="@(e => Toggle(sub.SubscriptionId, e))" />
+                            @sub.DisplayName <span style="color:#999">(@sub.SubscriptionId[..8])</span>
+                            @if (!string.Equals(sub.State, "Enabled", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <span style="color:#999">[@sub.State]</span>
+                            }
+                        </label>
+                    </div>
+                }
+            </div>
+
+            <div style="display:flex;gap:8px;margin:12px 0;align-items:center;flex-wrap:wrap;">
+                @if (!Session.Running)
+                {
+                    <Button Type="ButtonType.Primary" Size="ButtonSize.Small"
+                            Disabled="@(selected.Count == 0)"
+                            OnClick="StartAsync">Start scan (@selected.Count)</Button>
+                    <Button Size="ButtonSize.Small" Disabled="@(selected.Count == 0)"
+                            OnClick="PreflightAsync">Preflight</Button>
+                    @if (resumable is not null)
+                    {
+                        <Button Size="ButtonSize.Small" OnClick="ResumeScanAsync">
+                            Resume interrupted scan (@resumable.ResourceCount rows saved)
+                        </Button>
+                    }
+                }
+                else
+                {
+                    <Button Size="ButtonSize.Small" OnClick="@(_ => Session.Pause())" Disabled="@Session.Paused">Pause</Button>
+                    <Button Size="ButtonSize.Small" OnClick="@(_ => Session.ResumeRun())" Disabled="@(!Session.Paused)">Resume</Button>
+                    <Button Danger Size="ButtonSize.Small" OnClick="@(_ => Session.Cancel())">Cancel</Button>
+                }
+            </div>
+
+            @if (Session.Running)
+            {
+                <Progress Percent="@(Session.Progress is { QueriesTotal: > 0 } pr ? pr.QueriesCompleted * 100 / pr.QueriesTotal : 0)" />
+                <span>@(Session.Progress?.QueriesCompleted ?? 0)/@(Session.Progress?.QueriesTotal ?? 0) query groups · @(Session.Progress?.Rows ?? 0) rows</span>
+            }
+
+            @if (Session.LastError is { } err)
+            {
+                <div style="color:#cf1322;margin-top:8px;">@err</div>
+            }
+
+            @if (probes is { Count: > 0 })
+            {
+                <h4 style="margin-top:12px;">Permissions</h4>
+                <table style="width:100%;font-size:13px;">
+                    @foreach (var probe in probes)
+                    {
+                        <tr>
+                            <td><b>@probe.DisplayName</b><br /><span style="color:#999">@probe.RequiredRole</span></td>
+                            <td><Tag Color="@ProbeColor(probe.Status)">@probe.Status</Tag></td>
+                            <td>@probe.Detail</td>
+                        </tr>
+                    }
+                </table>
+            }
+
+            <h4 style="margin-top:12px;">History</h4>
+            @foreach (var scan in history)
+            {
+                <div style="display:flex;gap:8px;font-size:13px;border-bottom:1px solid #fafafa;padding:4px 0;">
+                    <Tag Color="@ScanColor(scan.Status)">@scan.Status</Tag>
+                    <span>@scan.Scope · @scan.ResourceCount rows</span>
+                    <span style="color:#999">@scan.StartedAt.LocalDateTime:dd.MM HH:mm</span>
+                    @if (scan.Error is { } e)
+                    {
+                        <span style="color:#cf1322;">@e</span>
+                    }
+                </div>
+            }
+        }
+    }
+    else if (activeTab == "browse")
+    {
+        @if (browseScanId is null)
+        {
+            <div style="margin-bottom:8px;">
+                @if (completed.Count == 0)
+                {
+                    <span>No completed scans yet.</span>
+                }
+                else
+                {
+                    <select @bind="browseScanId" @bind:after="LoadBrowseAsync">
+                        @foreach (var scan in completed)
+                        {
+                            <option value="@scan.Id">@scan.StartedAt.LocalDateTime:dd.MM HH:mm · @scan.Scope · @scan.ResourceCount rows</option>
+                        }
+                    </select>
+                }
+            </div>
+        }
+        else
+        {
+            <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
+                <input style="flex:1;padding:4px;" placeholder="search name / id" @bind="browseSearch" @bind:event="oninput" />
+                <select @bind="browseProvider">
+                    <option value="">all providers</option>
+                    @foreach (var facet in facets?.Providers ?? [])
+                    {
+                        <option value="@facet.Value">@facet.Value (@facet.Count)</option>
+                    }
+                </select>
+                <select @bind="browseLocation">
+                    <option value="">all locations</option>
+                    @foreach (var facet in facets?.Locations ?? [])
+                    {
+                        <option value="@facet.Value">@facet.Value (@facet.Count)</option>
+                    }
+                </select>
+                <a @onclick="@(() => browseScanId = null)">back</a>
+            </div>
+
+            @if (facets is { } f)
+            {
+                <div style="margin-bottom:8px;font-size:13px;color:#666;">
+                    @f.Total resources · @f.Untagged untagged
+                    @if (f.Owners.Count > 0)
+                    {
+                        <span> · owners: </span>
+                        @foreach (var o in f.Owners)
+                        {
+                            <a style="margin-right:8px;" @onclick="@(() => browseOwner = o.Value)">@o.Value (@o.Count)</a>
+                        }
+                        <a @onclick="@(() => browseOwner = null)">clear</a>
+                    }
+                </div>
+            }
+            @foreach (var item in Filtered().Take(200))
+            {
+                <div style="border-bottom:1px solid #fafafa;padding:4px 0;cursor:pointer;"
+                     @onclick="@(() => expandedId = expandedId == item.Id ? null : item.Id)">
+                    <b>@item.Name</b> <Tag>@item.ResourceTypeSegment</Tag>
+                    <span style="color:#999;font-size:12px;">@item.Location · @item.ResourceGroup</span>
+                    @if (expandedId == item.Id)
+                    {
+                        <pre style="max-height:260px;overflow:auto;background:#fafafa;padding:8px;font-size:12px;">@Pretty(item)</pre>
+                    }
+                </div>
+            }
+            @if (Filtered().Count() > 200)
+            {
+                <div style="color:#999;font-size:12px;">showing first 200 of @Filtered().Count() — narrow with facets</div>
+            }
+        }
+    }
+    else if (reportScan is null)
+    {
+        <span>No completed scan to analyze yet - run one first.</span>
+    }
+    else
+    {
+        <div style="margin-bottom:8px;font-size:13px;">
+            <b>@reportItems.Count resources</b> scanned @reportScan.FinishedAt?.LocalDateTime:dd.MM HH:mm ·
+            retirement data as of <b>@catalog.DataAsOf.LocalDateTime:yyyy-MM-dd</b>
+            <Tag Color="@FreshnessColor(catalog.FreshnessAt(DateTimeOffset.UtcNow))">@catalog.FreshnessAt(DateTimeOffset.UtcNow)</Tag>
+        </div>
+
+        @foreach (var finding in reportFindings)
+        {
+                <div style="border-bottom:1px solid #fafafa;padding:4px 0;font-size:13px;">
+                    <Tag Color="@KindColor(finding.Kind)">@finding.Kind</Tag>
+                <b>@NameOf(finding.ResourceId)</b> <span style="color:#999">@finding.ResourceType</span>
+                <div style="color:#666;">@finding.Detail</div>
+            </div>
+        }
+        @if (reportFindings.Count == 0)
+        {
+            <span>No orphaned, idle or broken resources.</span>
+        }
+
+        @if (watched.Count > 0)
+        {
+            <h4>Retiring / retired resources</h4>
+            @foreach (var (item, entry) in watched)
+            {
+                <div style="border-bottom:1px solid #fafafa;padding:4px 0;font-size:13px;">
+                    <Tag Color="@("red")">@entry.Status</Tag> <b>@item.Name</b> <span style="color:#999">@item.Type</span>
+                    <div style="color:#666;">@entry.Note</div>
+                </div>
+            }
+        }
+    }
+</div>
+
+@code {
+    private string activeTab = "scan";
+    private bool loading = true;
+    private string loadError = "";
+    private IReadOnlyList<SubscriptionInfo> subscriptions = [];
+    private readonly HashSet<string> selected = [];
+    private IReadOnlyList<DataSourceProbe>? probes;
+    private IReadOnlyList<ScanRecord> history = [];
+    private List<ScanRecord> completed = [];
+    private ScanRecord? resumable;
+
+    private string? browseScanId;
+    private string browseSearch = "";
+    private string browseProvider = "";
+    private string browseLocation = "";
+    private string? browseOwner;
+    private string? expandedId;
+    private List<InventoryItem> browseItems = [];
+    private InventoryFacets? facets;
+
+    private ScanRecord? reportScan;
+    private List<InventoryItem> reportItems = [];
+    private IReadOnlyList<AnalysisFinding> reportFindings = [];
+    private IReadOnlyList<(InventoryItem Item, DeprecationEntry Entry)> watched = [];
+    private DeprecationCatalog catalog = DeprecationCatalog.Seed;
+
+    private int enabledCount => subscriptions.Count(s => s.State == "Enabled");
+
+    protected override async Task OnInitializedAsync()
+    {
+        Session.StateChanged += OnSessionChanged;
+        await RefreshAsync();
+        try
+        {
+            subscriptions = await Session.GetSubscriptionsAsync();
+            foreach (var sub in subscriptions.Where(s => s.State == "Enabled"))
+                selected.Add(sub.SubscriptionId);
+        }
+        catch (Exception e) { loadError = e.Message; }
+        loading = false;
+    }
+
+    private void OnSessionChanged() => InvokeAsync(async () =>
+    {
+        await RefreshAsync();
+        StateHasChanged();
+    });
+
+    private async Task RefreshAsync()
+    {
+        history = await Session.GetHistoryAsync();
+        resumable = await Session.GetResumableAsync();
+        completed = history.Where(s => s.Status == "Completed").ToList();
+    }
+
+    private async Task SwitchTabAsync(string key)
+    {
+        activeTab = key;
+        if (key == "report" && reportScan is null) await LoadReportAsync();
+    }
+
+    private async Task LoadReportAsync()
+    {
+        reportScan = await Session.Scans.GetLatestCompletedAsync();
+        catalog = DeprecationCatalog.Load(null);
+        if (reportScan?.Snapshots is { Count: > 0 } snaps)
+        {
+            reportItems = snaps.Select(ToItem).ToList();
+            reportFindings = OrphanAnalyzer.Analyze(reportItems);
+            watched = catalog.Watch(reportItems);
+        }
+    }
+
+    private void ToggleAll(ChangeEventArgs e)
+    {
+        if (e.Value is true or "true")
+            foreach (var s in subscriptions.Where(s => s.State == "Enabled")) selected.Add(s.SubscriptionId);
+        else selected.Clear();
+    }
+
+    private void Toggle(string id, ChangeEventArgs e)
+    {
+        if (e.Value is true or "true") selected.Add(id); else selected.Remove(id);
+    }
+
+    private Task StartAsync() => Session.StartScanAsync(selected.ToList());
+    private Task ResumeScanAsync() => Session.StartScanAsync(selected.ToList(), resume: true);
+
+    private async Task PreflightAsync()
+    {
+        if (selected.Count == 0) return;
+        try { probes = await Session.RunPreflightAsync(selected.First()); }
+        catch (Exception e) { probes = [new("error", e.Message, "", [], ProbeStatus.NotAvailable, "")]; }
+    }
+
+    private async Task LoadBrowseAsync()
+    {
+        if (browseScanId is null) return;
+        var rows = await Session.GetSnapshotsAsync(browseScanId);
+        browseItems = rows.Select(ToItem).ToList();
+        facets = InventoryFacets.From(browseItems);
+        browseOwner = null;
+        expandedId = null;
+    }
+
+    private IEnumerable<InventoryItem> Filtered()
+    {
+        foreach (var item in browseItems)
+        {
+            if (browseProvider.Length > 0 && !item.Type.StartsWith(browseProvider + "/", StringComparison.OrdinalIgnoreCase)) continue;
+            if (browseLocation.Length > 0 && !string.Equals(item.Location, browseLocation, StringComparison.OrdinalIgnoreCase)) continue;
+            if (browseOwner is { Length: > 0 } owner &&
+                (!item.Tags.TryGetValue("owner", out var o) || !string.Equals(o, owner, StringComparison.OrdinalIgnoreCase))) continue;
+            if (browseSearch.Length > 0 &&
+                !item.Name.Contains(browseSearch, StringComparison.OrdinalIgnoreCase) &&
+                !item.Id.Contains(browseSearch, StringComparison.OrdinalIgnoreCase)) continue;
+            yield return item;
+        }
+    }
+
+    private static InventoryItem ToItem(ResourceSnapshotRecord r) => new(
+        r.ResourceId, r.Name, r.ResourceType, r.Location ?? "", r.ResourceGroup ?? "", r.SubscriptionId ?? "",
+        ParseTags(r.TagsJson), ParseRaw(r.PropertiesJson));
+
+    private static IReadOnlyDictionary<string, string> ParseTags(string? json) =>
+        json is null ? new Dictionary<string, string>()
+                     : JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new Dictionary<string, string>();
+
+    private static JsonElement? ParseRaw(string? json)
+    {
+        if (json is null) return null;
+        try { return JsonDocument.Parse(json).RootElement.Clone(); }
+        catch (JsonException) { return null; }
+    }
+
+    private static string Pretty(InventoryItem item) => item.Raw is { } raw
+        ? JsonSerializer.Serialize(raw, new JsonSerializerOptions { WriteIndented = true })
+        : "{}";
+
+    private static string NameOf(string id) => id.Contains('/') ? id[(id.LastIndexOf('/') + 1)..] : id;
+
+    private static string ProbeColor(ProbeStatus s) => s switch
+    {
+        ProbeStatus.Available => "green",
+        ProbeStatus.AvailableWithCaveat => "orange",
+        _ => "red",
+    };
+
+    private static string ScanColor(string status) => status switch
+    {
+        "Completed" => "green",
+        "Running" => "blue",
+        "Canceled" => "orange",
+        _ => "red",
+    };
+
+    private static string FreshnessColor(CatalogFreshness f) => f switch
+    {
+        CatalogFreshness.Current => "green",
+        CatalogFreshness.ReviewDue => "orange",
+        _ => "red",
+    };
+    private static string KindColor(FindingKind kind) => kind switch
+    {
+        FindingKind.BrokenReference => "red",
+        FindingKind.Orphan => "orange",
+        _ => "blue",
+    };
+
+    public new void Dispose()
+    {
+        Session.StateChanged -= OnSessionChanged;
+        base.Dispose();
+    }
+}

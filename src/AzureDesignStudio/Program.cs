@@ -72,6 +72,8 @@ builder.Services.AddSingleton<AdsContext>();
 // Server redirect sign-in flow (AddMsalAuthentication + /authentication endpoints);
 // no host overrides needed on WASM.
 builder.Services.AddSingleton<AdsHostAuth>();
+// Browser host has no tenant scan; desktop replaces this registration with its own.
+builder.Services.AddSingleton<AdsHostFeatures>();
 builder.Services.AddAutoMapper(typeof(AzureNodeProfile));
 // Bicep decompiler service
 builder.Services.AddAdsBicepDecompiler();

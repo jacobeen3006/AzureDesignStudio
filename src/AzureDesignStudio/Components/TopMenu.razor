@@ -10,6 +10,8 @@
 @inject IHttpClientFactory clientFactory
 @inject ModalService modalService
 @inject IAdsBicepDecompiler _adsBicepDecompiler
+@inject AdsHostFeatures features
+@inject IServiceProvider Services
 
 <div>
     <Menu @ref="@topMenu" Mode="@MenuMode.Horizontal" OnMenuItemClicked="HandleMenuItemClicked">        
@@ -29,6 +31,10 @@
         <div title="Validate the design"><MenuItem Key="validate" Icon="@IconType.Outline.CheckCircle" RouterMatch="@NavLinkMatch.Prefix" /></div>
         <div title="Estimate monthly cost"><MenuItem Key="cost" Icon="@IconType.Outline.DollarCircle" RouterMatch="@NavLinkMatch.Prefix" /></div>
         <div title="Save/Load"><MenuItem Key="save" Icon="@IconType.Outline.Save" RouterMatch="@NavLinkMatch.Prefix" /></div>
+        @if (features.TenantScanLabel is { } scanLabel)
+        {
+            <div title="@scanLabel"><MenuItem Key="scan" Icon="@IconType.Outline.Global" RouterMatch="@NavLinkMatch.Prefix" /></div>
+        }
     </Menu>
 </div>
 

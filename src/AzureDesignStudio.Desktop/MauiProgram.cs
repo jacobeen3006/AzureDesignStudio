@@ -109,6 +109,21 @@ public static class MauiProgram
         builder.Services.AddSingleton<AdsContext>();
         builder.Services.AddAutoMapper(typeof(AzureNodeProfile));
         builder.Services.AddAdsBicepDecompiler();
+        builder.Services.AddSingleton<TenantScanSession>();
+        // Tenant scan drawer (plan 7.8): the shared TopMenu opens it through the seam.
+        // DrawerService must be the current circuit's instance - the func gets the
+        // scoped provider straight from the click site in TopMenu.
+        builder.Services.AddSingleton(new AdsHostFeatures
+        {
+            TenantScanLabel = "Tenant scan",
+            OpenTenantScan = async circuitServices =>
+            {
+                var drawers = circuitServices.GetRequiredService<AntDesign.DrawerService>();
+                var drawer = await drawers.CreateAsync<Components.TenantScanDrawerTemplate, string, string>(
+                    new AntDesign.DrawerOptions { Title = "Tenant scan", Width = "720" }, string.Empty);
+                drawer.OnClose = () => Task.CompletedTask;
+            },
+        });
 
         builder.Logging.AddConfiguration(builder.Configuration.GetSection("Logging"));
         builder.Logging.AddProvider(new FileLoggerProvider(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ads_desktop_crash.log")));
