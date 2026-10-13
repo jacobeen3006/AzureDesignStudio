@@ -26,6 +26,8 @@
 - 7.6 **[5][9]** Tag/owner facets; sovereign-cloud endpoint sets.
 - 7.7 **[7][6]** Orphan & idle detection report; retirement/deprecation catalog with freshness ("data as of").
 
+**Status (2026-10-13):** 7.1-7.7 done - ARG spine, permission preflight, scope tree, typeless inventory, checkpointed scan engine, tag/owner facets + sovereign-cloud endpoint sets, orphan/idle analyzer + deprecation catalog with freshness tiers. Remaining: browse/report UI + real-tenant smoke (mid-scan kill resume, 429 storm).
+
 **Gate:** scan a real small tenant offline-resumably; browse full inventory + orphan report; kill mid-scan → resume from checkpoint; 429 storm handled (part of 99 suite).
 **Effort:** 3–4 weeks (the biggest read-only chunk).
 
