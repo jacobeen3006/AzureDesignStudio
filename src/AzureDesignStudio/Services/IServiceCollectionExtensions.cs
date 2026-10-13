@@ -6,12 +6,15 @@ namespace AzureDesignStudio.Services;
 
 public sealed class EmptyArtifactRegistryProvider : IArtifactRegistryProvider
 {
-    public ImmutableArray<IArtifactRegistry> Registries(Uri templateUri) => [];
+    public ImmutableArray<string> SupportedSchemes => [];
+
+    public IArtifactRegistry? TryGetRegistry(string scheme) => null;
 }
 
 public static class IServiceCollectionExtensions
 {
     public static IServiceCollection AddAdsBicepDecompiler(this IServiceCollection services) => services
+        .AddBicepDecompiler()
         .AddSingleton<IArtifactRegistryProvider, EmptyArtifactRegistryProvider>()
         .AddSingleton<IAdsBicepDecompiler, AdsBicepDecompiler>();
 }

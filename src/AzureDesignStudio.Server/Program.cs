@@ -13,7 +13,7 @@ using Microsoft.Identity.Web;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAdB2C"));
+    .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
 builder.Services.Configure<JwtBearerOptions>(
     JwtBearerDefaults.AuthenticationScheme, options =>
     {
@@ -24,8 +24,12 @@ builder.Services.Configure<JwtBearerOptions>(
 builder.Services.AddDbContext<DesignDbContext>(options => options.UseInMemoryDatabase("adsdb-inmem"));
 #else
     // Use Azure Key Vault as configurations
+    var keyVaultName = builder.Configuration["KeyVaultName"];
+    if (string.IsNullOrWhiteSpace(keyVaultName))
+        throw new InvalidOperationException(
+            "KeyVaultName is not configured. Set the KeyVaultName configuration or environment variable (e.g. KeyVaultName=ads-kv).");
     var secretClient = new SecretClient(
-        new Uri($"https://{builder.Configuration["KeyVaultName"]}.vault.azure.net/"),
+        new Uri($"https://{keyVaultName}.vault.azure.net/"),
         new DefaultAzureCredential());
 
     builder.Configuration.AddAzureKeyVault(secretClient, new KeyVaultSecretManager());
@@ -39,6 +43,8 @@ builder.Services.AddApplicationInsightsTelemetry();
 
 builder.Services.AddRazorPages();
 builder.Services.AddGrpc();
+builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient("RetailPrices", client => client.Timeout = TimeSpan.FromSeconds(30));
 
 #if DEBUG
     builder.Services.AddGrpcReflection();
@@ -79,6 +85,7 @@ app.UseAuthorization();
 app.UseGrpcWeb();
 app.MapGrpcService<DesignService>().EnableGrpcWeb();
 app.MapGrpcService<DeployService>().EnableGrpcWeb();
+app.MapGrpcService<RetailPriceService>().EnableGrpcWeb();
 
 #if DEBUG
     if (app.Environment.IsDevelopment())

@@ -1,18 +1,25 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
   <PropertyGroup>
-	<TargetFramework>net8.0</TargetFramework>
+	<TargetFramework>net10.0</TargetFramework>
 	<Nullable>enable</Nullable>
 	<ImplicitUsings>enable</ImplicitUsings>
     <ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest>
     <BlazorEnableTimeZoneSupport>false</BlazorEnableTimeZoneSupport>
 	<PublishTrimmed>true</PublishTrimmed>
-  </PropertyGroup>	
+	<!-- AOT unsupported in Debug publish (WasmApp.Common.targets); Release-only. -->
+	<RunAOTCompilation Condition="'$(Configuration)' == 'Release'">true</RunAOTCompilation>
+  </PropertyGroup>
+  <PropertyGroup>
+    <!-- AutoMapper 12.0.1 GHSA-rvv3-g6hj-g44x (DoS via uncontrolled recursion) accepted:
+         mappings are shallow node DTOs; 13+ requires a commercial license key. -->
+    <NoWarn>$(NoWarn);NU1903</NoWarn>
+  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="AntDesign" Version="1.6.2" />
     <PackageReference Include="AutoMapper" Version="12.0.1" />
     <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.0" />
-    <PackageReference Include="Azure.Bicep.Decompiler" Version="0.33.93" />
-    <PackageReference Include="BlazorApplicationInsights" Version="2.2.0" />
+    <PackageReference Include="Azure.Bicep.Decompiler" Version="0.48.1" />
+    <PackageReference Include="BlazorApplicationInsights" Version="2.2.2" />
     <PackageReference Include="Google.Protobuf" Version="3.28.2" />
     <PackageReference Include="Grpc.Net.Client" Version="2.66.0" />
     <PackageReference Include="Grpc.Net.Client.Web" Version="2.66.0" />
@@ -21,16 +28,20 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="8.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="8.0.0" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.Authentication.WebAssembly.Msal" Version="8.0.16" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Configuration" Version="8.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.12" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.12" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Authentication.WebAssembly.Msal" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Configuration" Version="10.0.12" />
     <PackageReference Include="Nerdbank.GitVersioning" Version="3.6.146">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="System.IO.Abstractions.TestingHelpers" Version="19.2.4" />
+    <!-- Mono AOT compiles System.Private.Windows.Core (pulled in by the Bicep decompiler via
+         Microsoft.Windows.Compatibility) and fails to load its System.Formats.Nrbf reference
+         unless that assembly is in the app payload. -->
+    <PackageReference Include="System.Formats.Nrbf" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup>

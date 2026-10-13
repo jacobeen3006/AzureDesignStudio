@@ -1,11 +1,16 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
 
 	<PropertyGroup>
-		<TargetFramework>net8.0</TargetFramework>
+		<TargetFramework>net10.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 	</PropertyGroup>
-		
+
+	<PropertyGroup>
+		<!-- AutoMapper 12.0.1 GHSA-rvv3-g6hj-g44x (DoS via uncontrolled recursion) accepted:
+		     mappings are shallow node DTOs; 13+ requires a commercial license key. -->
+		<NoWarn>$(NoWarn);NU1903</NoWarn>
+	</PropertyGroup>
   <ItemGroup>
     <SupportedPlatform Include="browser" />
   </ItemGroup>
@@ -18,9 +23,9 @@
 	<!--<PackageReference Include="AzureDesignStudio.AzureResources.Sql" Version="0.3.0" />-->
 	<!--<PackageReference Include="AzureDesignStudio.AzureResources.Storage" Version="0.2.0" />-->
 	<!--<PackageReference Include="AzureDesignStudio.AzureResources.Web" Version="0.2.0" />-->
-    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.12" />
 	<PackageReference Include="Nerdbank.GitVersioning" Version="3.6.146">
 		<PrivateAssets>all</PrivateAssets>
 		<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

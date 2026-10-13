@@ -35,7 +35,7 @@ Azure Design Studio won the **3rd Place Winner award** of Microsoft Global Hacka
 ### Cloud Storage & Collaboration
 - Save designs to Azure Cloud Storage
 - Retrieve previously saved designs for future use
-- Single sign-on authentication via Azure AD B2C
+- Single sign-on authentication via Microsoft Entra ID (work and personal accounts)
 
 ### Infrastructure as Code Generation
 - Automatically generates ARM templates from your visual designs
@@ -67,10 +67,10 @@ AzureDesignStudio.sln
 
 | Layer | Technology |
 |---|---|
-| **UI framework** | Blazor WebAssembly + .NET 8 |
-| **UI components** | Ant Design Blazor 0.14.4 |
+| **UI framework** | Blazor WebAssembly + .NET 10 |
+| **UI components** | Ant Design Blazor 1.6.2 |
 | **Diagramming** | Blazor.Diagrams (custom fork — submodule) |
-| **Auth** | Azure AD B2C (MSAL via `Microsoft.Authentication.WebAssembly.Msal`) |
+| **Auth** | Microsoft Entra ID (MSAL via `Microsoft.Authentication.WebAssembly.Msal`) |
 | **Backend API** | ASP.NET Core gRPC with gRPC-Web (browser-compatible) |
 | **ORM** | Entity Framework Core (InMemory dev / SQL Server prod) |
 | **Mapping** | AutoMapper 12 + custom Roslyn source generator |
@@ -142,7 +142,7 @@ AzureDesignStudio.sln
 │  ├── DeployGrpcService.cs  (gRPC client)            │
 │  └── AdsBicepDecompiler.cs (Bicep parsing)          │
 │                                                      │
-│  Auth: MSAL → Azure AD B2C                        │
+│  Auth: MSAL → Microsoft Entra ID                   │
 └──────────────┬──────────────────────────────────────┘
               │ gRPC-Web (protobuf)
               ▼
@@ -156,7 +156,7 @@ AzureDesignStudio.sln
 │  │   (deploy ARM templates, stream status)          │
 │  └── CryptoService.cs   (encrypt stored credentials) │
 │                                                      │
-│  Auth: JWT Bearer + AzureAdB2C                    │
+│  Auth: JWT Bearer + AzureAd                        │
 │  Telemetry: Application Insights                 │
 └─────────────────────────────────────────────────────┘
 ```
@@ -217,12 +217,12 @@ This eliminates manual DTO boilerplate when adding new Azure resource types.
 ## 🔐 Authentication
 
 ### Client-Side (WASM)
-- **Azure AD B2C** with MSAL (`Microsoft.Authentication.WebAssembly.Msal`)
+- **Microsoft Entra ID** (work + personal accounts) with MSAL (`Microsoft.Authentication.WebAssembly.Msal`)
 - Login, logout, and token management
 - Single Sign-On support
 
 ### Server-Side
-- **JWT Bearer** + AzureAdB2C with `Microsoft.Identity.Web`
+- **JWT Bearer** + AzureAd with `Microsoft.Identity.Web`
 - All gRPC endpoints decorated with `[Authorize]` + `[RequiredScope]`
 - Client uses MSAL (`AddMsalAuthentication`) with scoped HTTP message handler (`BaseAddressAuthorizationMessageHandler`)
 
@@ -247,6 +247,10 @@ docker build -f src/AzureDesignStudio.Server/Dockerfile .
 # Clone with git submodule (Blazor.Diagrams)
 git clone --recursive https://github.com/jacobeen3006/AzureDesignStudio.git
 cd AzureDesignStudio
+
+# Required: .NET 10 patch for the Blazor.Diagrams submodule (upstream fork is .NET 8 era;
+# no push access to chunliu/Blazor.Diagrams, so the fix ships as a patch file — CI applies it too)
+git -C src/Blazor.Diagrams apply patches/blazor-diagrams-net10.patch
 ```
 
 ### Development Environment

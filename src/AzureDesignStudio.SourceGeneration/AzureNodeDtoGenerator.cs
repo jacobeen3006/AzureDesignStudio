@@ -5,6 +5,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Scriban;
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Linq;
 
@@ -16,9 +17,9 @@ namespace AzureDesignStudio.SourceGeneration
     }
 
     [Generator]
-    public class AzureNodeDtoGenerator : ISourceGenerator
+    public class AzureNodeDtoGenerator : IIncrementalGenerator
     {
-        public void Initialize(GeneratorInitializationContext context)
+        public void Initialize(IncrementalGeneratorInitializationContext context)
         {
             // Uncomment if debugging.
             //if (!Debugger.IsAttached)
@@ -26,53 +27,81 @@ namespace AzureDesignStudio.SourceGeneration
             //    Debugger.Launch();
             //}
 
-            context.RegisterForSyntaxNotifications(() => new DtoGeneratorSyntaxReceiver());
-        } 
-        
-        public void Execute(GeneratorExecutionContext context)
-        {
+            var classDeclarations = context.SyntaxProvider
+                .CreateSyntaxProvider(
+                    predicate: static (s, _) => s is ClassDeclarationSyntax c &&
+                        (c.AttributeLists.Count > 0 ||
+                         c.Identifier.Text == "AzureNodeDto" ||
+                         c.Identifier.Text == "AzureNodeProfile" ||
+                         c.Identifier.Text == "AdsConstants"),
+                    transform: static (ctx, _) => (ClassDeclarationSyntax?)ctx.Node)
+                .Collect();
 
-            if (context.SyntaxReceiver is not DtoGeneratorSyntaxReceiver dtoReceiver)
-                return;
-
-            if (string.IsNullOrEmpty(dtoReceiver.DtoNamespace))
+            context.RegisterSourceOutput(classDeclarations, static (context, classDeclarations) =>
             {
-                throw new ArgumentNullException(nameof(dtoReceiver.DtoNamespace));
-            }
+                string? dtoNamespace = default;
+                string? mapProfileNamespace = default;
+                string? typeKeyNamespace = default;
+                var modelTypes = new List<ClassDeclarationSyntax>();
 
-            var mapProfile = new MapProfileModel()
-            {
-                Maps = new List<MapModel>(),
-                Usings = new HashSet<string>
+                foreach (var classSyntax in classDeclarations)
                 {
-                    dtoReceiver.TypeKeyNamespace!,
-                },
-                Namespace = dtoReceiver.MapProfileNamespace!
-            };
+                    if (classSyntax is null)
+                        continue;
 
-            foreach (var model in dtoReceiver.ModelTypes)
-            {
-                var dtoTypeModel = CreateDtoTypeModel(model, dtoReceiver.DtoNamespace!);
-                var source = GenerateSourceFromDtoTypeModel(dtoTypeModel);
+                    if ("AzureNodeDto".Equals(classSyntax.Identifier.Text, StringComparison.InvariantCulture))
+                        dtoNamespace = classSyntax.GetNamespace();
 
-                context.AddSource($"{dtoTypeModel.ClassName}.g.cs", source);
+                    if ("AzureNodeProfile".Equals(classSyntax.Identifier.Text, StringComparison.InvariantCulture))
+                        mapProfileNamespace = classSyntax.GetNamespace();
 
-                var typeKey = model.GetAttributeParameterValue(GeneratorConsts.DtoAttributeName, "TypeKey");
-                mapProfile.Maps.Add(new MapModel
+                    if ("AdsConstants".Equals(classSyntax.Identifier.Text, StringComparison.InvariantCulture))
+                        typeKeyNamespace = classSyntax.GetNamespace();
+
+                    if (classSyntax.HasAttribute(GeneratorConsts.DtoAttributeName))
+                        modelTypes.Add(classSyntax);
+                }
+
+                if (string.IsNullOrEmpty(dtoNamespace))
                 {
-                    TypeKey = (string.IsNullOrEmpty(typeKey) ? string.Empty : typeKey)!,
-                    SourceType = model.Identifier.Text,
-                    DestinationType = dtoTypeModel.ClassName
-                });
-                mapProfile.Usings.Add(dtoTypeModel.Namespace);
-            }
+                    throw new ArgumentNullException(nameof(dtoNamespace));
+                }
 
-            var mpSource = GenerateSourceFromMapProfileModel(mapProfile);
-            context.AddSource($"AzureNodeProfile.g.cs", mpSource);
+                var mapProfile = new MapProfileModel()
+                {
+                    Maps = new List<MapModel>(),
+                    Usings = new HashSet<string>
+                    {
+                        typeKeyNamespace!,
+                    },
+                    Namespace = mapProfileNamespace!
+                };
 
-            var dmfSource = GenerateSourceForDataModelFactory(mapProfile);
-            context.AddSource($"DataModelFactory.g.cs", dmfSource);
+                foreach (var model in modelTypes)
+                {
+                    var dtoTypeModel = CreateDtoTypeModel(model, dtoNamespace!);
+                    var source = GenerateSourceFromDtoTypeModel(dtoTypeModel);
+
+                    context.AddSource($"{dtoTypeModel.ClassName}.g.cs", source);
+
+                    var typeKey = model.GetAttributeParameterValue(GeneratorConsts.DtoAttributeName, "TypeKey");
+                    mapProfile.Maps.Add(new MapModel
+                    {
+                        TypeKey = (string.IsNullOrEmpty(typeKey) ? string.Empty : typeKey)!,
+                        SourceType = model.Identifier.Text,
+                        DestinationType = dtoTypeModel.ClassName
+                    });
+                    mapProfile.Usings.Add(dtoTypeModel.Namespace);
+                }
+
+                var mpSource = GenerateSourceFromMapProfileModel(mapProfile);
+                context.AddSource($"AzureNodeProfile.g.cs", mpSource);
+
+                var dmfSource = GenerateSourceForDataModelFactory(mapProfile);
+                context.AddSource($"DataModelFactory.g.cs", dmfSource);
+            });
         }
+
 
         private static DtoTypeModel CreateDtoTypeModel(ClassDeclarationSyntax classDecl, string dtoNamespace)
         {

@@ -9,7 +9,7 @@
     <Authorized>
         <Collapse DefaultActiveKey="@(new[]{"1"})" Accordion>
             <Panel Header="Save the design" Key="1">
-                <Form @ref="@_form" Model="@_designName" Context="formContext" ValidateMode="@FormValidateMode.Complex"
+                <Form @ref="@_form" Model="@_designName" Context="formContext"
                       LabelCol="@(new ColLayoutParam { Span = 24 })" WrapperCol="@(new ColLayoutParam { Span = 24 })">
                     <FormItem Label="Design name" Rules="@designNameRules">
                         <Input @bind-Value="@formContext.Name" Placeholder="azure design studio" />
@@ -27,9 +27,9 @@
                 </Alert>
             </Panel>
             <Panel Header="Load the design" Key="2">
-                <Table DataSource="@_allDesignRecords" @bind-SelectedRows="@_selectedRows"
+                <Table DataSource="@_allDesignRecords" @bind-SelectedRows="@_selectedRows" RowKey="c => c.Key"
                        Context="tableCtx" Loading="@_loadingDesigns" HidePagination Bordered Size="@TableSize.Small">
-                    <Selection Key="@tableCtx.Key" Type="@SelectionType.Radio" />
+                    <Selection Type="@SelectionType.Radio" />
                     <PropertyColumn Property="c => c.DesignName" Title="Your saved designs">
                         <span style="vertical-align: middle"><IconComponent IconPath="assets/azure/reference-arch.svg" /></span>
                         <span style="margin-left: 4px;">@tableCtx.DesignName</span>

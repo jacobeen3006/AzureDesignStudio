@@ -1,4 +1,5 @@
 ﻿using Bicep.Decompiler;
+using Bicep.IO.Abstraction;
 using System.Collections.Immutable;
 
 namespace AzureDesignStudio.Services;
@@ -23,7 +24,7 @@ public class AdsBicepDecompiler : IAdsBicepDecompiler
     {
         try
         {
-            var bicepUri = new Uri("file:///main.bicep");
+            var bicepUri = new IOUri("file", "", "/main.bicep");
             var result = await _decompiler.Decompile(bicepUri, jsonContent);
 
             return new DecompileResult(result.FilesToSave[result.EntrypointUri], null);

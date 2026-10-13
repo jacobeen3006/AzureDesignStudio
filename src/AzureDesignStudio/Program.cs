@@ -16,14 +16,14 @@ builder.Services.AddHttpClient("AzureDesignStudio.Root",
     client => client.BaseAddress = new Uri(builder.HostEnvironment.BaseAddress));
 builder.Services.AddHttpClient("AzureDesignStudio.ResourceAccess", 
     client => client.BaseAddress = new Uri(builder.Configuration.GetValue<string>("ResourceRoot")!));
-// AAD B2C Authentication
+// Microsoft Entra ID Authentication (work + personal accounts)
 builder.Services.AddHttpClient("AzureDesignStudio.ServerAPI", client => client.BaseAddress = new Uri(builder.HostEnvironment.BaseAddress))
     .AddHttpMessageHandler<BaseAddressAuthorizationMessageHandler>();
 builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("AzureDesignStudio.ServerAPI"));
 builder.Services.AddMsalAuthentication(options =>
 {
-    builder.Configuration.Bind("AzureAdB2C", options.ProviderOptions.Authentication);
-    options.ProviderOptions.DefaultAccessTokenScopes.Add(builder.Configuration.GetValue<string>("B2CScope")!);
+    builder.Configuration.Bind("AzureAd", options.ProviderOptions.Authentication);
+    options.ProviderOptions.DefaultAccessTokenScopes.Add(builder.Configuration.GetValue<string>("ServerScope")!);
 });
 
 builder.Logging.AddConfiguration(builder.Configuration.GetSection("Logging"));
@@ -50,6 +50,13 @@ builder.Services.AddGrpcClient<Deploy.DeployClient>("DeployClientWithAuth", o =>
     baseAddressMessageHandler.InnerHandler = new HttpClientHandler();
     return new GrpcWebHandler(GrpcWebMode.GrpcWeb, baseAddressMessageHandler);
 });
+builder.Services.AddScoped<CostGrpcService>();
+builder.Services.AddScoped<CostService>();
+builder.Services.AddGrpcClient<Cost.CostClient>("CostClient", o =>
+{
+    o.Address = new Uri(builder.HostEnvironment.BaseAddress);
+}).ConfigurePrimaryHttpMessageHandler(() =>
+    new GrpcWebHandler(GrpcWebMode.GrpcWeb, new HttpClientHandler()));
 
 builder.Services.AddAntDesign();
 builder.Services.AddSingleton<AdsContext>();

@@ -1,12 +1,18 @@
 #See https://aka.ms/containerfastmode to understand how Visual Studio uses this Dockerfile to build your images for faster debugging.
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 WORKDIR /app
 EXPOSE 80
 EXPOSE 443
 
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG BuildConfiguration=Release
 WORKDIR /src
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/bin/python3 /usr/local/bin/python \
+    && dotnet workload install wasm-tools
 COPY ["AzureDesignStudio.Server/AzureDesignStudio.Server.csproj", "AzureDesignStudio.Server/"]
 COPY ["AzureDesignStudio.SharedModels/AzureDesignStudio.SharedModels.csproj", "AzureDesignStudio.SharedModels/"]
 COPY ["AzureDesignStudio/AzureDesignStudio.csproj", "AzureDesignStudio/"]
@@ -18,10 +24,10 @@ COPY ["AzureDesignStudio.SourceGeneration/AzureDesignStudio.SourceGeneration.csp
 RUN dotnet restore "AzureDesignStudio.Server/AzureDesignStudio.Server.csproj"
 COPY . .
 WORKDIR "/src/AzureDesignStudio.Server"
-RUN dotnet build "AzureDesignStudio.Server.csproj" -c Release -o /app/build
+RUN dotnet build "AzureDesignStudio.Server.csproj" -c "$BuildConfiguration" -o /app/build
 
 FROM build AS publish
-RUN dotnet publish "AzureDesignStudio.Server.csproj" -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "AzureDesignStudio.Server.csproj" -c "$BuildConfiguration" -o /app/publish /p:UseAppHost=false
 
 FROM base AS final
 WORKDIR /app
