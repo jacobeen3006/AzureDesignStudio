@@ -1,0 +1,28 @@
+@using AzureDesignStudio.Core.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@trafficManagerProfile" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
+    <NameAndLocation Node="@context" />
+    <FormItem>
+        <RadioGroup @bind-Value="@context.RoutingMethod" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("Performance")">Performance</Radio>
+            <Radio RadioButton Value="@("MultiValue")">Multi-value</Radio>
+            <Radio RadioButton Value="@("Weighted")">Weighted</Radio>
+            <Radio RadioButton Value="@("Priority")">Priority</Radio>
+            <Radio RadioButton Value="@("Geographic")">Geographic</Radio>
+        </RadioGroup>
+    </FormItem>
+    <FormItem>
+        <InputNumber @bind-Value="@context.DnsTtl" Min="30" Max="2147483647" Size="@InputSize.Small"></InputNumber>
+    </FormItem>
+</Form>
+
+@code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+    [CascadingParameter]
+    public Diagram Diagram { get; set; } = null!;
+
+    private TrafficManagerProfileModel trafficManagerProfile => (TrafficManagerProfileModel)Node;
+}

@@ -1,0 +1,28 @@
+@using AzureDesignStudio.Core.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@vault" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
+    <NameAndLocation Node="@context" />
+    <FormItem Label="SKU">
+        <RadioGroup @bind-Value="@context.SkuName" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("RS0")">RS0</Radio>
+            <Radio RadioButton Value="@("RS1")">RS1</Radio>
+        </RadioGroup>
+    </FormItem>
+    <FormItem Label="Redundancy">
+        <RadioGroup @bind-Value="@context.Redundancy" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("GRS")">GRS</Radio>
+            <Radio RadioButton Value="@("ZRS")">ZRS</Radio>
+        </RadioGroup>
+    </FormItem>
+</Form>
+
+@code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+    [CascadingParameter]
+    public Diagram Diagram { get; set; } = null!;
+
+    private RecoveryServicesVaultModel vault => (RecoveryServicesVaultModel)Node;
+}

@@ -1,0 +1,22 @@
+@using AzureDesignStudio.Core.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@natGateway" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
+    <NameAndLocation Node="@context" />
+    <FormItem>
+        <Input TValue="string" Size="@InputSize.Small" ReadOnly Value="@context.SkuName"></Input>
+    </FormItem>
+    <FormItem>
+        <InputNumber @bind-Value="@context.IdleTimeoutInMinutes" Min="4" Max="30" Size="@InputSize.Small"></InputNumber>
+    </FormItem>
+</Form>
+
+@code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+    [CascadingParameter]
+    public Diagram Diagram { get; set; } = null!;
+
+    private NatGatewayModel natGateway => (NatGatewayModel)Node;
+}

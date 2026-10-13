@@ -10,7 +10,7 @@ using Xunit;
 namespace AzureDesignStudio.Core.Tests
 {
     /// <summary>
-    /// Offline ARM contract tests for the Phase 1 resource types:
+    /// Offline ARM contract tests for catalog resource types beyond the original set:
     /// stencil key -> model -> ARM resource type@apiVersion.
     /// </summary>
     public class NewResourceTypesArmTests
@@ -35,6 +35,22 @@ namespace AzureDesignStudio.Core.Tests
             [AdsConstants.AzureRedis, "Microsoft.Cache/redis", "2023-08-01", "ads-redis"],
             [AdsConstants.AzureOpenAI, "Microsoft.CognitiveServices/accounts", "2024-10-01", "ads-openai"],
             [AdsConstants.FabricCapacity, "Microsoft.Fabric/capacities", "2023-11-11", "ads-fabric"],
+            [AdsConstants.NatGateway, "Microsoft.Network/natGateways", "2024-01-01", "ads-nat"],
+            [AdsConstants.TrafficManagerProfile, "Microsoft.Network/trafficmanagerprofiles", "2018-08-01", "ads-tm"],
+            [AdsConstants.ExpressRouteCircuit, "Microsoft.Network/expressRouteCircuits", "2024-01-01", "ads-er"],
+            [AdsConstants.NetworkSecurityGroup, "Microsoft.Network/networkSecurityGroups", "2024-01-01", "ads-nsg"],
+            [AdsConstants.AzureContainerInstance, "Microsoft.ContainerInstance/containerGroups", "2024-05-01", "ads-aci"],
+            [AdsConstants.VirtualMachineScaleSet, "Microsoft.Compute/virtualMachineScaleSets", "2024-03-01", "ads-vmss"],
+            [AdsConstants.RecoveryServicesVault, "Microsoft.RecoveryServices/vaults", "2024-04-01", "ads-rsv"],
+            [AdsConstants.LogAnalyticsWorkspace, "Microsoft.OperationalInsights/workspaces", "2023-09-01", "ads-law"],
+            [AdsConstants.LogicApps, "Microsoft.Logic/workflows", "2019-05-01", "ads-logic"],
+            [AdsConstants.StaticWebApp, "Microsoft.Web/staticSites", "2023-12-01", "ads-swa"],
+            [AdsConstants.ApplicationInsights, "Microsoft.Insights/components", "2020-02-02", "ads-appi"],
+            [AdsConstants.AppConfiguration, "Microsoft.AppConfiguration/configurationStores", "2024-05-01", "ads-appconf"],
+            [AdsConstants.CosmosDBAccount, "Microsoft.DocumentDB/databaseAccounts", "2023-04-15", "ads-cosmos"],
+            [AdsConstants.AiSearch, "Microsoft.Search/searchServices", "2023-11-01", "ads-search"],
+            [AdsConstants.DataFactory, "Microsoft.DataFactory/factories", "2018-06-01", "ads-adf"],
+            [AdsConstants.SignalR, "Microsoft.SignalRService/signalR", "2024-03-01", "ads-signalr"],
         ];
 
         [Theory]

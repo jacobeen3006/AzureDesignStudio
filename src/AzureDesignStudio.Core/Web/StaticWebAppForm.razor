@@ -1,0 +1,25 @@
+@using AzureDesignStudio.Core.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@staticWebApp" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
+    <NameAndLocation Node="@context" />
+    <FormItem>
+        <RadioGroup @bind-Value="@context.Sku" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("Free")">Free</Radio>
+            <Radio RadioButton Value="@("Standard")">Standard</Radio>
+        </RadioGroup>
+    </FormItem>
+    <FormItem Label="SKU size cap (GB)">
+        <Input @bind-Value="@context.SkuSizeCap" Size="@InputSize.Small" />
+    </FormItem>
+</Form>
+
+@code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+    [CascadingParameter]
+    public Diagram Diagram { get; set; } = null!;
+
+    private StaticWebAppModel staticWebApp => (StaticWebAppModel)Node;
+}

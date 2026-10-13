@@ -22,7 +22,7 @@
 - AntDesign 1.6.2 = latest stable (2.0 nightly-only) — current, no action.
 - Azure.Bicep.Decompiler latest 0.48.1 (we're on 0.39.26).
 - Photino.Blazor semi-dormant (last publish 2025-01) — not chosen.
-- Catalog today: 14 resources + 3 templates (`ads-stencils.json`). No AI-era services.
+- Catalog today: 43 resources + 6 reference architectures = 49 stencils (`ads-stencils.json`); AI-era services included (Azure OpenAI, Fabric, Container Apps).
 - CI: Docker build only — no `dotnet test`; CodeQL manual-trigger.
 - Tests: 9 live-Azure integration tests, 0 offline unit tests.
 - PWA service worker scaffolded but unregistered; no WASM AOT; no undo/redo/minimap.
@@ -55,6 +55,7 @@
 - 1.1 New ARM models (`AzureResources/<svc>/`) + node models & forms (`Core/<svc>/`) + stencil entries + icons for: **Microsoft Foundry / Azure OpenAI, Container Apps (+Environment, Jobs), Service Bus, Event Hubs, Event Grid, Key Vault, Load Balancer, Private Endpoint, DNS Zone, Azure Redis, Container Registry, Fabric capacity, Availability Set** (16 new → ~30 total).
 - 1.2 Validation rules engine: extend existing per-node validation with cross-node/Well-Architected checks (SKU-region availability, subnet delegation, naming rules, required child resources).
 - 1.3 Export verification per new type: generated ARM passes `bicep build` / ARM schema validation in tests.
+- 1.4 Catalog expansion wave 2 (2026-10-13): 16 more deployable types -> 43 resources / 49 stencils total. Networking: NAT Gateway, Traffic Manager, ExpressRoute Circuit, NSG; Compute: Container Instance, VM Scale Set; Data: Cosmos DB, AI Search, Data Factory; Others: Recovery Services Vault, Log Analytics Workspace, Logic App, Static Web App, Application Insights, App Configuration, SignalR. Per type: ARM model + node model + AntDesign form + icon + stencil entry; 16 new `NewResourceTypesArmTests` contracts (73 offline green). Verified in browser: all 16 render in panel tabs, drop-to-canvas works, node form fields bind.
 
 **Effort:** 5-8 days (mechanical per-type via source-gen pipeline; ~2-4h/type). **Risk:** icon assets; ARM api-version choices per type.
 

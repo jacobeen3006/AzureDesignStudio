@@ -1,0 +1,38 @@
+@using AzureDesignStudio.Core.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@cosmosDBAccount" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
+    <NameAndLocation Node="@context" />
+    <FormItem Label="Kind">
+        <RadioGroup @bind-Value="@context.Kind" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("GlobalDocumentDB")">Global Document DB</Radio>
+            <Radio RadioButton Value="@("MongoDB")">Mongo DB</Radio>
+            <Radio RadioButton Value="@("Parse")">Parse</Radio>
+        </RadioGroup>
+    </FormItem>
+    <FormItem Label="Default consistency level">
+        <RadioGroup @bind-Value="@context.DefaultConsistencyLevel" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("Eventual")">Eventual</Radio>
+            <Radio RadioButton Value="@("BoundedStaleness")">Bounded Staleness</Radio>
+            <Radio RadioButton Value="@("Session")">Session</Radio>
+            <Radio RadioButton Value="@("Strong")">Strong</Radio>
+            <Radio RadioButton Value="@("Weak")">Weak</Radio>
+        </RadioGroup>
+    </FormItem>
+    <FormItem Label="Multiple write locations">
+        <RadioGroup @bind-Value="@context.EnableMultipleWriteLocations" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@(true)">Enabled</Radio>
+            <Radio RadioButton Value="@(false)">Disabled</Radio>
+        </RadioGroup>
+    </FormItem>
+</Form>
+
+@code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+    [CascadingParameter]
+    public Diagram Diagram { get; set; } = null!;
+
+    private CosmosDBAccountModel cosmosDBAccount => (CosmosDBAccountModel)Node;
+}

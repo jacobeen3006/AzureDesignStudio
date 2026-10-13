@@ -233,5 +233,117 @@
     "iconPath": "assets/azure/fabric-capacity.svg",
     "label": "Fabric Capacity",
     "category": 4
+  },
+  {
+    "key": "nat-gateway",
+    "name": "nat",
+    "iconPath": "assets/azure/nat-gateway.svg",
+    "label": "NAT Gateway",
+    "category": 0
+  },
+  {
+    "key": "traffic-manager",
+    "name": "tm",
+    "iconPath": "assets/azure/traffic-manager.svg",
+    "label": "Traffic Manager Profile",
+    "category": 0
+  },
+  {
+    "key": "express-route",
+    "name": "er",
+    "iconPath": "assets/azure/express-route.svg",
+    "label": "ExpressRoute Circuit",
+    "category": 0
+  },
+  {
+    "key": "network-security-group",
+    "name": "nsg",
+    "iconPath": "assets/azure/network-security-group.svg",
+    "label": "Network Security Group",
+    "category": 0
+  },
+  {
+    "key": "azure-container-instance",
+    "name": "aci",
+    "iconPath": "assets/azure/azure-container-instance.svg",
+    "label": "Container Instance",
+    "category": 1
+  },
+  {
+    "key": "virtual-machine-scale-set",
+    "name": "vmss",
+    "iconPath": "assets/azure/virtual-machine-scale-set.svg",
+    "label": "VM Scale Set",
+    "category": 1
+  },
+  {
+    "key": "cosmos-db",
+    "name": "cosmos",
+    "iconPath": "assets/azure/cosmos-db.svg",
+    "label": "Azure Cosmos DB Account",
+    "category": 2
+  },
+  {
+    "key": "ai-search",
+    "name": "aisearch",
+    "iconPath": "assets/azure/ai-search.svg",
+    "label": "Azure AI Search",
+    "category": 2
+  },
+  {
+    "key": "data-factory",
+    "name": "adf",
+    "iconPath": "assets/azure/data-factory.svg",
+    "label": "Data Factory",
+    "category": 2
+  },
+  {
+    "key": "recovery-services-vault",
+    "name": "rsv",
+    "iconPath": "assets/azure/recovery-services-vault.svg",
+    "label": "Recovery Services Vault",
+    "category": 4
+  },
+  {
+    "key": "log-analytics-workspace",
+    "name": "law",
+    "iconPath": "assets/azure/log-analytics-workspace.svg",
+    "label": "Log Analytics Workspace",
+    "category": 4
+  },
+  {
+    "key": "logic-apps",
+    "name": "logic",
+    "iconPath": "assets/azure/logic-apps.svg",
+    "label": "Logic App",
+    "category": 4
+  },
+  {
+    "key": "static-web-app",
+    "name": "swa",
+    "iconPath": "assets/azure/static-web-app.svg",
+    "label": "Static Web App",
+    "category": 4
+  },
+  {
+    "key": "application-insights",
+    "name": "appi",
+    "iconPath": "assets/azure/application-insights.svg",
+    "label": "Application Insights",
+    "category": 4
+  },
+  {
+    "key": "app-configuration",
+    "name": "appconf",
+    "iconPath": "assets/azure/app-configuration.svg",
+    "label": "App Configuration",
+    "category": 4
+  },
+  {
+    "key": "signalr",
+    "name": "signalr",
+    "iconPath": "assets/azure/signalr.svg",
+    "label": "SignalR",
+    "category": 4
   }
 ]

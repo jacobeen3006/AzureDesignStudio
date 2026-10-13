@@ -34,5 +34,21 @@
         public const string AzureOpenAI = "azure-openai";
         public const string FabricCapacity = "fabric-capacity";
         public const string AvailabilitySet = "availability-set";
+        public const string LogicApps = "logic-apps";
+        public const string StaticWebApp = "static-web-app";
+        public const string ApplicationInsights = "application-insights";
+        public const string AppConfiguration = "app-configuration";
+        public const string CosmosDBAccount = "cosmos-db";
+        public const string AiSearch = "ai-search";
+        public const string DataFactory = "data-factory";
+        public const string SignalR = "signalr";
+        public const string AzureContainerInstance = "azure-container-instance";
+        public const string VirtualMachineScaleSet = "virtual-machine-scale-set";
+        public const string RecoveryServicesVault = "recovery-services-vault";
+        public const string LogAnalyticsWorkspace = "log-analytics-workspace";
+        public const string NatGateway = "nat-gateway";
+        public const string TrafficManagerProfile = "traffic-manager";
+        public const string ExpressRouteCircuit = "express-route";
+        public const string NetworkSecurityGroup = "network-security-group";
     }
 }

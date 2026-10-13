@@ -1,0 +1,33 @@
+@using AzureDesignStudio.Core.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@signalR" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
+    <NameAndLocation Node="@context" />
+    <FormItem Label="SKU">
+        <RadioGroup @bind-Value="@context.SkuName" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("Free_F1")">Free</Radio>
+            <Radio RadioButton Value="@("Standard_S1")">Standard</Radio>
+            <Radio RadioButton Value="@("Premium_P1")">Premium</Radio>
+        </RadioGroup>
+    </FormItem>
+    <FormItem Label="Capacity">
+        <InputNumber @bind-Value="@context.SkuCapacity" Min="1" Size="@InputSize.Small"></InputNumber>
+    </FormItem>
+    <FormItem Label="Service mode">
+        <RadioGroup @bind-Value="@context.ServiceMode" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("OnlineServer")">Online Server</Radio>
+            <Radio RadioButton Value="@("Serverless")">Serverless</Radio>
+            <Radio RadioButton Value="@("Default")">Default</Radio>
+        </RadioGroup>
+    </FormItem>
+</Form>
+
+@code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+    [CascadingParameter]
+    public Diagram Diagram { get; set; } = null!;
+
+    private SignalRModel signalR => (SignalRModel)Node;
+}

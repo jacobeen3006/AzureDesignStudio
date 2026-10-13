@@ -4,6 +4,16 @@ using AzureDesignStudio.Core.APIM;
 using AzureDesignStudio.Core.App;
 using AzureDesignStudio.Core.Cache;
 using AzureDesignStudio.Core.CognitiveServices;
+using AzureDesignStudio.Core.AppConfiguration;
+using AzureDesignStudio.Core.Insights;
+using AzureDesignStudio.Core.Logic;
+using AzureDesignStudio.Core.DataFactory;
+using AzureDesignStudio.Core.DocumentDB;
+using AzureDesignStudio.Core.Search;
+using AzureDesignStudio.Core.SignalRService;
+using AzureDesignStudio.Core.ContainerInstance;
+using AzureDesignStudio.Core.OperationalInsights;
+using AzureDesignStudio.Core.RecoveryServices;
 using AzureDesignStudio.Core.Web;
 using AzureDesignStudio.Core.Common;
 using AzureDesignStudio.Core.Components;
@@ -73,6 +83,22 @@ public static partial class DataModelFactory
             AdsConstants.AzureRedis => new AzureRedisModel(),
             AdsConstants.AzureOpenAI => new AzureOpenAIModel(),
             AdsConstants.FabricCapacity => new FabricCapacityModel(),
+            AdsConstants.LogicApps => new LogicAppsModel(),
+            AdsConstants.StaticWebApp => new StaticWebAppModel(),
+            AdsConstants.ApplicationInsights => new ApplicationInsightsModel(),
+            AdsConstants.AppConfiguration => new AppConfigurationModel(),
+            AdsConstants.CosmosDBAccount => new CosmosDBAccountModel(),
+            AdsConstants.AiSearch => new AiSearchModel(),
+            AdsConstants.DataFactory => new DataFactoryModel(),
+            AdsConstants.SignalR => new SignalRModel(),
+            AdsConstants.AzureContainerInstance => new ContainerInstanceModel(),
+            AdsConstants.VirtualMachineScaleSet => new VirtualMachineScaleSetModel(),
+            AdsConstants.RecoveryServicesVault => new RecoveryServicesVaultModel(),
+            AdsConstants.LogAnalyticsWorkspace => new LogAnalyticsWorkspaceModel(),
+            AdsConstants.NatGateway => new NatGatewayModel(),
+            AdsConstants.TrafficManagerProfile => new TrafficManagerProfileModel(),
+            AdsConstants.ExpressRouteCircuit => new ExpressRouteCircuitModel(),
+            AdsConstants.NetworkSecurityGroup => new NetworkSecurityGroupModel(),
             _ => throw new NotImplementedException(),
         };
 
@@ -144,6 +170,22 @@ public static partial class DataModelFactory
         [typeof(AzureRedisModel)] = AdsConstants.AzureRedis,
         [typeof(AzureOpenAIModel)] = AdsConstants.AzureOpenAI,
         [typeof(FabricCapacityModel)] = AdsConstants.FabricCapacity,
+        [typeof(LogicAppsModel)] = AdsConstants.LogicApps,
+        [typeof(StaticWebAppModel)] = AdsConstants.StaticWebApp,
+        [typeof(ApplicationInsightsModel)] = AdsConstants.ApplicationInsights,
+        [typeof(AppConfigurationModel)] = AdsConstants.AppConfiguration,
+        [typeof(CosmosDBAccountModel)] = AdsConstants.CosmosDBAccount,
+        [typeof(AiSearchModel)] = AdsConstants.AiSearch,
+        [typeof(DataFactoryModel)] = AdsConstants.DataFactory,
+        [typeof(SignalRModel)] = AdsConstants.SignalR,
+        [typeof(ContainerInstanceModel)] = AdsConstants.AzureContainerInstance,
+        [typeof(VirtualMachineScaleSetModel)] = AdsConstants.VirtualMachineScaleSet,
+        [typeof(RecoveryServicesVaultModel)] = AdsConstants.RecoveryServicesVault,
+        [typeof(LogAnalyticsWorkspaceModel)] = AdsConstants.LogAnalyticsWorkspace,
+        [typeof(NatGatewayModel)] = AdsConstants.NatGateway,
+        [typeof(TrafficManagerProfileModel)] = AdsConstants.TrafficManagerProfile,
+        [typeof(ExpressRouteCircuitModel)] = AdsConstants.ExpressRouteCircuit,
+        [typeof(NetworkSecurityGroupModel)] = AdsConstants.NetworkSecurityGroup,
     };
 
     /// <summary>Stencil key for a node: the key stored at creation, or the type-based fallback for legacy designs.</summary>

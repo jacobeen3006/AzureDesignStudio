@@ -1,0 +1,38 @@
+@using AzureDesignStudio.Core.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@expressRouteCircuit" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
+    <NameAndLocation Node="@context" />
+    <FormItem>
+        <RadioGroup @bind-Value="@context.ServiceProvider" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("Equinix")">Equinix</Radio>
+            <Radio RadioButton Value="@("Globalreach")">Global Reach</Radio>
+            <Radio RadioButton Value="@("BT")">BT</Radio>
+            <Radio RadioButton Value="@("Microsoft")">Microsoft</Radio>
+        </RadioGroup>
+    </FormItem>
+    <FormItem>
+        <RadioGroup @bind-Value="@context.SkuName" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("Standard50Mbps")">Standard 50 Mbps</Radio>
+            <Radio RadioButton Value="@("Standard100Mbps")">Standard 100 Mbps</Radio>
+            <Radio RadioButton Value="@("Premium100Mbps")">Premium 100 Mbps</Radio>
+            <Radio RadioButton Value="@("Premium200Mbps")">Premium 200 Mbps</Radio>
+        </RadioGroup>
+    </FormItem>
+    <FormItem>
+        <RadioGroup @bind-Value="@context.SkuTier" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("Standard")">Standard</Radio>
+            <Radio RadioButton Value="@("Premium")">Premium</Radio>
+        </RadioGroup>
+    </FormItem>
+</Form>
+
+@code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+    [CascadingParameter]
+    public Diagram Diagram { get; set; } = null!;
+
+    private ExpressRouteCircuitModel expressRouteCircuit => (ExpressRouteCircuitModel)Node;
+}

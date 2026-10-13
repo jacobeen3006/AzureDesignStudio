@@ -1,0 +1,29 @@
+@using AzureDesignStudio.Core.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@applicationInsights" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
+    <NameAndLocation Node="@context" />
+    <FormItem Label="Application type">
+        <RadioGroup @bind-Value="@context.ApplicationType" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("web")">Web</Radio>
+            <Radio RadioButton Value="@("other")">Other</Radio>
+        </RadioGroup>
+    </FormItem>
+    <FormItem Label="Ingestion mode">
+        <RadioGroup @bind-Value="@context.IngestionMode" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("ApplicationInsights")">Application Insights</Radio>
+            <Radio RadioButton Value="@("LogAnalytics")">Log Analytics</Radio>
+            <Radio RadioButton Value="@("LogAnalyticsAroundInstance")">Log Analytics around instance</Radio>
+        </RadioGroup>
+    </FormItem>
+</Form>
+
+@code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+    [CascadingParameter]
+    public Diagram Diagram { get; set; } = null!;
+
+    private ApplicationInsightsModel applicationInsights => (ApplicationInsightsModel)Node;
+}
