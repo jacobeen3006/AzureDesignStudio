@@ -45,7 +45,7 @@ Azure Design Studio won the **3rd Place Winner award** of Microsoft Global Hacka
 
 ---
 
-## 🏗️ Solution Structure (7 projects)
+## 🏗️ Solution Structure (8 projects)
 
 ```
 AzureDesignStudio.sln
@@ -55,10 +55,11 @@ AzureDesignStudio.sln
 ├── AzureDesignStudio.SharedModels     — Protobuf contracts (gRPC service definitions)
 ├── AzureDesignStudio.AzureResources   — CLS-compliant Azure resource type definitions
 ├── AzureDesignStudio.SourceGeneration — Roslyn source generator for DTO/mapping profiles
-└── AzureDesignStudio.Core.Tests       — xUnit unit tests
+├── AzureDesignStudio.Core.Tests       — xUnit unit tests
+└── AzureDesignStudio.Desktop          — .NET MAUI Windows app (native gRPC, MSAL broker auth, offline design cache)
 ```
 
-**Target**: .NET 8.0, Blazor WebAssembly
+**Target**: .NET 10 — Blazor WebAssembly, ASP.NET Core, .NET MAUI (Windows)
 
 ---
 
@@ -231,15 +232,31 @@ This eliminates manual DTO boilerplate when adding new Azure resource types.
 
 ### Build Locally
 ```bash
-# Full solution build
+# Full solution build (Windows; includes the MAUI desktop app)
 dotnet build src/AzureDesignStudio.sln
 
+# Server-side + WASM + tests only (builds on Linux; same set CI uses)
+dotnet build src/ci.slnf
+
 # Run unit tests
-dotnet test src/AzureDesignStudio.Core.Tests
+dotnet test src/AzureDesignStudio.Core.Tests --filter "Category!=LiveAzure"
 
 # Build Docker image
 docker build -f src/AzureDesignStudio.Server/Dockerfile .
+
+# Package the Windows MSIX installer
+dotnet publish src/AzureDesignStudio.Desktop -c Release -f net10.0-windows10.0.19041.0 `
+  -p:WindowsPackageType=MSIX -p:RuntimeIdentifier=win-x64 -p:WindowsAppSDKSelfContained=true
 ```
+
+### Test Tiers
+- **Offline (CI gate)** — `dotnet test src/AzureDesignStudio.Core.Tests --filter "Category!=LiveAzure"`:
+  ARM contract, validation, cost and editor-model tests; no network, no credentials. CI runs exactly this.
+- **Live Azure** — `dotnet test src/AzureDesignStudio.Core.Tests --filter "Category=LiveAzure"`:
+  deploys real template validations through `Microsoft.Resources`. Requires `az login` (or another
+  `DefaultAzureCredential` source), a subscription, and permissions to run deployments; the suite is
+  deployment-preflight only (no resources are left behind). Expect failures from environment quotas
+  (e.g. `SubscriptionIDOverQuotaForSku` on PIv2 cores) — those are subscription limits, not code bugs.
 
 ### Clone the Repository
 ```bash
@@ -257,7 +274,9 @@ cd AzureDesignStudio
 ## 📚 Documentation
 
 - [Architecture Overview](docs/architecture.md) — Detailed system architecture and design decisions
+- [Entra Setup & Desktop Build](docs/entra-setup.md) — App registration, auth configuration, MSIX packaging
 - [Development Guidelines](AGENTS.md) — Coding standards, conventions, and development workflow
+- [Changelog](CHANGELOG.md) — Release history
 
 ---
 

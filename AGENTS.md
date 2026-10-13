@@ -79,9 +79,11 @@ AzureDesignStudio/
 ## COMMANDS
 
 ```bash
-dotnet build src/AzureDesignStudio.sln       # Full solution build
-dotnet test src/AzureDesignStudio.Core.Tests  # Run unit tests
+dotnet build src/AzureDesignStudio.sln       # Full solution build (Windows)
+dotnet build src/ci.slnf                      # Everything except MAUI Desktop (Linux-CI set)
+dotnet test src/AzureDesignStudio.Core.Tests --filter "Category!=LiveAzure"  # Offline tests
 docker build -f src/AzureDesignStudio.Server/Dockerfile .  # Docker image
+dotnet publish src/AzureDesignStudio.Desktop -c Release -f net10.0-windows10.0.19041.0 -p:WindowsPackageType=MSIX -p:RuntimeIdentifier=win-x64 -p:WindowsAppSDKSelfContained=true  # MSIX package
 ```
 
 ## NOTES

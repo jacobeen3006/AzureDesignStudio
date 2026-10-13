@@ -1,0 +1,117 @@
+name: publish
+
+# Release artifacts: WASM site zip, server Docker image, Windows MSIX.
+# Triggered by version tags (v*) or manually. Docker push needs registry
+# secrets/vars; MSIX signing needs the PFX secrets, otherwise the package
+# is uploaded unsigned (dev installs require trusting the signing cert).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DESKTOP_TFM: net10.0-windows10.0.19041.0
+
+jobs:
+  wasm:
+    name: Publish WASM site
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    - name: Publish
+      run: dotnet publish src/AzureDesignStudio -c Release -o out/wasm --nologo
+    - name: Zip
+      run: cd out/wasm && zip -rq ../../ads-wasm.zip .
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ads-wasm
+        path: ads-wasm.zip
+
+  docker:
+    name: Build server image
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Docker build
+      run: docker build -f src/AzureDesignStudio.Server/Dockerfile -t ads-server:${{ github.ref_name }} .
+    - name: Push (requires registry vars and secrets)
+      if: vars.REGISTRY != ''
+      env:
+        REGISTRY: ${{ vars.REGISTRY }}
+        IMAGE: ${{ vars.REGISTRY }}/azure-design-studio/server:${{ github.ref_name }}
+      run: |
+        echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login "$REGISTRY" -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+        docker tag ads-server:${{ github.ref_name }} "$IMAGE"
+        docker push "$IMAGE"
+
+  desktop-msix:
+    name: Package Windows MSIX
+    runs-on: windows-latest
+    env:
+      MSIX_PFX: ${{ secrets.MSIX_PFX_BASE64 }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    - name: Install MAUI workload
+      run: dotnet workload install maui-windows
+    - name: Stamp package version from tag
+      if: startsWith(github.ref, 'refs/tags/v')
+      shell: pwsh
+      run: |
+        $v = "${{ github.ref_name }}".TrimStart('v')
+        $file = 'src/AzureDesignStudio.Desktop/Platforms/Windows/Package.appxmanifest'
+        (Get-Content $file -Raw) -replace 'Version="\d+\.\d+\.\d+\.\d+"', "Version=`"$v.0`"" | Set-Content $file
+    - name: Publish MSIX
+      run: >
+        dotnet publish src/AzureDesignStudio.Desktop -c Release -f ${{ env.DESKTOP_TFM }}
+        -p:WindowsPackageType=MSIX -p:RuntimeIdentifier=win-x64
+        -p:WindowsAppSDKSelfContained=true -p:SelfContained=true --nologo
+    - name: Locate package
+      id: find
+      shell: pwsh
+      run: |
+        $pkg = Get-ChildItem -Recurse -Path src/AzureDesignStudio.Desktop/bin -Include *.msix,*.appx -File |
+               Sort-Object LastWriteTime | Select-Object -Last 1
+        echo "path=$($pkg.FullName)" >> $env:GITHUB_OUTPUT
+    - name: Sign package
+      if: env.MSIX_PFX != ''
+      shell: pwsh
+      run: |
+        $pfx = Join-Path $env:RUNNER_TEMP 'sign.pfx'
+        [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String('${{ env.MSIX_PFX }}'))
+        $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\signtool.exe" |
+                     Sort-Object FullName -Descending | Select-Object -First 1).FullName
+        & $signtool sign /fd SHA256 /f $pfx /p '${{ secrets.MSIX_PFX_PASSWORD }}' /td SHA256 /tr http://timestamp.digicert.com '${{ steps.find.outputs.path }}'
+        Remove-Item $pfx
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ads-desktop-msix
+        path: ${{ steps.find.outputs.path }}
+
+  release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [wasm, docker, desktop-msix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+    - name: Create release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          artifacts/ads-wasm/ads-wasm.zip
+          artifacts/ads-desktop-msix/*.msix
+          artifacts/ads-desktop-msix/*.appx

@@ -1,0 +1,13 @@
+{
+  "solution": {
+    "projects": [
+      "AzureDesignStudio/AzureDesignStudio.csproj",
+      "AzureDesignStudio.Core/AzureDesignStudio.Core.csproj",
+      "AzureDesignStudio.Core.Tests/AzureDesignStudio.Core.Tests.csproj",
+      "AzureDesignStudio.Server/AzureDesignStudio.Server.csproj",
+      "AzureDesignStudio.SharedModels/AzureDesignStudio.SharedModels.csproj",
+      "AzureDesignStudio.SourceGeneration/AzureDesignStudio.SourceGeneration.csproj",
+      "AzureDesignStudio.AzureResources/AzureDesignStudio.AzureResources.csproj"
+    ]
+  }
+}
