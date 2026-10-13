@@ -12,21 +12,10 @@ public class AppGatewayModel : AzureNodeBase
 {
     public AppGatewayModel() : base()
     {
-        var leftPort = AddPort(PortAlignment.Left);
-        leftPort.OnLinkAdded += PortLinkAdded;
-        leftPort.OnLinkRemoved += PortLinkRemoved;
-
-        var topPort = AddPort(PortAlignment.Top);
-        topPort.OnLinkAdded += PortLinkAdded;
-        topPort.OnLinkRemoved += PortLinkRemoved;
-
-        var rightPort = AddPort(PortAlignment.Right);
-        rightPort.OnLinkAdded += PortLinkAdded;
-        rightPort.OnLinkRemoved += PortLinkRemoved;
-
-        var bottomPort = AddPort(PortAlignment.Bottom);
-        bottomPort.OnLinkAdded += PortLinkAdded;
-        bottomPort.OnLinkRemoved += PortLinkRemoved;
+        AddAzurePort(PortAlignment.Left);
+        AddAzurePort(PortAlignment.Top);
+        AddAzurePort(PortAlignment.Right);
+        AddAzurePort(PortAlignment.Bottom);
     }
 
     public override string ServiceName => "Application Gateway";
@@ -38,33 +27,26 @@ public class AppGatewayModel : AzureNodeBase
 
         return base.IsDrappable(overlappedGroup);
     }
-    private List<PublicIpModel>? _pips = null;
-    private void PortLinkAdded(PortModel port, BaseLinkModel link)
+    private List<PublicIpModel> Pips
     {
-        if (link.SourcePort?.Parent is PublicIpModel pip)
+        get
         {
-            if (_pips == null)
-                _pips = new List<PublicIpModel>();
-
-            if (!_pips.Exists(p => p.ResourceId == pip.ResourceId))
+            var pips = new List<PublicIpModel>();
+            foreach (var port in Ports)
             {
-                _pips.Add(pip);
-                Refresh();
+                foreach (var link in port.Links)
+                {
+                    if (link.Source.Model is PortModel sp && sp.Parent is PublicIpModel pip
+                        && !pips.Exists(p => p.ResourceId == pip.ResourceId))
+                        pips.Add(pip);
+                }
             }
-        }
-    }
-    private void PortLinkRemoved(PortModel port, BaseLinkModel link)
-    {
-        if (link.SourcePort?.Parent is PublicIpModel pip
-            && (_pips?.Exists(p => p.ResourceId == pip.ResourceId) ?? false))
-        {
-            _pips.Remove(pip);
-            Refresh();
+            return pips;
         }
     }
     public override bool IsValid
     {
-        get => _pips?.Count > 0;
+        get => Pips.Count > 0;
     }
     public override bool DataFormNoPadding => true;
 

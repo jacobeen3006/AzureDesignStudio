@@ -6,6 +6,9 @@
 	<ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>a237ae84-fe59-44e2-8570-ed2f536ab4ed</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    <!-- Mirrors the client: generated service-worker assets must not get
+         precompressed endpoints (broken {0}-templated compressed copies). -->
+    <CompressionExcludePatterns>$(CompressionExcludePatterns);**/service-worker*.js;</CompressionExcludePatterns>
   </PropertyGroup>
 	
   <ItemGroup>

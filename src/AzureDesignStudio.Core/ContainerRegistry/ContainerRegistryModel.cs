@@ -16,10 +16,10 @@ namespace AzureDesignStudio.Core.ContainerRegistry
     {
         public ContainerRegistryModel() : base()
         {
-            AddPort(PortAlignment.Left);
-            AddPort(PortAlignment.Top);
-            AddPort(PortAlignment.Right);
-            AddPort(PortAlignment.Bottom);
+            AddAzurePort(PortAlignment.Left);
+            AddAzurePort(PortAlignment.Top);
+            AddAzurePort(PortAlignment.Right);
+            AddAzurePort(PortAlignment.Bottom);
         }
         public override string ServiceName => "Container Registry";
         public override Type? DataFormType => typeof(ContainerRegistryForm);

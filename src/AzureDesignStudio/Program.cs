@@ -14,8 +14,17 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 
 builder.Services.AddHttpClient("AzureDesignStudio.Root",
     client => client.BaseAddress = new Uri(builder.HostEnvironment.BaseAddress));
-builder.Services.AddHttpClient("AzureDesignStudio.ResourceAccess", 
-    client => client.BaseAddress = new Uri(builder.Configuration.GetValue<string>("ResourceRoot")!));
+// ResourceRoot may be a root-relative path (dev: "/"); resolve it against the host base
+// because new Uri("/") on WASM parses as file:/// and breaks HttpClient request URIs.
+var resourceRoot = builder.Configuration.GetValue<string>("ResourceRoot")!;
+var resourceBase = new Uri(resourceRoot, UriKind.RelativeOrAbsolute);
+if (!resourceBase.IsAbsoluteUri || resourceBase.Scheme == Uri.UriSchemeFile)
+{
+    var hostAuthority = new Uri(builder.HostEnvironment.BaseAddress).GetLeftPart(UriPartial.Authority);
+    resourceBase = new Uri(resourceRoot.StartsWith('/') ? hostAuthority + resourceRoot : hostAuthority + "/" + resourceRoot);
+}
+builder.Services.AddHttpClient("AzureDesignStudio.ResourceAccess",
+    client => client.BaseAddress = resourceBase);
 // Microsoft Entra ID Authentication (work + personal accounts)
 builder.Services.AddHttpClient("AzureDesignStudio.ServerAPI", client => client.BaseAddress = new Uri(builder.HostEnvironment.BaseAddress))
     .AddHttpMessageHandler<BaseAddressAuthorizationMessageHandler>();

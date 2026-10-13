@@ -1,4 +1,4 @@
-﻿.ads-azure-node {
+.ads-azure-node {
     /*display: table-cell;*/
     width: 81px;
     height: 81px;
@@ -34,52 +34,52 @@
 /*
  *   Port style
 */
-::deep .port.left.ads-port,
-::deep .port.top.ads-port,
-::deep .port.right.ads-port,
-::deep .port.bottom.ads-port {
+::deep .diagram-port.left.ads-port,
+::deep .diagram-port.top.ads-port,
+::deep .diagram-port.right.ads-port,
+::deep .diagram-port.bottom.ads-port {
     position: absolute;
     background-color: transparent;
     border-radius: 5px;
 }
 
-    ::deep .port.left.ads-port:hover,
-    ::deep .port.top.ads-port:hover,
-    ::deep .port.right.ads-port:hover,
-    ::deep .port.bottom.ads-port:hover {
+    ::deep .diagram-port.left.ads-port:hover,
+    ::deep .diagram-port.top.ads-port:hover,
+    ::deep .diagram-port.right.ads-port:hover,
+    ::deep .diagram-port.bottom.ads-port:hover {
         background-color: #cccccc;
         opacity: 0.5;
     }
 
-::deep .port.top.ads-port,
-::deep .port.bottom.ads-port {
+::deep .diagram-port.top.ads-port,
+::deep .diagram-port.bottom.ads-port {
     width: 60%;
     height: 10px;
     left: 50%;
     transform: translate(-50%, 0);
 }
 
-::deep .port.top.ads-port {
+::deep .diagram-port.top.ads-port {
     top: -5px;
 }
 
-::deep .port.bottom.ads-port {
+::deep .diagram-port.bottom.ads-port {
     bottom: -5px;
 }
 
-::deep .port.left.ads-port,
-::deep .port.right.ads-port {
+::deep .diagram-port.left.ads-port,
+::deep .diagram-port.right.ads-port {
     height: 60%;
     width: 10px;
     top: 50%;
     transform: translate(0, -50%);
 }
 
-::deep .port.left.ads-port {
+::deep .diagram-port.left.ads-port {
     left: -5px;
 }
 
-::deep .port.right.ads-port {
+::deep .diagram-port.right.ads-port {
     right: -5px;
 }
 /*

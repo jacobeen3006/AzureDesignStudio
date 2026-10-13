@@ -12,7 +12,7 @@ Azure Design Studio is a **Blazor WebAssembly** SPA for visually designing Azure
 
 ---
 
-## Solution Structure (8 projects)
+## Solution Structure (7 projects)
 
 ```
 AzureDesignStudio.sln
@@ -22,8 +22,7 @@ AzureDesignStudio.sln
 ├── AzureDesignStudio.SharedModels     — Protobuf contracts (gRPC service definitions)
 ├── AzureDesignStudio.AzureResources   — CLS-compliant Azure resource type definitions
 ├── AzureDesignStudio.SourceGeneration — Roslyn source generator for DTO/mapping profiles
-├── AzureDesignStudio.Core.Tests       — xUnit unit tests
-└── Blazor.Diagrams/                   — Git submodule (forked Blazor.Diagrams library)
+└── AzureDesignStudio.Core.Tests       — xUnit unit tests
 ```
 
 **Target**: .NET 7.0, Blazor WebAssembly
@@ -36,7 +35,7 @@ AzureDesignStudio.sln
 |---|---|
 | **UI framework** | Blazor WebAssembly + .NET 7 |
 | **UI components** | Ant Design Blazor 0.14.4 |
-| **Diagramming** | Blazor.Diagrams (custom fork — submodule) |
+| **Diagramming** | Z.Blazor.Diagrams 3.0.4.1 (NuGet) |
 | **Auth** | Azure AD B2C (MSAL via `Microsoft.Authentication.WebAssembly.Msal`) |
 | **Backend API** | ASP.NET Core gRPC with gRPC-Web (browser-compatible) |
 | **ORM** | Entity Framework Core (InMemory dev / SQL Server prod) |

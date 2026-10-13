@@ -70,12 +70,12 @@
                 Name = "Subnet1"
             });
 
-        Diagram.AddGroup(subnet);
+        Diagram.Groups.Add(subnet);
     }
 
     private void HandleRemoveSubnet(SubnetModel subnet)
     {
         vnet.RemoveChild(subnet);
-        Diagram.RemoveGroup(subnet);
+        Diagram.Groups.Remove(subnet);
     }
 }

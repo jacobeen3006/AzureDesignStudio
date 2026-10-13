@@ -18,8 +18,6 @@ COPY ["AzureDesignStudio.SharedModels/AzureDesignStudio.SharedModels.csproj", "A
 COPY ["AzureDesignStudio/AzureDesignStudio.csproj", "AzureDesignStudio/"]
 COPY ["AzureDesignStudio.Core/AzureDesignStudio.Core.csproj", "AzureDesignStudio.Core/"]
 COPY ["AzureDesignStudio.AzureResources/AzureDesignStudio.AzureResources.csproj", "AzureDesignStudio.AzureResources/"]
-COPY ["Blazor.Diagrams/src/Blazor.Diagrams.Core/Blazor.Diagrams.Core.csproj", "Blazor.Diagrams/src/Blazor.Diagrams.Core/"]
-COPY ["Blazor.Diagrams/src/Blazor.Diagrams/Blazor.Diagrams.csproj", "Blazor.Diagrams/src/Blazor.Diagrams/"]
 COPY ["AzureDesignStudio.SourceGeneration/AzureDesignStudio.SourceGeneration.csproj", "AzureDesignStudio.SourceGeneration/"]
 RUN dotnet restore "AzureDesignStudio.Server/AzureDesignStudio.Server.csproj"
 COPY . .

@@ -17,10 +17,10 @@ namespace AzureDesignStudio.Core.Web
     {
         public WebAppModel() : base()
         {
-            AddPort(PortAlignment.Left);
-            AddPort(PortAlignment.Top);
-            AddPort(PortAlignment.Right);
-            AddPort(PortAlignment.Bottom);
+            AddAzurePort(PortAlignment.Left);
+            AddAzurePort(PortAlignment.Top);
+            AddAzurePort(PortAlignment.Right);
+            AddAzurePort(PortAlignment.Bottom);
         }
         public override (bool result, string message) IsDrappable(GroupModel overlappedGroup)
         {

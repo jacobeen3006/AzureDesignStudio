@@ -1,6 +1,7 @@
 ﻿using AntDesign;
 using AutoMapper;
 using AzureDesignStudio.AzureResources.Base;
+using AzureDesignStudio.Core.Common;
 using AzureDesignStudio.Core.DTO;
 using Blazor.Diagrams.Core.Geometry;
 using Blazor.Diagrams.Core.Models;
@@ -18,10 +19,12 @@ namespace AzureDesignStudio.Core.Models
     {
         public AzureGroupBase() : base(Array.Empty<NodeModel>())
         {
+            ControlledSize = true;
             Size = new Size(141, 141);
             if (GroupStyle != null)
                 BuildCSSStyle();
         }
+        protected PortModel AddAzurePort(PortAlignment alignment) => AddPort(new AzurePort(this, alignment));
         public string ImagePath { get; set; } = string.Empty;
 
         #region IAzureNode

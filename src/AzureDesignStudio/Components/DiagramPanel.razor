@@ -11,7 +11,7 @@
 <div class="ads-diagram-wrapper" ondragover="event.preventDefault();" @ondragover:preventDefault @ondrop="HandleDrop">
     <CascadingValue Value="@diagram">
         <div class="ads-diagram-container">
-            <DiagramCanvas Id="ads-diagram-canvas"></DiagramCanvas>
+            <DiagramCanvas Class="ads-diagram-canvas"></DiagramCanvas>
         </div>
     </CascadingValue>
     <div class="ads-context-menu @(showCtxMenu ? "ads-context-menu-active" : "")">
@@ -44,7 +44,7 @@
             },
             OnOk = (e) =>
             {
-                diagram.DeleteSelectedModel();
+                diagram.DeleteSelectedModels();
                 RefreshDiagram();
                 return Task.CompletedTask;
             },

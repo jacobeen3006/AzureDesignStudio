@@ -89,8 +89,8 @@ namespace AzureDesignStudio.Core.Tests
             var sqlDatabase = new SqlDatabaseModel()
             {
                 Name = "azsqldb1",
-                Group = sqlServer,
             };
+            sqlServer.AddChild(sqlDatabase);
 
             armTemplate.AddResource(sqlDatabase.GetArmResources());
 

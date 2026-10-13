@@ -16,10 +16,10 @@ namespace AzureDesignStudio.Core.SQL
     {
         public SqlDatabaseModel() : base()
         {
-            AddPort(PortAlignment.Left);
-            AddPort(PortAlignment.Top);
-            AddPort(PortAlignment.Right);
-            AddPort(PortAlignment.Bottom);
+            AddAzurePort(PortAlignment.Left);
+            AddAzurePort(PortAlignment.Top);
+            AddAzurePort(PortAlignment.Right);
+            AddAzurePort(PortAlignment.Bottom);
         }
         public override string ServiceName => "Azure SQL Database";
         public override Type? DataFormType => typeof(SqlDatabaseForm);

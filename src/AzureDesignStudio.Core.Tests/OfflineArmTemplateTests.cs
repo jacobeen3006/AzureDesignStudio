@@ -101,7 +101,8 @@ namespace AzureDesignStudio.Core.Tests
             var template = new ArmTemplate();
             var server = new SqlServerModel { Name = "ads-sql" };
             template.AddResource(server.GetArmResources());
-            var db = new SqlDatabaseModel { Name = "ads-db", Group = server };
+            var db = new SqlDatabaseModel { Name = "ads-db" };
+            server.AddChild(db);
             template.AddResource(db.GetArmResources());
 
             using var doc = Generate(template);
@@ -120,7 +121,9 @@ namespace AzureDesignStudio.Core.Tests
             template.AddResource(plan.GetArmResources());
             template.AddResource(new PublicIpModel { Name = "ads-ip" }.GetArmResources());
             template.AddResource(new VirtualMachineModel { Name = "ads-vm" }.GetArmResources());
-            template.AddResource(new WebAppModel { Name = "ads-web", RuntimeStack = "NODE|14-lts", Group = plan }.GetArmResources());
+            var web = new WebAppModel { Name = "ads-web", RuntimeStack = "NODE|14-lts" };
+            plan.AddChild(web);
+            template.AddResource(web.GetArmResources());
 
             using var doc = Generate(template);
             var types = ResourceTypes(doc.RootElement);
@@ -148,7 +151,9 @@ namespace AzureDesignStudio.Core.Tests
             template.AddResource(vnet.GetArmResources());
             var server = new SqlServerModel { Name = "ads-sql" };
             template.AddResource(server.GetArmResources());
-            template.AddResource(new SqlDatabaseModel { Name = "ads-db", Group = server }.GetArmResources());
+            var db = new SqlDatabaseModel { Name = "ads-db" };
+            server.AddChild(db);
+            template.AddResource(db.GetArmResources());
 
             using var doc = Generate(template);
             foreach (var resource in doc.RootElement.GetProperty("resources").EnumerateArray())

@@ -347,7 +347,7 @@ namespace AzureDesignStudio.Components
             // Clear the diagram before loading a new one.
             adsContext.Diagram.Nodes.Clear();
             adsContext.Diagram.Links.Clear();
-            adsContext.Diagram.RemoveAllGroups();
+            adsContext.Diagram.Groups.Clear();
 
             messageService.Loading("Loading the design ...", 0);
 

@@ -15,7 +15,16 @@
         if (!string.IsNullOrEmpty(IconPath))
         {
             var httpClient = clientFactory.CreateClient("AzureDesignStudio.ResourceAccess");
-            var svgMarkup = await httpClient.GetStringAsync(IconPath);
+            string? svgMarkup;
+            try
+            {
+                svgMarkup = await httpClient.GetStringAsync(IconPath);
+            }
+            catch (HttpRequestException)
+            {
+                // Decorative icon unavailable (e.g. local run without CDN assets); render empty.
+                return;
+            }
             component = builder =>
             {
                 builder.AddMarkupContent(0, svgMarkup);

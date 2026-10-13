@@ -68,10 +68,10 @@ namespace AzureDesignStudio.Core.Network
             {
                 foreach (var link in port.Links)
                 {
-                    if (link.TargetPort?.Parent == node)
+                    if (link.Target.Model is PortModel tp && tp.Parent == node)
                         continue;
 
-                    if (link.TargetPort?.Parent is SqlDatabaseModel sqlDb
+                    if (link.Target.Model is PortModel sqlTp && sqlTp.Parent is SqlDatabaseModel sqlDb
                         && serviceEndpoints.FirstOrDefault(d => d.Service == "Microsoft.Sql") is null)
                     {
                         serviceEndpoints.Add(new()
@@ -80,7 +80,7 @@ namespace AzureDesignStudio.Core.Network
                                 Locations = new List<string>{ sqlDb.Location }
                             });
                     }
-                    if (link.TargetPort?.Parent is WebAppModel webapp
+                    if (link.Target.Model is PortModel webTp && webTp.Parent is WebAppModel webapp
                         && serviceEndpoints.FirstOrDefault(d => d.Service == "Microsoft.Web") is null)
                     {
                         serviceEndpoints.Add(new()

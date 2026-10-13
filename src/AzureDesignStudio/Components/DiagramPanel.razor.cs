@@ -2,7 +2,10 @@
 using AzureDesignStudio.Core;
 using AzureDesignStudio.Core.DTO;
 using AzureDesignStudio.Core.Models;
+using AzureDesignStudio.Services;
 using Blazor.Diagrams.Core;
+using Blazor.Diagrams.Core.Events;
+using PointerEventArgs = Blazor.Diagrams.Core.Events.PointerEventArgs;
 using Blazor.Diagrams.Core.Models;
 using Blazor.Diagrams.Core.Models.Base;
 using Microsoft.AspNetCore.Components;
@@ -13,7 +16,7 @@ namespace AzureDesignStudio.Components
 {
     public partial class DiagramPanel : IDisposable
     {
-        private Diagram diagram = null!;
+        private AdsDiagram diagram = null!;
         protected override void OnInitialized()
         {
             base.OnInitialized();
@@ -22,28 +25,28 @@ namespace AzureDesignStudio.Components
 
             DataModelFactory.RegisterAzureModels(diagram);
 
-            diagram.MouseDown += HandleMouseDown;
-            diagram.MouseUp += HandleMouseUp;
+            diagram.PointerDown += HandlePointerDown;
+            diagram.PointerUp += HandlePointerUp;
             diagram.SelectionChanged += HandleSelectionChanged;
         }
 
         public void Dispose()
         {
-            diagram.MouseDown -= HandleMouseDown;
-            diagram.MouseUp -= HandleMouseUp;
+            diagram.PointerDown -= HandlePointerDown;
+            diagram.PointerUp -= HandlePointerUp;
             diagram.SelectionChanged -= HandleSelectionChanged;
         }
 
         #region Drag & Drop
         double clientX, clientY = 0;
 
-        private void HandleMouseDown(Model node, MouseEventArgs e)
+        private void HandlePointerDown(Model? node, PointerEventArgs e)
         {
             clientX = e.ClientX;
             clientY = e.ClientY;
         }
 
-        private void HandleMouseUp(Model node, MouseEventArgs e)
+        private void HandlePointerUp(Model? node, PointerEventArgs e)
         {
             if ((e.ClientX != clientX || e.ClientY != clientY)
                // && node is not GroupModel
@@ -107,7 +110,7 @@ namespace AzureDesignStudio.Components
                     {
                         if (node is GroupModel g)
                         {
-                            diagram.AddGroup(g);
+                            diagram.Groups.Add(g);
                         }
                         else
                         {
@@ -133,7 +136,7 @@ namespace AzureDesignStudio.Components
             // Clear the diagram before loading a new one.
             adsContext.Diagram.Nodes.Clear();
             adsContext.Diagram.Links.Clear();
-            adsContext.Diagram.RemoveAllGroups();
+            adsContext.Diagram.Groups.Clear();
 
             messageService.Loading("Loading the design ...", 0);
             try

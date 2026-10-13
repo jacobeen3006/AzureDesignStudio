@@ -74,8 +74,6 @@ else
 
 app.UseForwardedHeaders();
 app.UseHttpsRedirection();
-app.UseBlazorFrameworkFiles();
-app.UseStaticFiles();
 
 app.UseRouting();
 
@@ -94,6 +92,7 @@ app.MapGrpcService<RetailPriceService>().EnableGrpcWeb();
     }
 #endif
 
+app.MapStaticAssets();
 app.MapRazorPages();
 app.MapFallbackToFile("index.html");
 

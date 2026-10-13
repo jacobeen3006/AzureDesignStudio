@@ -72,11 +72,13 @@
 
 **Goal:** modern editor; submodule dies.
 
-- 3.1 Port to `ModelingEvolution.Blazor.Diagrams` 3.0.6 NuGet (re-check org has shipped .NET 10-compatible release; if yes prefer org). Remove submodule; migrate 37 consumer files (`Core.Models`/`Core`/`Geometry` surface); re-implement group behavior on 3.x (upstream deleted `GroupingBehavior` — rebuild drag-into-group/z-order from the +205/−46 fork delta).
+- 3.1 Port to `Z.Blazor.Diagrams` 3.0.4.1 NuGet (org package; verified .NET 10 static assets under `_content/Z.Blazor.Diagrams`). Remove submodule; migrate 37 consumer files (`Core.Models`/`Core`/`Geometry` surface); re-implement group behavior on 3.x (upstream deleted `GroupingBehavior` — rebuild drag-into-group/z-order from the +205/−46 fork delta).
 - 3.2 Undo/redo: command-stack behavior over diagram events (library lacks it in 2.x and 3.x).
 - 3.3 Minimap (3.x Navigator widget), keyboard shortcuts, copy/paste, alignment guides.
 
 **Effort:** 5-7 days. **Risk:** group UX parity; ME fork bus factor — fallback is rebase on org 3.x (same port cost, known).
+
+**Status (2026-10-13): 3.1 complete.** Submodule + net10 patch removed; `Z.Blazor.Diagrams` 3.0.4.1 in both csproj. Fork-only APIs live in `AdsDiagram` (DeleteSelectedModels, print capture + A4 fit, shortcut overrides) and `AzurePort`/`VirtualNetworkPort` (`CanAttachTo` bidirectional rules: source-only check in 3.x, vnet-peering pair rules). Group drag-into-group/z-order verified in headless browser (create, nest, links incl. blue peering, duplicate/self/cross-type rejects, edit form, delete, export-image preview, view-state restore).
 
 ## Phase 4 — Desktop (MAUI Blazor Hybrid)
 

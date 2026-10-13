@@ -1,5 +1,6 @@
 ﻿using AutoMapper;
 using AzureDesignStudio.AzureResources.Base;
+using AzureDesignStudio.Core.Common;
 using AzureDesignStudio.Core.DTO;
 using Blazor.Diagrams.Core.Geometry;
 using Blazor.Diagrams.Core.Models;
@@ -10,8 +11,10 @@ namespace AzureDesignStudio.Core.Models
     {
         public AzureNodeBase() : base()
         {
+            ControlledSize = true;
             Size = new Size(81, 81);
         }
+        protected PortModel AddAzurePort(PortAlignment alignment) => AddPort(new AzurePort(this, alignment));
         public string ImagePath { get; set; } = string.Empty;
         /// <summary>Stencil key this node was created from (empty for legacy designs; resolved via DataModelFactory fallback).</summary>
         public string StencilKey { get; set; } = string.Empty;

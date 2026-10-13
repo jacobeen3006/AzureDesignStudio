@@ -15,10 +15,10 @@ namespace AzureDesignStudio.Core.Fabric
     {
         public FabricCapacityModel() : base()
         {
-            AddPort(PortAlignment.Left);
-            AddPort(PortAlignment.Top);
-            AddPort(PortAlignment.Right);
-            AddPort(PortAlignment.Bottom);
+            AddAzurePort(PortAlignment.Left);
+            AddAzurePort(PortAlignment.Top);
+            AddAzurePort(PortAlignment.Right);
+            AddAzurePort(PortAlignment.Bottom);
         }
 
         public override string ServiceName => "Fabric Capacity";

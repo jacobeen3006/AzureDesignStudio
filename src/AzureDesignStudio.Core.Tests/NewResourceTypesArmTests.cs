@@ -45,9 +45,9 @@ namespace AzureDesignStudio.Core.Tests
             Assert.NotNull(model);
 
             if (model is ContainerAppModel ca)
-                ca.Group = new ContainerAppsEnvironmentModel { Name = "ads-env" };
+                new ContainerAppsEnvironmentModel { Name = "ads-env" }.AddChild(ca);
             if (model is ContainerAppsJobModel job)
-                job.Group = new ContainerAppsEnvironmentModel { Name = "ads-env" };
+                new ContainerAppsEnvironmentModel { Name = "ads-env" }.AddChild(job);
 
             var template = new ArmTemplate();
             template.AddResource(((IAzureResource)model).GetArmResources());
@@ -64,7 +64,8 @@ namespace AzureDesignStudio.Core.Tests
         public void ContainerAppLinksToEnvironment()
         {
             var env = new ContainerAppsEnvironmentModel { Name = "ads-env" };
-            var ca = new ContainerAppModel { Name = "ads-ca", Group = env };
+            var ca = new ContainerAppModel { Name = "ads-ca" };
+            env.AddChild(ca);
 
             var template = new ArmTemplate();
             template.AddResource(env.GetArmResources());

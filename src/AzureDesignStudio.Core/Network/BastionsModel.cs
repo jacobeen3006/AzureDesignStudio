@@ -14,10 +14,10 @@ namespace AzureDesignStudio.Core.Network
     {
         public BastionsModel() : base()
         {
-            AddPort(PortAlignment.Left);
-            AddPort(PortAlignment.Top);
-            AddPort(PortAlignment.Right);
-            AddPort(PortAlignment.Bottom);
+            AddAzurePort(PortAlignment.Left);
+            AddAzurePort(PortAlignment.Top);
+            AddAzurePort(PortAlignment.Right);
+            AddAzurePort(PortAlignment.Bottom);
         }
         public override string ServiceName => "Azure Bastion";
         public override Type? DataFormType => typeof(BastionsForm);
@@ -59,7 +59,8 @@ namespace AzureDesignStudio.Core.Network
             PublicIpModel? publicIp = null;
             foreach (var port in Ports)
             {
-                publicIp = port.Links?.FirstOrDefault(l => l.SourcePort?.Parent is PublicIpModel)?.SourcePort?.Parent as PublicIpModel;
+                var pipLink = port.Links.FirstOrDefault(l => l.Source.Model is PortModel { Parent: PublicIpModel });
+                publicIp = pipLink?.Source.Model is PortModel sp ? (PublicIpModel)sp.Parent : null;
                 if (publicIp != null)
                     break;
             }

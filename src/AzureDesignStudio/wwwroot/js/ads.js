@@ -1,5 +1,5 @@
 ﻿async function diagram2PicAsync(type, width, height) {
-    var diagram = document.getElementById("ads-diagram-canvas");
+    var diagram = document.querySelector(".diagram-canvas");
     var dataUrl = "";
     if (type === "png") {
         dataUrl = await domtoimage.toPng(diagram, {

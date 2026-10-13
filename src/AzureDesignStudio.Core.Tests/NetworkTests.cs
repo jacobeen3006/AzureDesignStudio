@@ -1,5 +1,7 @@
 ﻿using AzureDesignStudio.Core.Models;
 using AzureDesignStudio.Core.Network;
+using Blazor.Diagrams;
+using Blazor.Diagrams.Core.Anchors;
 using Blazor.Diagrams.Core.Models;
 using System.Threading.Tasks;
 using Xunit;
@@ -81,17 +83,16 @@ namespace AzureDesignStudio.Core.Tests
             {
                 Name = "bastion-pip",
             };
-            var link = new LinkModel(pip.Ports[0]);
-            link.SetSourcePort(pip.Ports[1]);
-            link.SetTargetPort(bastion.Ports[0]);
+            var diagram = new BlazorDiagram();
+            var link = new LinkModel(new SinglePortAnchor(pip.Ports[1]), new SinglePortAnchor(bastion.Ports[0]));
+            diagram.Links.Add(link);
 
             var fwpip = new PublicIpModel()
             {
                 Name = "firewall-pip",
             };
-            var fwlink = new LinkModel(fwpip.Ports[0]);
-            fwlink.SetSourcePort(fwpip.Ports[1]);
-            fwlink.SetTargetPort(firewall.Ports[0]);
+            var fwlink = new LinkModel(new SinglePortAnchor(fwpip.Ports[1]), new SinglePortAnchor(firewall.Ports[0]));
+            diagram.Links.Add(fwlink);
 
             var armTemplate = new ArmTemplate();
             armTemplate.AddResource(vnet.GetArmResources());

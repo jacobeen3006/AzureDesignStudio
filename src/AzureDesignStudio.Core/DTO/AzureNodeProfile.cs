@@ -1,7 +1,8 @@
 ﻿using AutoMapper;
 using AzureDesignStudio.Core.Network;
+using Blazor.Diagrams.Core.Anchors;
+using Blazor.Diagrams.Core.Geometry;
 using Blazor.Diagrams.Core.Models;
-
 namespace AzureDesignStudio.Core.DTO
 {
     public partial class AzureNodeProfile : Profile
@@ -10,19 +11,18 @@ namespace AzureDesignStudio.Core.DTO
         {
             CreateMap<TSource, TTarget>()
                 .ForMember(d => d.GroupId, a => a.MapFrom(s => s.Group != null ? s.Group.Id : string.Empty))
+                .ForMember(d => d.Size, a => a.MapFrom(s => s.Size ?? new Size(81, 81)))
                 .AfterMap((s, d) => d.TypeKey = typeKey)
                 .ReverseMap()
-                .AfterMap((s, d) => d.Group = null);
+                .ForMember(d => d.Group, a => a.Ignore());
         }
         public AzureNodeProfile()
         {
             CreateMap<LinkModel, LinkModelDto>()
-                .ForMember(d => d.SourcePortParentId, a => a.MapFrom(s => s.SourcePort != null ? s.SourcePort.Parent.Id : string.Empty))
-                .ForMember(d => d.SourcePortAlignment, a => a.MapFrom(s => s.SourcePort != null ? s.SourcePort.Alignment : PortAlignment.Bottom))
-                .ForMember(d => d.TargetPortParentId, a => a.MapFrom(s => s.TargetPort != null ? s.TargetPort.Parent.Id : string.Empty))
-                .ForMember(d => d.TargetPortAlignment, a => a.MapFrom(s => s.TargetPort != null ? s.TargetPort.Alignment : PortAlignment.Bottom))
-                .ReverseMap();
-
+                .ForMember(d => d.SourcePortParentId, a => a.MapFrom(s => GetAnchorParentId(s.Source)))
+                .ForMember(d => d.SourcePortAlignment, a => a.MapFrom(s => GetAnchorAlignment(s.Source)))
+                .ForMember(d => d.TargetPortParentId, a => a.MapFrom(s => GetAnchorParentId(s.Target)))
+                .ForMember(d => d.TargetPortAlignment, a => a.MapFrom(s => GetAnchorAlignment(s.Target)));
 
             CreateMap<FirewallPolicyModel, FirewallPolicyModelDto>()
                 .ReverseMap();
@@ -30,5 +30,7 @@ namespace AzureDesignStudio.Core.DTO
             CreateAzureNodeMaps();
         }
         private partial void CreateAzureNodeMaps();
+        private static string GetAnchorParentId(Anchor anchor) => anchor.Model is NodeModel n ? n.Id : string.Empty;
+        private static PortAlignment GetAnchorAlignment(Anchor anchor) => (anchor as SinglePortAnchor)?.Port.Alignment ?? PortAlignment.Bottom;
     }
 }

@@ -17,7 +17,9 @@ using AzureDesignStudio.Core.Messaging;
 using AzureDesignStudio.Core.Network;
 using AzureDesignStudio.Core.SQL;
 using AzureDesignStudio.Core.Storage;
+using Blazor.Diagrams;
 using Blazor.Diagrams.Core;
+using Blazor.Diagrams.Core.Anchors;
 using Blazor.Diagrams.Core.Models;
 using Blazor.Diagrams.Core.Models.Base;
 using System.Text.Json;
@@ -26,16 +28,14 @@ namespace AzureDesignStudio.Core;
 
 public static partial class DataModelFactory
 {
-    public static void RegisterAzureModels(Diagram diagram)
+    public static void RegisterAzureModels(BlazorDiagram diagram)
     {
-        // AzureNodeComponent is the default componet.
-        //diagram.RegisterModelComponent<ResourceGroupModel, AzureGroupComponent>();
-        diagram.RegisterModelComponent<VirtualNetworkModel, AzureGroupComponent>();
-        diagram.RegisterModelComponent<SubnetModel, AzureGroupComponent>();
-        diagram.RegisterModelComponent<SqlServerModel, AzureGroupComponent>();
-        diagram.RegisterModelComponent<AppServicePlanModel, AzureGroupComponent>();
-        diagram.RegisterModelComponent<ContainerAppsEnvironmentModel, AzureGroupComponent>();
-        diagram.RegisterModelComponent<AvailabilitySetModel, AzureGroupComponent>();
+        diagram.RegisterComponent<VirtualNetworkModel, AzureGroupComponent>();
+        diagram.RegisterComponent<SubnetModel, AzureGroupComponent>();
+        diagram.RegisterComponent<SqlServerModel, AzureGroupComponent>();
+        diagram.RegisterComponent<AppServicePlanModel, AzureGroupComponent>();
+        diagram.RegisterComponent<ContainerAppsEnvironmentModel, AzureGroupComponent>();
+        diagram.RegisterComponent<AvailabilitySetModel, AzureGroupComponent>();
     }
     public static NodeModel CreateNodeModelFromKey(string key, string name, string imagePath)
     {
@@ -90,24 +90,25 @@ public static partial class DataModelFactory
 
         return result;
     }
-    public static BaseLinkModel LinkModelFactory(Diagram diagram, PortModel sourcePort)
+    public static BaseLinkModel? LinkModelFactory(Diagram diagram, ILinkable source, Anchor targetAnchor)
     {
-        return sourcePort switch
+        if (source is not PortModel sourcePort)
+            return null;
+
+        var link = new LinkModel(new SinglePortAnchor(sourcePort), targetAnchor)
         {
-            VirtualNetworkPort => new LinkModel(sourcePort)
-            {
-                Color = "#0078d7",
-                SourceMarker = LinkMarker.Arrow,
-                TargetMarker = LinkMarker.Arrow,
-                Width = 1,
-                StrokeStyle = "dashed",
-            },
-            _ => new LinkModel(sourcePort)
-            {
-                TargetMarker = LinkMarker.Arrow,
-                Width = 1,
-            },
+            TargetMarker = LinkMarker.Arrow,
+            Width = 1,
         };
+
+        if (sourcePort is VirtualNetworkPort)
+        {
+            // VNet peering link.
+            link.Color = "#0078d7";
+            link.SourceMarker = LinkMarker.Arrow;
+        }
+
+        return link;
     }
     public static partial Type? GetDtoTypeFromKey(string key);
 
@@ -208,6 +209,9 @@ public static partial class DataModelFactory
         // Handle Json deserialization.
         var groupsDto = GetNodesDto(diagramGraph.Groups) ?? throw new Exception("Groups' NodesDto is null.");
 
+        // Model Ids are regenerated on load, so look them up by the saved dto Id.
+        var groupById = new Dictionary<string, GroupModel>();
+
         // Load all groups
         var parentGroups = groupsDto.Where(g => g is AzureNodeDto d && string.IsNullOrEmpty(d.GroupId)).ToList();
         var childGroups = groupsDto.Where(g => g is AzureNodeDto d && !string.IsNullOrEmpty(d.GroupId)).ToList();
@@ -216,7 +220,8 @@ public static partial class DataModelFactory
             var group = GetNodeModelFromDto(parent, mapper);
             if (group is GroupModel g)
             {
-                diagram.AddGroup(g);
+                diagram.Groups.Add(g);
+                groupById[parent.Id] = g;
             }
         }
         foreach (var child in childGroups)
@@ -224,22 +229,24 @@ public static partial class DataModelFactory
             var node = GetNodeModelFromDto(child, mapper);
             if (node is GroupModel n)
             {
-                var group = diagram.Groups.FirstOrDefault(g => g.Id == child.GroupId);
+                var group = groupById.GetValueOrDefault(child.GroupId!);
                 // Sequence is important
-                diagram.AddGroup(n);
+                diagram.Groups.Add(n);
                 group?.AddChild(n);
             }
         }
 
         // Load all nodes
         var nodesDto = GetNodesDto(diagramGraph.Nodes) ?? throw new Exception("Nodes' NodesDto is null.");
+        var nodeById = new Dictionary<string, NodeModel>();
         foreach (var nodeDto in nodesDto)
         {
             var node = GetNodeModelFromDto(nodeDto, mapper) ?? throw new Exception("NodeModel is null");
             diagram.Nodes.Add(node);
+            nodeById[nodeDto.Id] = node;
             if (!string.IsNullOrEmpty(nodeDto.GroupId))
             {
-                var parentGroup = diagram.Groups.FirstOrDefault(g => g.Id == nodeDto.GroupId);
+                var parentGroup = groupById.GetValueOrDefault(nodeDto.GroupId);
                 parentGroup?.AddChild(node);
             }
         }
@@ -248,18 +255,17 @@ public static partial class DataModelFactory
         foreach (var linkDto in diagramGraph.Links)
         {
             // Search all groups first.
-            NodeModel? sourceNode = diagram.Groups.FirstOrDefault(g => g.Id == linkDto.SourcePortParentId);
-            sourceNode ??= diagram.Nodes.FirstOrDefault(n => n.Id == linkDto.SourcePortParentId)
+            NodeModel? sourceNode = groupById.GetValueOrDefault(linkDto.SourcePortParentId)
+                    ?? nodeById.GetValueOrDefault(linkDto.SourcePortParentId)
                     ?? throw new Exception($"Cannot find the link's source node. SourceParentId = {linkDto.SourcePortParentId}");
 
-            NodeModel? targetNode = diagram.Groups.FirstOrDefault(g => g.Id == linkDto.TargetPortParentId);
-            targetNode ??= diagram.Nodes.FirstOrDefault(n => n.Id == linkDto.TargetPortParentId)
+            NodeModel? targetNode = groupById.GetValueOrDefault(linkDto.TargetPortParentId)
+                    ?? nodeById.GetValueOrDefault(linkDto.TargetPortParentId)
                     ?? throw new Exception($"Cannot find the target node. TargetParentId = {linkDto.TargetPortParentId}");
 
             var sourcePort = sourceNode.Ports.Single(p => p.Alignment == linkDto.SourcePortAlignment);
             var targetPort = targetNode.Ports.Single(p => p.Alignment == linkDto.TargetPortAlignment);
-            var link = diagram.Options.Links.Factory(diagram, sourcePort);
-            link.SetTargetPort(targetPort);
+            var link = diagram.Options.Links.Factory!(diagram, sourcePort, new SinglePortAnchor(targetPort));
             diagram.Links.Add(link);
         }
 

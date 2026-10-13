@@ -81,7 +81,8 @@ namespace AzureDesignStudio.Core.Network
             {
                 foreach (var link in port.Links)
                 {
-                    var node = link.TargetPort?.Parent != this ? link.TargetPort?.Parent : link.SourcePort?.Parent;
+                    var targetParent = link.Target.Model is PortModel tp ? tp.Parent : null;
+                    var node = targetParent != this ? targetParent : (link.Source.Model is PortModel sp ? sp.Parent : null);
                     if (node is VirtualNetworkModel n)
                     {
                         var peering = new VirtualNetworkPeeringModel()

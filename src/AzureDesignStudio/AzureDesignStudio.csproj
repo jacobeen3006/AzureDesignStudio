@@ -10,6 +10,12 @@
 	<RunAOTCompilation Condition="'$(Configuration)' == 'Release'">true</RunAOTCompilation>
   </PropertyGroup>
   <PropertyGroup>
+    <!-- Build-time compression runs before ServiceWorkerAssetsManifest generation,
+         producing dangling precompressed endpoints (empty 200 bodies). Exclude the
+         generated service-worker files; they are served uncompressed. -->
+    <CompressionExcludePatterns>$(CompressionExcludePatterns);**/service-worker*.js;</CompressionExcludePatterns>
+  </PropertyGroup>
+  <PropertyGroup>
     <!-- AutoMapper 12.0.1 GHSA-rvv3-g6hj-g44x (DoS via uncontrolled recursion) accepted:
          mappings are shallow node DTOs; 13+ requires a commercial license key. -->
     <NoWarn>$(NoWarn);NU1903</NoWarn>
@@ -22,6 +28,7 @@
     <PackageReference Include="BlazorApplicationInsights" Version="2.2.2" />
     <PackageReference Include="Google.Protobuf" Version="3.28.2" />
     <PackageReference Include="Grpc.Net.Client" Version="2.66.0" />
+    <PackageReference Include="Z.Blazor.Diagrams" Version="3.0.4.1" />
     <PackageReference Include="Grpc.Net.Client.Web" Version="2.66.0" />
     <PackageReference Include="Grpc.Net.ClientFactory" Version="2.66.0" />
     <PackageReference Include="Grpc.Tools" Version="2.66.0">
@@ -47,8 +54,6 @@
   <ItemGroup>
     <ProjectReference Include="..\AzureDesignStudio.Core\AzureDesignStudio.Core.csproj" />
     <ProjectReference Include="..\AzureDesignStudio.SharedModels\AzureDesignStudio.SharedModels.csproj" />
-    <ProjectReference Include="..\Blazor.Diagrams\src\Blazor.Diagrams.Core\Blazor.Diagrams.Core.csproj" />
-    <ProjectReference Include="..\Blazor.Diagrams\src\Blazor.Diagrams\Blazor.Diagrams.csproj" />
   </ItemGroup>
 
   <ItemGroup>

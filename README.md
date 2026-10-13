@@ -45,7 +45,7 @@ Azure Design Studio won the **3rd Place Winner award** of Microsoft Global Hacka
 
 ---
 
-## 🏗️ Solution Structure (8 projects)
+## 🏗️ Solution Structure (7 projects)
 
 ```
 AzureDesignStudio.sln
@@ -55,8 +55,7 @@ AzureDesignStudio.sln
 ├── AzureDesignStudio.SharedModels     — Protobuf contracts (gRPC service definitions)
 ├── AzureDesignStudio.AzureResources   — CLS-compliant Azure resource type definitions
 ├── AzureDesignStudio.SourceGeneration — Roslyn source generator for DTO/mapping profiles
-├── AzureDesignStudio.Core.Tests       — xUnit unit tests
-└── Blazor.Diagrams/                   — Git submodule (forked Blazor.Diagrams library)
+└── AzureDesignStudio.Core.Tests       — xUnit unit tests
 ```
 
 **Target**: .NET 8.0, Blazor WebAssembly
@@ -69,7 +68,7 @@ AzureDesignStudio.sln
 |---|---|
 | **UI framework** | Blazor WebAssembly + .NET 10 |
 | **UI components** | Ant Design Blazor 1.6.2 |
-| **Diagramming** | Blazor.Diagrams (custom fork — submodule) |
+| **Diagramming** | Z.Blazor.Diagrams 3.0.4.1 (NuGet) |
 | **Auth** | Microsoft Entra ID (MSAL via `Microsoft.Authentication.WebAssembly.Msal`) |
 | **Backend API** | ASP.NET Core gRPC with gRPC-Web (browser-compatible) |
 | **ORM** | Entity Framework Core (InMemory dev / SQL Server prod) |
@@ -244,13 +243,8 @@ docker build -f src/AzureDesignStudio.Server/Dockerfile .
 
 ### Clone the Repository
 ```bash
-# Clone with git submodule (Blazor.Diagrams)
-git clone --recursive https://github.com/jacobeen3006/AzureDesignStudio.git
+git clone https://github.com/jacobeen3006/AzureDesignStudio.git
 cd AzureDesignStudio
-
-# Required: .NET 10 patch for the Blazor.Diagrams submodule (upstream fork is .NET 8 era;
-# no push access to chunliu/Blazor.Diagrams, so the fix ships as a patch file — CI applies it too)
-git -C src/Blazor.Diagrams apply patches/blazor-diagrams-net10.patch
 ```
 
 ### Development Environment
