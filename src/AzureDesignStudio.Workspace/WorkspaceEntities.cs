@@ -26,6 +26,10 @@ public class ScanRecord
     public string? ContentHash { get; set; }
     public int ResourceCount { get; set; }
     public string? Error { get; set; }
+    /// <summary>Scan manifest: scope, group counts, partial failures (plan 7.5).</summary>
+    public string? ManifestJson { get; set; }
+    /// <summary>Durable resume state; a killed scan continues from here (plan 7.5).</summary>
+    public string? CheckpointJson { get; set; }
     public List<ResourceSnapshotRecord> Snapshots { get; set; } = [];
 }
 

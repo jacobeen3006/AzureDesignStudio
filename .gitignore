@@ -25,6 +25,9 @@ x64/
 x86/
 [Aa][Rr][Mm]/
 [Aa][Rr][Mm]64/
+
+# ARM source directory (the build-output rules above would swallow it)
+!src/AzureDesignStudio.Discovery/Arm/
 bld/
 [Bb]in/
 [Oo]bj/

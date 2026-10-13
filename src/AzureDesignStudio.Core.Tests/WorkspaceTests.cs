@@ -165,5 +165,35 @@ namespace AzureDesignStudio.Core.Tests
                 Assert.Empty(db.ResourceSnapshots); // cascade delete keeps history consistent
             }
         }
+
+        [Fact]
+        public async Task ScanCheckpoint_SurvivesKillAndResumesSameRow()
+        {
+            var scans = new WorkspaceScans(_workspace);
+            var scan = await scans.StartAsync("tenant", "Tenant");
+            await scans.PersistPageAsync(scan.Id,
+                [new InventorySnapshotRow("/subs/s/rg/a/providers/Microsoft.Test/w/one", "one", "Microsoft.Test/widgets", "westeurope", "rg", "s", null, """{"size":3}""")],
+                """{"completedQueries":["gA"],"rows":1}""");
+
+            // Simulated process kill: FinishAsync never ran, yet the page and checkpoint are durable.
+            var resumable = await scans.GetResumableAsync();
+            Assert.Equal(scan.Id, resumable!.Id);
+            Assert.Contains("gA", resumable.CheckpointJson);
+
+            var resumed = await scans.StartAsync("tenant", "Tenant", resumeScanId: scan.Id);
+            Assert.Equal(scan.Id, resumed.Id); // one history row, not a fresh one
+            await scans.PersistPageAsync(scan.Id,
+                [new InventorySnapshotRow("/subs/s/rg/b/providers/Microsoft.Test/w/two", "two", "Microsoft.Test/widgets", "westeurope", "rg", "s", null, null)],
+                """{"completedQueries":["gA","gB"],"rows":2,"contentHash":"HASH"}""");
+            await scans.FinishAsync(scan.Id, "Completed", """{"completedQueries":["gA","gB"],"rows":2,"contentHash":"HASH"}""", """{"groupsCompleted":2}""", null);
+
+            var latest = await scans.GetLatestCompletedAsync();
+            Assert.Equal(scan.Id, latest!.Id);
+            Assert.Equal(2, latest.Snapshots.Count);
+            Assert.Equal("HASH", latest.ContentHash);
+            Assert.Equal(2, latest.ResourceCount);
+            Assert.Equal("""{"size":3}""", latest.Snapshots.Single(s => s.Name == "one").PropertiesJson); // raw ARM JSON verbatim
+            Assert.Null(await scans.GetResumableAsync());
+        }
     }
 }

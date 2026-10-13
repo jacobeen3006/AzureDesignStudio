@@ -4,6 +4,10 @@ using BlazorApplicationInsights;
 using AzureDesignStudio.Core.DTO;
 using AzureDesignStudio.Services;
 using AzureDesignStudio.Workspace;
+using AzureDesignStudio.Discovery.Arm;
+using AzureDesignStudio.Discovery.Preflight;
+using AzureDesignStudio.Discovery.ResourceGraph;
+using AzureDesignStudio.Discovery.Scan;
 using AzureDesignStudio.SharedModels.Protos;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.Configuration;
@@ -74,6 +78,20 @@ public static class MauiProgram
         builder.Services.AddSingleton<AdsTokenBroker>();
         builder.Services.AddSingleton<Azure.Core.TokenCredential>(sp => sp.GetRequiredService<AdsTokenBroker>());
         builder.Services.AddTransient<MsalAuthTokenHandler>();
+
+        // Tenant discovery (plan 7): ARG spine + ARM transport ride the broker credential;
+        // scan pages checkpoint into the SQLite workspace so a kill resumes, not restarts.
+        builder.Services.AddSingleton(sp => new ArmTransport(
+            new HttpClient { Timeout = TimeSpan.FromMinutes(5) },
+            sp.GetRequiredService<Azure.Core.TokenCredential>(), ArmEndpointSet.AzureCloud));
+        builder.Services.AddSingleton(sp => new ResourceGraphClient(
+            new HttpClient { Timeout = TimeSpan.FromMinutes(5) },
+            sp.GetRequiredService<Azure.Core.TokenCredential>()));
+        builder.Services.AddSingleton<TenantInventory>();
+        builder.Services.AddSingleton<PermissionPreflight>();
+        builder.Services.AddSingleton<WorkspaceScanSink>();
+        builder.Services.AddSingleton<AzureDesignStudio.Discovery.Scan.IScanSink>(sp => sp.GetRequiredService<WorkspaceScanSink>());
+        builder.Services.AddSingleton<ScanEngine>();
         builder.Services.AddScoped<AuthenticationStateProvider, DesktopAuthenticationStateProvider>();
         builder.Services.AddAuthorizationCore();
 

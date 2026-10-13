@@ -74,6 +74,26 @@ public sealed class WorkspaceDb
 
         using var db = CreateContext();
         db.Database.EnsureCreated();
+        EnsureAddedColumns(db);
+    }
+
+    // EnsureCreated never alters an existing schema; additive columns land here (SQLite ALTER is cheap).
+    private void EnsureAddedColumns(WorkspaceDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        foreach (var (table, column) in new[] { ("Scans", "ManifestJson"), ("Scans", "CheckpointJson") })
+        {
+            using var check = conn.CreateCommand();
+            check.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name='{column}';";
+            if (Convert.ToInt64(check.ExecuteScalar()) == 0)
+            {
+                using var add = conn.CreateCommand();
+                add.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} TEXT;";
+                add.ExecuteNonQuery();
+            }
+        }
+        conn.Close();
     }
 
     public WorkspaceDbContext CreateContext()
