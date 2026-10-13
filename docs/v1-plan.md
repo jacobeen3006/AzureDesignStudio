@@ -80,6 +80,8 @@
 
 **Status (2026-10-13): 3.1 complete.** Submodule + net10 patch removed; `Z.Blazor.Diagrams` 3.0.4.1 in both csproj. Fork-only APIs live in `AdsDiagram` (DeleteSelectedModels, print capture + A4 fit, shortcut overrides) and `AzurePort`/`VirtualNetworkPort` (`CanAttachTo` bidirectional rules: source-only check in 3.x, vnet-peering pair rules). Group drag-into-group/z-order verified in headless browser (create, nest, links incl. blue peering, duplicate/self/cross-type rejects, edit form, delete, export-image preview, view-state restore).
 
+**Status (2026-10-13): 3.2 complete.** `DiagramHistory` (Core/Common) — command stack over diagram events: node/group add/remove (incl. child snapshots), move (gesture window per pointer drag, coalesced), link add/remove, group-membership (`RecordChildMembership`; library exposes no group event). `Capture` = one user action = one command; `Suspend` = programmatic (design load/print) records nothing. Toolbar Undo/Redo + Ctrl+Z/Y/Ctrl+Alt+Z wired through `StateChanged`; subnet add/remove in `VirtualNetworkForm` records as composite. Verified headless: drop/undo/redo button states, drag-into-group undo restores position+membership, delete modal undo/redo, subnet path.
+
 ## Phase 4 — Desktop (MAUI Blazor Hybrid)
 
 **Goal:** installable Windows app sharing the component stack.

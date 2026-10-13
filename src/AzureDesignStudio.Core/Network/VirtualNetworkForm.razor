@@ -1,5 +1,5 @@
-﻿@using AzureDesignStudio.Core.Components
-@using AzureDesignStudio.Core.Models
+﻿@using AzureDesignStudio.Core.Common
+@using AzureDesignStudio.Core.Components
 @using Blazor.Diagrams.Core
 @using Blazor.Diagrams.Core.Models
 
@@ -65,17 +65,27 @@
 
     private void HandleAddSubnet()
     {
-        var subnet = vnet.AddSubnet(new SubnetModel()
-            {
-                Name = "Subnet1"
-            });
+        Diagram.EnsureHistory().Capture(() =>
+        {
+            var subnet = vnet.AddSubnet(new SubnetModel()
+                {
+                    Name = "Subnet1"
+                });
 
-        Diagram.Groups.Add(subnet);
+            Diagram.Groups.Add(subnet);
+            Diagram.GetHistory()?.RecordChildMembership(vnet, subnet, added: true);
+        });
     }
 
     private void HandleRemoveSubnet(SubnetModel subnet)
     {
-        vnet.RemoveChild(subnet);
-        Diagram.Groups.Remove(subnet);
+        var history = Diagram.EnsureHistory();
+        history.SnapshotChildren(subnet);
+        history.Capture(() =>
+        {
+            vnet.RemoveChild(subnet);
+            Diagram.GetHistory()?.RecordChildMembership(vnet, subnet, added: false);
+            Diagram.Groups.Remove(subnet);
+        });
     }
 }

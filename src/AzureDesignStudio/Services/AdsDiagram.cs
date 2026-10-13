@@ -1,4 +1,5 @@
 using AzureDesignStudio.Core.Components;
+using AzureDesignStudio.Core.Common;
 using Blazor.Diagrams;
 using Blazor.Diagrams.Options;
 using Blazor.Diagrams.Core;
@@ -24,28 +25,58 @@ namespace AzureDesignStudio.Services
         public AdsDiagram(BlazorDiagramOptions options) : base(options)
         {
             RegisterComponent<NodeModel, AzureNodeComponent>();
-            // Delete is handled by the UI context menu; Ctrl+Alt+G grouping stays disabled.
+            History = this.EnsureHistory();
+
             var shortcuts = GetBehavior<KeyboardShortcutsBehavior>();
+            // Delete is handled by the UI context menu; Ctrl+Alt+G grouping stays disabled.
             shortcuts?.RemoveShortcut("Delete", false, false, false);
             shortcuts?.RemoveShortcut("g", true, false, true);
+            // Undo/redo over the DiagramHistory command stack.
+            shortcuts?.SetShortcut("z", true, false, false, UndoShortcutAsync);
+            shortcuts?.SetShortcut("Z", true, false, false, UndoShortcutAsync);
+            shortcuts?.SetShortcut("z", true, true, false, RedoShortcutAsync);
+            shortcuts?.SetShortcut("Z", true, true, false, RedoShortcutAsync);
+            shortcuts?.SetShortcut("y", true, false, false, RedoShortcutAsync);
+            shortcuts?.SetShortcut("Y", true, false, false, RedoShortcutAsync);
+        }
+
+        public DiagramHistory History { get; }
+
+        private static ValueTask UndoShortcutAsync(Diagram diagram)
+        {
+            diagram.GetHistory()?.Undo();
+            return ValueTask.CompletedTask;
+        }
+
+        private static ValueTask RedoShortcutAsync(Diagram diagram)
+        {
+            diagram.GetHistory()?.Redo();
+            return ValueTask.CompletedTask;
         }
 
         public void DeleteSelectedModels()
         {
-            Batch(() =>
+            History.Capture(() =>
             {
-                foreach (var sm in GetSelectedModels().ToList())
-                {
-                    if (sm.Locked)
-                        continue;
+                // Groups lose their children before Removed fires; snapshot for undo.
+                foreach (var group in GetSelectedModels().OfType<GroupModel>())
+                    History.SnapshotChildren(group);
 
-                    if (sm is GroupModel group)
-                        Groups.Delete(group);
-                    else if (sm is NodeModel node)
-                        Nodes.Remove(node);
-                    else if (sm is BaseLinkModel link)
-                        Links.Remove(link);
-                }
+                Batch(() =>
+                {
+                    foreach (var sm in GetSelectedModels().ToList())
+                    {
+                        if (sm.Locked)
+                            continue;
+
+                        if (sm is GroupModel group)
+                            Groups.Delete(group);
+                        else if (sm is NodeModel node)
+                            Nodes.Remove(node);
+                        else if (sm is BaseLinkModel link)
+                            Links.Remove(link);
+                    }
+                });
             });
 
             UnselectAll();

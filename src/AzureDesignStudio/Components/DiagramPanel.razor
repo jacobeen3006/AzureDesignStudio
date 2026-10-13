@@ -22,6 +22,12 @@
             <Button Type="@ButtonType.Text" Class="ads-context-btn" Icon="Delete" OnClick="_=>ConfirmDelete()">
                 Delete
             </Button>
+            <Button Type="@ButtonType.Text" Class="ads-context-btn" Icon="undo" OnClick="_=>Undo()" Disabled="@(!undoAvailable)">
+                Undo
+            </Button>
+            <Button Type="@ButtonType.Text" Class="ads-context-btn" Icon="redo" OnClick="_=>Redo()" Disabled="@(!redoAvailable)">
+                Redo
+            </Button>
         </div>
     </div>
 </div>
@@ -37,7 +43,7 @@
         {
             Title = "Delete the selected node(s)?",
             Icon = icon,
-            Content = "The node(s) will be deleted and there is no way to revert back.",
+            Content = "The node(s) will be deleted. You can restore them with Undo (Ctrl+Z).",
             OnCancel = (e) =>
             {
                 return Task.CompletedTask;
@@ -49,6 +55,34 @@
                 return Task.CompletedTask;
             },
             OkType = ButtonType.Primary,
+        });
+    }
+
+    private bool undoAvailable;
+    private bool redoAvailable;
+
+    private void Undo()
+    {
+        diagram.History.Undo();
+        RefreshDiagram();
+    }
+
+    private void Redo()
+    {
+        diagram.History.Redo();
+        RefreshDiagram();
+    }
+
+    private void HandleHistoryStateChanged()
+    {
+        InvokeAsync(() =>
+        {
+            if (diagram is null)
+                return;
+
+            undoAvailable = diagram.History.CanUndo;
+            redoAvailable = diagram.History.CanRedo;
+            StateHasChanged();
         });
     }
 }

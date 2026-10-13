@@ -344,10 +344,13 @@ namespace AzureDesignStudio.Components
                 return;
             }
 
-            // Clear the diagram before loading a new one.
-            adsContext.Diagram.Nodes.Clear();
-            adsContext.Diagram.Links.Clear();
-            adsContext.Diagram.Groups.Clear();
+            // Clear the diagram before loading a new one; history tracks user edits only.
+            adsContext.Diagram.History.Suspend(() =>
+            {
+                adsContext.Diagram.Nodes.Clear();
+                adsContext.Diagram.Links.Clear();
+                adsContext.Diagram.Groups.Clear();
+            });
 
             messageService.Loading("Loading the design ...", 0);
 
@@ -364,7 +367,8 @@ namespace AzureDesignStudio.Components
             }
             else
             {
-                DataModelFactory.LoadDiagramFromDto(adsContext.Diagram, diagramGraph, mapper);
+                adsContext.Diagram.History.Suspend(() => DataModelFactory.LoadDiagramFromDto(adsContext.Diagram, diagramGraph!, mapper));
+                adsContext.Diagram.History.Clear();
                 adsContext.CurrentDesignName = designName;
             }
 

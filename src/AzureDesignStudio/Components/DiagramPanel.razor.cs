@@ -28,10 +28,17 @@ namespace AzureDesignStudio.Components
             diagram.PointerDown += HandlePointerDown;
             diagram.PointerUp += HandlePointerUp;
             diagram.SelectionChanged += HandleSelectionChanged;
+            // Attach last so the history gesture commit sees our auto-group record.
+            diagram.History.Attach();
+            diagram.History.StateChanged += HandleHistoryStateChanged;
+            undoAvailable = diagram.History.CanUndo;
+            redoAvailable = diagram.History.CanRedo;
         }
 
         public void Dispose()
         {
+            diagram.History.Detach();
+            diagram.History.StateChanged -= HandleHistoryStateChanged;
             diagram.PointerDown -= HandlePointerDown;
             diagram.PointerUp -= HandlePointerUp;
             diagram.SelectionChanged -= HandleSelectionChanged;
@@ -44,6 +51,7 @@ namespace AzureDesignStudio.Components
         {
             clientX = e.ClientX;
             clientY = e.ClientY;
+            diagram.History.BeginGesture();
         }
 
         private void HandlePointerUp(Model? node, PointerEventArgs e)
@@ -57,9 +65,13 @@ namespace AzureDesignStudio.Components
                 var (result, _) = an.IsDrappable(group!);
                 if (result)
                 {
+                    var previousPosition = n.Position;
                     AddNodeToGroup(n, group!);
+                    diagram.History.RecordChildMembership(group!, n, added: true, previousPosition);
                 }
             }
+
+            diagram.History.EndGesture();
         }
         /// <summary>
         /// Add a node to a group based on the position of the node.
@@ -106,7 +118,7 @@ namespace AzureDesignStudio.Components
                         messageService.Error(message);
                         return;
                     }
-                    diagram.Batch(() =>
+                    diagram.History.Capture(() => diagram.Batch(() =>
                     {
                         if (node is GroupModel g)
                         {
@@ -116,9 +128,13 @@ namespace AzureDesignStudio.Components
                         {
                             diagram.Nodes.Add(node);
                         }
-                        AddNodeToGroup(node, overlappedGroup);
+                        var previousPosition = node.Position;
+                        if (AddNodeToGroup(node, overlappedGroup))
+                        {
+                            diagram.History.RecordChildMembership(overlappedGroup!, node, added: true, previousPosition);
+                        }
                         RefreshGroup(overlappedGroup);
-                    });
+                    }));
                 }
                 else
                 {
@@ -133,11 +149,6 @@ namespace AzureDesignStudio.Components
 
         private async Task LoadReferenceArch(string refArchPath)
         {
-            // Clear the diagram before loading a new one.
-            adsContext.Diagram.Nodes.Clear();
-            adsContext.Diagram.Links.Clear();
-            adsContext.Diagram.Groups.Clear();
-
             messageService.Loading("Loading the design ...", 0);
             try
             {
@@ -147,10 +158,16 @@ namespace AzureDesignStudio.Components
                 {
                     throw new NotImplementedException();
                 }
-                else
+
+                // Programmatic replace: never recorded, and prior history belongs to the old design.
+                adsContext.Diagram.History.Suspend(() =>
                 {
+                    adsContext.Diagram.Nodes.Clear();
+                    adsContext.Diagram.Links.Clear();
+                    adsContext.Diagram.Groups.Clear();
                     DataModelFactory.LoadDiagramFromDto(adsContext.Diagram, diagramGraph, _mapper);
-                }
+                });
+                adsContext.Diagram.History.Clear();
             }
             catch
             {
