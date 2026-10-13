@@ -1,0 +1,32 @@
+@using AzureDesignStudio.Core.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@fabric" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
+    <NameAndLocation Node="@context" />
+    <FormItem Label="SKU">
+        <SimpleSelect @bind-Value="@context.Sku">
+            <SelectOptions>
+                <SimpleSelectOption Label="F4" Value="@("F4")" />
+                <SimpleSelectOption Label="F8" Value="@("F8")" />
+                <SimpleSelectOption Label="F16" Value="@("F16")" />
+                <SimpleSelectOption Label="F32" Value="@("F32")" />
+                <SimpleSelectOption Label="F64" Value="@("F64")" />
+                <SimpleSelectOption Label="F128" Value="@("F128")" />
+                <SimpleSelectOption Label="F256" Value="@("F256")" />
+                <SimpleSelectOption Label="F512" Value="@("F512")" />
+                <SimpleSelectOption Label="F1024" Value="@("F1024")" />
+                <SimpleSelectOption Label="F2048" Value="@("F2048")" />
+            </SelectOptions>
+        </SimpleSelect>
+    </FormItem>
+</Form>
+
+@code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+    [CascadingParameter]
+    public Diagram Diagram { get; set; } = null!;
+
+    private FabricCapacityModel fabric => (FabricCapacityModel)Node;
+}

@@ -1,0 +1,28 @@
+@using AzureDesignStudio.Core.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@keyVault" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
+    <NameAndLocation Node="@context" />
+    <FormItem>
+        <RadioGroup @bind-Value="@context.Sku" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("standard")">Standard</Radio>
+            <Radio RadioButton Value="@("premium")">Premium</Radio>
+        </RadioGroup>
+    </FormItem>
+    <FormItem Label="RBAC authorization">
+        <RadioGroup @bind-Value="@context.EnableRbacAuthorization" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@(true)">Enabled</Radio>
+            <Radio RadioButton Value="@(false)">Disabled</Radio>
+        </RadioGroup>
+    </FormItem>
+</Form>
+
+@code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+    [CascadingParameter]
+    public Diagram Diagram { get; set; } = null!;
+
+    private KeyVaultModel keyVault => (KeyVaultModel)Node;
+}

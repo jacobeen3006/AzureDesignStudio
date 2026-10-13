@@ -13,6 +13,8 @@ namespace AzureDesignStudio.Core.Models
             Size = new Size(81, 81);
         }
         public string ImagePath { get; set; } = string.Empty;
+        /// <summary>Stencil key this node was created from (empty for legacy designs; resolved via DataModelFactory fallback).</summary>
+        public string StencilKey { get; set; } = string.Empty;
 
         #region IAzureNode
         public virtual string ServiceName => string.Empty;

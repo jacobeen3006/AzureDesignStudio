@@ -1,14 +1,20 @@
 ﻿using AutoMapper;
 //using AzureDesignStudio.Core.AKS;
 using AzureDesignStudio.Core.APIM;
+using AzureDesignStudio.Core.App;
+using AzureDesignStudio.Core.Cache;
+using AzureDesignStudio.Core.CognitiveServices;
 using AzureDesignStudio.Core.Web;
 using AzureDesignStudio.Core.Common;
 using AzureDesignStudio.Core.Components;
 using AzureDesignStudio.Core.Compute;
+using AzureDesignStudio.Core.ContainerRegistry;
 using AzureDesignStudio.Core.DTO;
+using AzureDesignStudio.Core.Fabric;
+using AzureDesignStudio.Core.KeyVault;
 using AzureDesignStudio.Core.Models;
+using AzureDesignStudio.Core.Messaging;
 using AzureDesignStudio.Core.Network;
-//using AzureDesignStudio.Core.ResourceGroup;
 using AzureDesignStudio.Core.SQL;
 using AzureDesignStudio.Core.Storage;
 using Blazor.Diagrams.Core;
@@ -28,6 +34,8 @@ public static partial class DataModelFactory
         diagram.RegisterModelComponent<SubnetModel, AzureGroupComponent>();
         diagram.RegisterModelComponent<SqlServerModel, AzureGroupComponent>();
         diagram.RegisterModelComponent<AppServicePlanModel, AzureGroupComponent>();
+        diagram.RegisterModelComponent<ContainerAppsEnvironmentModel, AzureGroupComponent>();
+        diagram.RegisterModelComponent<AvailabilitySetModel, AzureGroupComponent>();
     }
     public static NodeModel CreateNodeModelFromKey(string key, string name, string imagePath)
     {
@@ -49,12 +57,31 @@ public static partial class DataModelFactory
             //AdsConstants.AKSCluster => new AKSModel(),
             AdsConstants.APIM => new APIMModel(),
             AdsConstants.AppGateway => new AppGatewayModel(),
+            AdsConstants.LoadBalancer => new LoadBalancerModel(),
+            AdsConstants.PrivateEndpoint => new PrivateEndpointModel(),
+            AdsConstants.DnsZone => new DnsZoneModel(),
+            AdsConstants.AvailabilitySet => new AvailabilitySetModel(),
+            AdsConstants.ServiceBus => new ServiceBusModel(),
+            AdsConstants.EventHubs => new EventHubsModel(),
+            AdsConstants.EventGrid => new EventGridModel(),
+            AdsConstants.ContainerAppsEnvironment => new ContainerAppsEnvironmentModel(),
+            AdsConstants.ContainerApp => new ContainerAppModel(),
+            AdsConstants.ContainerAppsJob => new ContainerAppsJobModel(),
+            AdsConstants.ContainerRegistry => new ContainerRegistryModel(),
+            AdsConstants.KeyVault => new KeyVaultModel(),
+            AdsConstants.AzureRedis => new AzureRedisModel(),
+            AdsConstants.AzureOpenAI => new AzureOpenAIModel(),
+            AdsConstants.FabricCapacity => new FabricCapacityModel(),
             _ => throw new NotImplementedException(),
         };
 
         if (result is IAzureNode n)
         {
             n.ImagePath = imagePath;
+        }
+        if (result is AzureNodeBase ab)
+        {
+            ab.StencilKey = key;
         }
         if (result is IAzureResource r)
         {
@@ -83,6 +110,43 @@ public static partial class DataModelFactory
         };
     }
     public static partial Type? GetDtoTypeFromKey(string key);
+
+    private static readonly Dictionary<Type, string> StencilKeyByType = new()
+    {
+        [typeof(StorageAccountModel)] = AdsConstants.StorageAccount,
+        [typeof(VirtualNetworkModel)] = AdsConstants.VirtualNetwork,
+        [typeof(VirtualMachineModel)] = AdsConstants.VirtualMachine,
+        [typeof(SubnetModel)] = AdsConstants.Subnet,
+        [typeof(AzureFirewallModel)] = AdsConstants.AzureFirewall,
+        [typeof(BastionsModel)] = AdsConstants.Bastions,
+        [typeof(PublicIpModel)] = AdsConstants.PublicIp,
+        [typeof(SqlServerModel)] = AdsConstants.SqlServer,
+        [typeof(SqlDatabaseModel)] = AdsConstants.SqlDatabase,
+        [typeof(AppServicePlanModel)] = AdsConstants.AppServicePlan,
+        [typeof(FunctionAppModel)] = AdsConstants.FunctionApp,
+        [typeof(WebAppModel)] = AdsConstants.WebApp,
+        [typeof(APIMModel)] = AdsConstants.APIM,
+        [typeof(AppGatewayModel)] = AdsConstants.AppGateway,
+        [typeof(LoadBalancerModel)] = AdsConstants.LoadBalancer,
+        [typeof(PrivateEndpointModel)] = AdsConstants.PrivateEndpoint,
+        [typeof(DnsZoneModel)] = AdsConstants.DnsZone,
+        [typeof(AvailabilitySetModel)] = AdsConstants.AvailabilitySet,
+        [typeof(ServiceBusModel)] = AdsConstants.ServiceBus,
+        [typeof(EventHubsModel)] = AdsConstants.EventHubs,
+        [typeof(EventGridModel)] = AdsConstants.EventGrid,
+        [typeof(ContainerAppsEnvironmentModel)] = AdsConstants.ContainerAppsEnvironment,
+        [typeof(ContainerAppModel)] = AdsConstants.ContainerApp,
+        [typeof(ContainerAppsJobModel)] = AdsConstants.ContainerAppsJob,
+        [typeof(ContainerRegistryModel)] = AdsConstants.ContainerRegistry,
+        [typeof(KeyVaultModel)] = AdsConstants.KeyVault,
+        [typeof(AzureRedisModel)] = AdsConstants.AzureRedis,
+        [typeof(AzureOpenAIModel)] = AdsConstants.AzureOpenAI,
+        [typeof(FabricCapacityModel)] = AdsConstants.FabricCapacity,
+    };
+
+    /// <summary>Stencil key for a node: the key stored at creation, or the type-based fallback for legacy designs.</summary>
+    public static string GetStencilKey(NodeModel node) =>
+        node is AzureNodeBase { StencilKey.Length: > 0 } b ? b.StencilKey : StencilKeyByType.GetValueOrDefault(node.GetType(), string.Empty);
     public static partial NodeModel? GetNodeModelFromDto(AzureNodeDto dto, IMapper mapper);
     public static async Task<DiagramGraph> SaveDiagramToDto(Diagram diagram, IMapper mapper)
     {

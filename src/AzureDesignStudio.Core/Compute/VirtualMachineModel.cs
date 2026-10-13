@@ -18,5 +18,16 @@ namespace AzureDesignStudio.Core.Compute
         public override Type? DataFormType => typeof(VirtualMachineForm);
         private readonly VirtualMachines _vm = new();
         protected override ResourceBase ArmResource => _vm;
+
+        protected override void PopulateArmAttributes()
+        {
+            base.PopulateArmAttributes();
+
+            if (Group is AvailabilitySetModel availabilitySet)
+            {
+                _vm.Properties ??= new VirtualMachineProperties();
+                _vm.Properties.AvailabilitySet = new SubResource { Id = availabilitySet.ResourceId };
+            }
+        }
     }
 }

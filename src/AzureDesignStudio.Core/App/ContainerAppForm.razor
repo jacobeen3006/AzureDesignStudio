@@ -1,0 +1,34 @@
+@using AzureDesignStudio.Core.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@containerApp" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
+    <NameAndLocation Node="@context" />
+    <FormItem>
+        <Input @bind-Value="@context.Image" Size="@InputSize.Small" />
+    </FormItem>
+    <FormItem>
+        <RadioGroup @bind-Value="@context.External" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio Value="true">Enabled</Radio>
+            <Radio Value="false">Disabled</Radio>
+        </RadioGroup>
+    </FormItem>
+    <FormItem>
+        <InputNumber @bind-Value="@context.TargetPort" Min="1" Max="65535" Size="@InputSize.Small" />
+    </FormItem>
+    <FormItem>
+        <Input @bind-Value="@context.Cpu" Size="@InputSize.Small" />
+    </FormItem>
+    <FormItem>
+        <Input @bind-Value="@context.Memory" Size="@InputSize.Small" />
+    </FormItem>
+</Form>
+
+@code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+    [CascadingParameter]
+    public Diagram Diagram { get; set; } = null!;
+
+    private ContainerAppModel containerApp => (ContainerAppModel)Node;
+}

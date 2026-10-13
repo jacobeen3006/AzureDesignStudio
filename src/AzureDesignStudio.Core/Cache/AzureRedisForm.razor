@@ -1,0 +1,25 @@
+@using AzureDesignStudio.Core.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@azureRedis" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
+    <NameAndLocation Node="@context" />
+    <FormItem>
+        <RadioGroup @bind-Value="@context.Family" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("C")">C</Radio>
+            <Radio RadioButton Value="@("P")">P</Radio>
+        </RadioGroup>
+    </FormItem>
+    <FormItem Label="Capacity">
+        <InputNumber @bind-Value="@context.Capacity" Min="0" Max="5"></InputNumber>
+    </FormItem>
+</Form>
+
+@code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+    [CascadingParameter]
+    public Diagram Diagram { get; set; } = null!;
+
+    private AzureRedisModel azureRedis => (AzureRedisModel)Node;
+}

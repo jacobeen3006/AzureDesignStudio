@@ -1,0 +1,32 @@
+@using AzureDesignStudio.Core.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@openAi" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
+    <NameAndLocation Node="@context" />
+    <FormItem>
+        <RadioGroup @bind-Value="@context.Kind" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("OpenAI")">OpenAI</Radio>
+            <Radio RadioButton Value="@("OpenAIv1")">OpenAI v1</Radio>
+        </RadioGroup>
+    </FormItem>
+    <FormItem Label="Subdomain">
+        <Input Placeholder="defaults to the resource name" TValue="string" Size="@InputSize.Small"
+            @bind-Value="@context.CustomSubDomainName"></Input>
+    </FormItem>
+    <FormItem Label="Network access">
+        <RadioGroup @bind-Value="@context.PublicNetworkAccess" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("Enabled")">Enabled</Radio>
+            <Radio RadioButton Value="@("Disabled")">Disabled</Radio>
+        </RadioGroup>
+    </FormItem>
+</Form>
+
+@code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+    [CascadingParameter]
+    public Diagram Diagram { get; set; } = null!;
+
+    private AzureOpenAIModel openAi => (AzureOpenAIModel)Node;
+}

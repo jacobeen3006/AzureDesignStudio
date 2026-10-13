@@ -128,4 +128,110 @@
     "referenceArchPath": "",
     "category": 5
   }
+  ,
+  {
+    "key": "load-balancer",
+    "name": "lb",
+    "iconPath": "assets/azure/load-balancer.svg",
+    "label": "Load Balancer",
+    "category": 0
+  },
+  {
+    "key": "private-endpoint",
+    "name": "pe",
+    "iconPath": "assets/azure/private-endpoint.svg",
+    "label": "Private Endpoint",
+    "category": 0
+  },
+  {
+    "key": "dns-zone",
+    "name": "dns",
+    "iconPath": "assets/azure/dns-zone.svg",
+    "label": "DNS Zone",
+    "category": 0
+  },
+  {
+    "key": "container-apps-environment",
+    "name": "cae",
+    "iconPath": "assets/azure/container-apps-environment.svg",
+    "label": "Container Apps Environment",
+    "category": 1
+  },
+  {
+    "key": "container-app",
+    "name": "ca",
+    "iconPath": "assets/azure/container-app.svg",
+    "label": "Container App",
+    "category": 1
+  },
+  {
+    "key": "container-apps-job",
+    "name": "caj",
+    "iconPath": "assets/azure/container-apps-job.svg",
+    "label": "Container Apps Job",
+    "category": 1
+  },
+  {
+    "key": "availability-set",
+    "name": "aset",
+    "iconPath": "assets/azure/availability-set.svg",
+    "label": "Availability Set",
+    "category": 1
+  },
+  {
+    "key": "azure-redis",
+    "name": "redis",
+    "iconPath": "assets/azure/azure-redis.svg",
+    "label": "Azure Redis",
+    "category": 2
+  },
+  {
+    "key": "container-registry",
+    "name": "acr",
+    "iconPath": "assets/azure/container-registry.svg",
+    "label": "Container Registry",
+    "category": 3
+  },
+  {
+    "key": "service-bus",
+    "name": "sb",
+    "iconPath": "assets/azure/service-bus.svg",
+    "label": "Service Bus",
+    "category": 4
+  },
+  {
+    "key": "event-hubs",
+    "name": "eh",
+    "iconPath": "assets/azure/event-hubs.svg",
+    "label": "Event Hubs",
+    "category": 4
+  },
+  {
+    "key": "event-grid",
+    "name": "eg",
+    "iconPath": "assets/azure/event-grid.svg",
+    "label": "Event Grid",
+    "category": 4
+  },
+  {
+    "key": "key-vault",
+    "name": "kv",
+    "iconPath": "assets/azure/key-vault.svg",
+    "label": "Key Vault",
+    "category": 4
+  },
+  {
+    "key": "azure-openai",
+    "name": "openai",
+    "iconPath": "assets/azure/azure-openai.svg",
+    "label": "Azure OpenAI",
+    "category": 4
+  },
+  {
+    "key": "fabric-capacity",
+    "name": "fabric",
+    "iconPath": "assets/azure/fabric-capacity.svg",
+    "label": "Fabric Capacity",
+    "category": 4
+  }
 ]

@@ -1,0 +1,40 @@
+@inherits FeedbackComponent<string, string>
+@using AzureDesignStudio.Core.Validation
+@using System.Text.Json
+
+@if (issues.Count == 0)
+{
+    <span style="font-size:16px;">No issues found. The design passes all validation rules.</span>
+}
+else
+{
+    <span style="font-size:16px;">@issues.Count issue(s) found:</span>
+    <br />
+    <AntList TItem="ValidationIssue" DataSource="@issues" Size="@ListSize.Small" Split="true">
+        <ChildContent Context="item">
+            <ListItem Style="padding:8px 0px;">
+                <div style="display:flex;align-items:baseline;gap:8px;">
+                    <Tag Color="@SeverityColor(item.Severity)">@item.Severity</Tag>
+                    <span><b>@item.NodeName</b> — @item.Message</span>
+                </div>
+            </ListItem>
+        </ChildContent>
+    </AntList>
+}
+
+@code {
+    private List<ValidationIssue> issues = new();
+
+    protected override void OnInitialized()
+    {
+        if (!string.IsNullOrEmpty(Options))
+            issues = JsonSerializer.Deserialize<List<ValidationIssue>>(Options, ValidationJson.Options) ?? new();
+    }
+
+    private static string SeverityColor(ValidationSeverity severity) => severity switch
+    {
+        ValidationSeverity.Error => "red",
+        ValidationSeverity.Warning => "orange",
+        _ => "blue",
+    };
+}

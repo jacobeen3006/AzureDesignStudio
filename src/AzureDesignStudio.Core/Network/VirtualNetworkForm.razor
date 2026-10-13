@@ -37,6 +37,14 @@
                     <InputGroup Compact>
                         <Input @bind-Value="@(item.Name)" Size="@InputSize.Small" />
                         <Input @bind-Value="@(item.AddressPrefix)" Size="@InputSize.Small" />
+                        <SimpleSelect @bind-Value="item.Delegation" Size="@InputSize.Small" Style="width: 220px;">
+                            <SelectOptions>
+                                <SimpleSelectOption Label="No delegation" Value="@("")" />
+                                <SimpleSelectOption Label="Microsoft.App/environments" Value="@("Microsoft.App/environments")" />
+                                <SimpleSelectOption Label="Microsoft.Web/serverfarms" Value="@("Microsoft.Web/serverfarms")" />
+                                <SimpleSelectOption Label="Microsoft.Database/custom" Value="@("Microsoft.Database/custom")" />
+                            </SelectOptions>
+                        </SimpleSelect>
                         <Tooltip Title=@("Remove the subnet") Style="display:inline-flex;">
                             <Button Icon="delete" Size="@ButtonSize.Small" Disabled="@(context.Subnets.Count <= 1)"
                                     OnClick="() => {HandleRemoveSubnet(item);}" />

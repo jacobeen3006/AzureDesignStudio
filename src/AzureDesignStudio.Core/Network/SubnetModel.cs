@@ -53,6 +53,15 @@ namespace AzureDesignStudio.Core.Network
             get => _subnet.Properties.AddressPrefix; 
             set => _subnet.Properties.AddressPrefix = value; 
         }
+
+        [MapToDto]
+        [DisplayName("Delegation")]
+        public string Delegation
+        {
+            get => _delegation;
+            set => _delegation = value;
+        }
+        private string _delegation = string.Empty;
         private static void PopulateServiceEndpoints(NodeModel node, IList<ServiceEndpointPropertiesFormat> serviceEndpoints)
         {
             foreach (var port in node.Ports)
@@ -126,6 +135,19 @@ namespace AzureDesignStudio.Core.Network
                 {
                     PopulateServiceEndpoints(child, _subnet.Properties.ServiceEndpoints);
                 }
+            }
+
+            if (!string.IsNullOrEmpty(Delegation)
+                && _subnet.Properties.Delegations.FirstOrDefault(d => d.Properties?.ServiceName == Delegation) is null)
+            {
+                _subnet.Properties.Delegations.Add(new()
+                {
+                    Name = $"{Delegation.Split('/').Last()}-delegation",
+                    Properties = new()
+                    {
+                        ServiceName = Delegation
+                    }
+                });
             }
 
             // Don't include them in the serialization if they are empty. 
