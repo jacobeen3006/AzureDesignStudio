@@ -195,5 +195,31 @@ namespace AzureDesignStudio.Core.Tests
             Assert.Equal("""{"size":3}""", latest.Snapshots.Single(s => s.Name == "one").PropertiesJson); // raw ARM JSON verbatim
             Assert.Null(await scans.GetResumableAsync());
         }
+
+        [Fact]
+        public async Task Start_WritesInitialCheckpoint_AndRetiresStaleRunningScans()
+        {
+            var scans = new WorkspaceScans(_workspace);
+            var crashed = await scans.StartAsync("tenant", "Tenant", checkpointJson: """{"rows":0}""");
+
+            // A crash before the first persisted page still leaves a resumable row:
+            // the checkpoint lands at start, not at first page.
+            var resumable = await scans.GetResumableAsync();
+            Assert.Equal(crashed.Id, resumable!.Id);
+
+            // a fresh start must not shadow the crashed row - it becomes Interrupted
+            var fresh = await scans.StartAsync("tenant", "Tenant", checkpointJson: "{}");
+            Assert.NotEqual(crashed.Id, fresh.Id);
+            using (var db = _workspace.CreateContext())
+            {
+                var retired = db.Scans.Single(s => s.Id == crashed.Id);
+                Assert.Equal("Interrupted", retired.Status);
+                Assert.NotNull(retired.FinishedAt);
+            }
+
+            // and the fresh scan is now the single resumable candidate
+            var current = await scans.GetResumableAsync();
+            Assert.Equal(fresh.Id, current!.Id);
+        }
     }
 }

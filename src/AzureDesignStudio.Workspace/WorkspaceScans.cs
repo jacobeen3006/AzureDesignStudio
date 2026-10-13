@@ -23,14 +23,25 @@ public sealed class WorkspaceScans(WorkspaceDb db)
         return running.OrderByDescending(s => s.StartedAt).FirstOrDefault();
     }
 
-    /// <summary>Opens a run; pass the existing id when resuming so history stays one row.</summary>
-    public async Task<ScanRecord> StartAsync(string scope, string scopeType, string? resumeScanId = null)
+    /// <summary>
+    /// Opens a run; pass the existing id when resuming so history stays one row. A fresh
+    /// start retires leftover Running rows (crash before first page) - they can only be
+    /// picked up through the resume path, never silently shadowed.
+    /// </summary>
+    public async Task<ScanRecord> StartAsync(string scope, string scopeType, string? resumeScanId = null, string? checkpointJson = null)
     {
         await using var ctx = db.CreateContext();
         ScanRecord scan;
         if (resumeScanId is null)
         {
-            scan = new ScanRecord { Scope = scope, ScopeType = scopeType, Status = "Running", StartedAt = DateTimeOffset.UtcNow };
+            var stale = await ctx.Scans.Where(s => s.Status == "Running").ToListAsync();
+            foreach (var old in stale)
+            {
+                old.Status = "Interrupted";
+                old.FinishedAt = DateTimeOffset.UtcNow;
+                old.Error ??= "replaced by new scan";
+            }
+            scan = new ScanRecord { Scope = scope, ScopeType = scopeType, Status = "Running", StartedAt = DateTimeOffset.UtcNow, CheckpointJson = checkpointJson };
             ctx.Scans.Add(scan);
         }
         else scan = await ctx.Scans.SingleAsync(s => s.Id == resumeScanId);
@@ -39,6 +50,7 @@ public sealed class WorkspaceScans(WorkspaceDb db)
             scan.Status = "Running";
             scan.FinishedAt = null;
             scan.Error = null;
+            if (checkpointJson is not null) scan.CheckpointJson = checkpointJson;
         }
         await ctx.SaveChangesAsync();
         return scan;

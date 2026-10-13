@@ -88,6 +88,6 @@ public sealed class PermissionPreflight(ArmTransport transport, ResourceGraphCli
     {
         401 => "token rejected - sign in again",
         403 => $"missing permission ({e.Code}) - request role: {role}",
-        _ => $"{e.Code}: {e.Message}",
+        _ => $"{e.StatusCode} {e.Code}: {e.Message}",
     };
 }

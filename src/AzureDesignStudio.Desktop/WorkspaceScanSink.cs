@@ -20,7 +20,7 @@ public sealed class WorkspaceScanSink(WorkspaceDb db) : IScanSink
     public async Task ScanStartedAsync(ScanRequest request, ScanCheckpoint checkpoint, bool isResume, CancellationToken ct)
     {
         var existing = isResume ? await _scans.GetResumableAsync() : null;
-        var scan = await _scans.StartAsync(request.Scope, request.ScopeType, existing?.Id);
+        var scan = await _scans.StartAsync(request.Scope, request.ScopeType, existing?.Id, checkpoint.ToJson());
         ScanId = scan.Id;
     }
 

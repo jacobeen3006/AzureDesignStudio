@@ -7,7 +7,7 @@ namespace AzureDesignStudio.Discovery.ResourceGraph;
 public sealed class ResourceGraphOptions
 {
     public string Endpoint { get; init; } = "https://management.azure.com";
-    public string ApiVersion { get; init; } = "2022-03-01";
+    public string ApiVersion { get; init; } = "2024-04-01";
     public string Scope { get; init; } = "https://management.azure.com/.default";
 
     /// <summary>ARG hard limit per response.</summary>
@@ -78,7 +78,7 @@ public sealed class ResourceGraphException : Exception
 
     internal static ResourceGraphException FromErrorBody(int statusCode, string body)
     {
-        string code = "Unknown", message = body;
+        string code = "Unknown", message = string.IsNullOrWhiteSpace(body) ? $"HTTP {statusCode} with empty error body" : body;
         try
         {
             if (JsonNode.Parse(body)?["error"] is JsonObject error)
