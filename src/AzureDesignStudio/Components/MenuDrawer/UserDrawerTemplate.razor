@@ -5,6 +5,7 @@
 @inject NavigationManager _navManager
 @inject DrawerService _drawerService
 @inject DeployGrpcService _deployService
+@inject AdsHostAuth _hostAuth
 
 <AuthorizeView>
     <Authorized>
@@ -77,6 +78,11 @@
         DrawerRef<string> dr = (FeedbackRef as DrawerRef<string>)!;
         await dr!.CloseAsync(string.Empty);
 
+        if (_hostAuth.SignIn is { } signIn)
+        {
+            await signIn();
+            return;
+        }
         _navManager.NavigateToLogin("authentication/login");
     }
 
@@ -85,6 +91,11 @@
         DrawerRef<string> dr = (FeedbackRef as DrawerRef<string>)!;
         await dr!.CloseAsync(string.Empty);
 
+        if (_hostAuth.SignOut is { } signOut)
+        {
+            await signOut();
+            return;
+        }
         _navManager.NavigateToLogout("authentication/logout");
     }
 

@@ -35,10 +35,6 @@ public static class MauiProgram
         var serverUrl = builder.Configuration["ServerUrl"] ?? "http://localhost:5203";
         var resourceRoot = builder.Configuration["ResourceRoot"] ?? "/";
 
-        // Static content (stencils, icons, images) is served from the app package via
-        // the WebView virtual host. NavigationManager is circuit-scoped and initialized
-        // only after the first render, so it must NOT be touched from client factories;
-        // the origin is fixed instead (first BlazorWebView on Windows = 0.0.0.1).
         var webViewOrigin = new Uri("https://0.0.0.1/");
         builder.Services.AddHttpClient("AzureDesignStudio.Root", (sp, client) => client.BaseAddress = webViewOrigin)
             .ConfigurePrimaryHttpMessageHandler(() => new PackageAssetHandler(webViewOrigin));
@@ -48,18 +44,32 @@ public static class MauiProgram
 
         // Native gRPC (HTTP/2) directly against the server; the browser-only
         // Grpc.Net.Client.Web shim from the WASM host is not needed here.
-        // Client names match the shared service wrappers' GrpcClientFactory lookups.
+        // Client names match the shared service wrappers' GrpcClientFactory lookups;
+        // the [Authorize] endpoints get their bearer token from the MSAL handler.
         builder.Services.AddScoped<DesignGrpcService>();
-        builder.Services.AddGrpcClient<Design.DesignClient>("DesignClientWithAuth", o => o.Address = new Uri(serverUrl));
+        builder.Services.AddGrpcClient<Design.DesignClient>("DesignClientWithAuth", o => o.Address = new Uri(serverUrl))
+            .AddHttpMessageHandler<MsalAuthTokenHandler>();
         builder.Services.AddScoped<DeployGrpcService>();
-        builder.Services.AddGrpcClient<Deploy.DeployClient>("DeployClientWithAuth", o => o.Address = new Uri(serverUrl));
+        builder.Services.AddGrpcClient<Deploy.DeployClient>("DeployClientWithAuth", o => o.Address = new Uri(serverUrl))
+            .AddHttpMessageHandler<MsalAuthTokenHandler>();
         builder.Services.AddScoped<CostGrpcService>();
         builder.Services.AddScoped<CostService>();
         builder.Services.AddGrpcClient<Cost.CostClient>("CostClient", o => o.Address = new Uri(serverUrl));
 
-        // Anonymous until MSAL sign-in lands (plan 4.2); components subscribe to this provider.
+        // Native MSAL (plan 4.2): work + personal accounts via the Windows broker
+        // (WAM) with device-code fallback; state mirrors the serialized cache.
+        builder.Services.AddSingleton<MsalAccountService>();
+        builder.Services.AddTransient<MsalAuthTokenHandler>();
         builder.Services.AddScoped<AuthenticationStateProvider, DesktopAuthenticationStateProvider>();
         builder.Services.AddAuthorizationCore();
+
+        // The shared drawers call these instead of the WASM server-redirect flow.
+        builder.Services.AddSingleton(sp => new AdsHostAuth
+        {
+            SignIn = () => sp.GetRequiredService<MsalAccountService>().SignInAsync(),
+            SignOut = async () => await sp.GetRequiredService<MsalAccountService>().SignOutAsync(),
+        });
+
 
         builder.Services.AddMauiBlazorWebView();
         builder.Services.AddAntDesign();

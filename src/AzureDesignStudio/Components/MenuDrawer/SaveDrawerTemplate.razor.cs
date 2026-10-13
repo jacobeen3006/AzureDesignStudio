@@ -67,6 +67,11 @@ namespace AzureDesignStudio.Components.MenuDrawer
             DrawerRef<string> dr = (FeedbackRef as DrawerRef<string>)!;
             await dr!.CloseAsync(string.Empty);
 
+            if (_hostAuth.SignIn is { } signIn)
+            {
+                await signIn();
+                return;
+            }
             _navManager.NavigateToLogin("authentication/login");
         }
 

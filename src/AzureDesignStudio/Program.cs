@@ -69,6 +69,9 @@ builder.Services.AddGrpcClient<Cost.CostClient>("CostClient", o =>
 
 builder.Services.AddAntDesign();
 builder.Services.AddSingleton<AdsContext>();
+// Server redirect sign-in flow (AddMsalAuthentication + /authentication endpoints);
+// no host overrides needed on WASM.
+builder.Services.AddSingleton<AdsHostAuth>();
 builder.Services.AddAutoMapper(typeof(AzureNodeProfile));
 // Bicep decompiler service
 builder.Services.AddAdsBicepDecompiler();
