@@ -33,12 +33,14 @@ namespace AzureDesignStudio.Components
             diagram.History.StateChanged += HandleHistoryStateChanged;
             undoAvailable = diagram.History.CanUndo;
             redoAvailable = diagram.History.CanRedo;
+            diagram.Snapping.GuideChanged += HandleGuideChanged;
         }
 
         public void Dispose()
         {
             diagram.History.Detach();
             diagram.History.StateChanged -= HandleHistoryStateChanged;
+            diagram.Snapping.GuideChanged -= HandleGuideChanged;
             diagram.PointerDown -= HandlePointerDown;
             diagram.PointerUp -= HandlePointerUp;
             diagram.SelectionChanged -= HandleSelectionChanged;

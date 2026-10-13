@@ -1,0 +1,160 @@
+@using Blazor.Diagrams.Core.Extensions
+@using Blazor.Diagrams.Core.Geometry
+@using Blazor.Diagrams.Core.Models
+@using Blazor.Diagrams.Core.Models.Base
+@implements IDisposable
+@inject AzureDesignStudio.Services.AdsContext adsContext
+
+<div class="ads-navigator" @onpointerdown:stopPropagation="true" @onpointerdown="OnPointerDown"
+     @onpointermove="OnPointerMove" @onpointerup="OnPointerUp" @onpointerleave="OnPointerUp">
+    <svg width="@Width" height="@Height">
+        @foreach (var rect in ModelRects)
+        {
+            <rect class="@(rect.IsGroup ? "ads-navigator-group" : "ads-navigator-node")"
+                  x="@rect.X" y="@rect.Y" width="@rect.W" height="@rect.H"></rect>
+        }
+        <rect class="ads-navigator-viewport" x="@Viewport.X" y="@Viewport.Y" width="@Viewport.W" height="@Viewport.H"></rect>
+    </svg>
+</div>
+
+@code {
+    private const double Width = 200;
+    private const double Height = 140;
+
+    private AzureDesignStudio.Services.AdsDiagram diagram = null!;
+    private readonly HashSet<MovableModel> tracked = new();
+
+    // Model-space view window (content bounds union viewport, padded).
+    private double viewMinX, viewMinY, viewScale = 1;
+
+    private bool panning;
+
+    private readonly record struct DrawnRect(double X, double Y, double W, double H, bool IsGroup);
+
+    protected override void OnInitialized()
+    {
+        diagram = adsContext.Diagram;
+        diagram.Nodes.Added += OnModelAdded;
+        diagram.Nodes.Removed += OnModelRemoved;
+        diagram.Groups.Added += OnModelAdded;
+        diagram.Groups.Removed += OnModelRemoved;
+        diagram.ZoomChanged += OnStateChanged;
+        diagram.PanChanged += OnStateChanged;
+        diagram.ContainerChanged += OnStateChanged;
+        foreach (var m in diagram.Nodes.Concat<MovableModel>(diagram.Groups))
+            Track(m);
+    }
+
+    public void Dispose()
+    {
+        diagram.Nodes.Added -= OnModelAdded;
+        diagram.Nodes.Removed -= OnModelRemoved;
+        diagram.Groups.Added -= OnModelAdded;
+        diagram.Groups.Removed -= OnModelRemoved;
+        diagram.ZoomChanged -= OnStateChanged;
+        diagram.PanChanged -= OnStateChanged;
+        diagram.ContainerChanged -= OnStateChanged;
+        foreach (var m in tracked)
+            m.Moved -= OnModelMoved;
+        tracked.Clear();
+    }
+
+    private void OnModelAdded(MovableModel model) => Track(model);
+    private void OnModelRemoved(MovableModel model) => Untrack(model);
+
+    private void Track(MovableModel model)
+    {
+        if (tracked.Add(model))
+            model.Moved += OnModelMoved;
+    }
+
+    private void Untrack(MovableModel model)
+    {
+        if (tracked.Remove(model))
+            model.Moved -= OnModelMoved;
+    }
+
+    private void OnStateChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnModelMoved(MovableModel model) => OnStateChanged();
+
+
+    private IEnumerable<NodeModel> Models => diagram.Nodes.Concat<NodeModel>(diagram.Groups);
+
+    private Rectangle? ViewportBounds =>
+        diagram.Container is { } c
+            ? new Rectangle(-diagram.Pan.X / diagram.Zoom, -diagram.Pan.Y / diagram.Zoom,
+                (-diagram.Pan.X + c.Width) / diagram.Zoom, (-diagram.Pan.Y + c.Height) / diagram.Zoom)
+            : null;
+
+    private void ComputeView()
+    {
+        var bounds = Models.Select(m => m.GetBounds(includePorts: false)).Append(ViewportBounds)
+            .Where(b => b is not null).Select(b => b!).ToList();
+        var minX = bounds.Count > 0 ? bounds.Min(b => b.Left) : 0;
+        var minY = bounds.Count > 0 ? bounds.Min(b => b.Top) : 0;
+        var maxX = bounds.Count > 0 ? bounds.Max(b => b.Right) : Width;
+        var maxY = bounds.Count > 0 ? bounds.Max(b => b.Bottom) : Height;
+        var w = Math.Max(maxX - minX, 50) * 1.15;
+        var h = Math.Max(maxY - minY, 50) * 1.15;
+        viewMinX = minX - (w - (maxX - minX)) / 2;
+        viewMinY = minY - (h - (maxY - minY)) / 2;
+        viewScale = Math.Min(Width / w, Height / h);
+    }
+
+    private IEnumerable<DrawnRect> ModelRects
+    {
+        get
+        {
+            ComputeView();
+            foreach (var m in Models)
+            {
+                var b = m.GetBounds(includePorts: false);
+                if (b is null)
+                    continue;
+                yield return new DrawnRect((b.Left - viewMinX) * viewScale, (b.Top - viewMinY) * viewScale,
+                    b.Width * viewScale, b.Height * viewScale, m is GroupModel);
+            }
+        }
+    }
+
+    private DrawnRect Viewport
+    {
+        get
+        {
+            var v = ViewportBounds ?? Rectangle.Zero;
+            return new DrawnRect((v.Left - viewMinX) * viewScale, (v.Top - viewMinY) * viewScale,
+                v.Width * viewScale, v.Height * viewScale, false);
+        }
+    }
+
+    private void OnPointerDown(PointerEventArgs e)
+    {
+        panning = true;
+        PanTo(e);
+    }
+
+    private void OnPointerMove(PointerEventArgs e)
+    {
+        if (panning)
+            PanTo(e);
+    }
+
+    private void OnPointerUp(PointerEventArgs e) => panning = false;
+
+    private void PanTo(PointerEventArgs e)
+    {
+        // Model point under the navigator cursor -> bring it to the viewport center.
+        var modelX = viewMinX + e.OffsetX / viewScale;
+        var modelY = viewMinY + e.OffsetY / viewScale;
+        if (diagram.Container is not { } c)
+            return;
+
+        var targetPanX = c.Width / 2 - modelX * diagram.Zoom;
+        var targetPanY = c.Height / 2 - modelY * diagram.Zoom;
+        diagram.UpdatePan(targetPanX - diagram.Pan.X, targetPanY - diagram.Pan.Y);
+    }
+}

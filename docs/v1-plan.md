@@ -82,6 +82,8 @@
 
 **Status (2026-10-13): 3.2 complete.** `DiagramHistory` (Core/Common) — command stack over diagram events: node/group add/remove (incl. child snapshots), move (gesture window per pointer drag, coalesced), link add/remove, group-membership (`RecordChildMembership`; library exposes no group event). `Capture` = one user action = one command; `Suspend` = programmatic (design load/print) records nothing. Toolbar Undo/Redo + Ctrl+Z/Y/Ctrl+Alt+Z wired through `StateChanged`; subnet add/remove in `VirtualNetworkForm` records as composite. Verified headless: drop/undo/redo button states, drag-into-group undo restores position+membership, delete modal undo/redo, subnet path.
 
+**Status (2026-10-13): 3.3 complete → Phase 3 done.** `SnappingDragBehavior` (Services): edge/center alignment guides over `DragMovables` semantics, snap window widened by `GridSize` so 10px grid quantization can't strand nodes off-target; Navigator minimap via `DiagramNavigator`; shortcuts Ctrl+Z/Y/Shift+Z + Ctrl+C/V over DTO clipboard; keyboard Delete stays removed (app deletes via context-menu confirm dialog, as in the fork). Verified headless on NuGet build: drop x3, snap-aligned drag (exact X/Y, guides drawn+cleared), drag-into-group, click-select in group, copy/paste, undo/redo (paste round-trip), port→port link commit (`diagram-link attached`; node/body drops correctly rejected by `CanAttachTo`), minimap canvas present, no circuit errors.
+
 ## Phase 4 — Desktop (MAUI Blazor Hybrid)
 
 **Goal:** installable Windows app sharing the component stack.

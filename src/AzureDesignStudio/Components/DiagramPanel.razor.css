@@ -50,3 +50,22 @@
     border-radius: 2px;
     vertical-align: -1px;
 }
+
+.ads-guide {
+    position: absolute;
+    background: #ff8c00;
+    z-index: 4;
+    pointer-events: none;
+}
+
+.ads-guide-v {
+    top: 0;
+    bottom: 0;
+    width: 1px;
+}
+
+.ads-guide-h {
+    left: 0;
+    right: 0;
+    height: 1px;
+}

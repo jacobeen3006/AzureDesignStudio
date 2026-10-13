@@ -10,9 +10,10 @@ namespace AzureDesignStudio.Services
     public class AdsContext
     {
         private readonly IHttpClientFactory clientFactory = null!;
-        public AdsContext(IHttpClientFactory factory)
+        public AdsContext(IHttpClientFactory factory, AutoMapper.IMapper mapper)
         {
             clientFactory = factory;
+            Diagram.Mapper = mapper;
         }
 
         public async Task InitializeAsync()

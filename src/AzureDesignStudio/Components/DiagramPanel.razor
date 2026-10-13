@@ -14,6 +14,15 @@
             <DiagramCanvas Class="ads-diagram-canvas"></DiagramCanvas>
         </div>
     </CascadingValue>
+    @if (guideX is not null)
+    {
+        <div class="ads-guide ads-guide-v" style="@($"left:{diagram.Pan.X + guideX.Value * diagram.Zoom}px")"></div>
+    }
+    @if (guideY is not null)
+    {
+        <div class="ads-guide ads-guide-h" style="@($"top:{diagram.Pan.Y + guideY.Value * diagram.Zoom}px")"></div>
+    }
+    <DiagramNavigator />
     <div class="ads-context-menu @(showCtxMenu ? "ads-context-menu-active" : "")">
         <div class="ads-context-btn-container">
             <Button Type="@ButtonType.Text" Class="ads-context-btn" Icon="Edit" OnClick="_=>OpenNodeDrawer()" Disabled="@(!nodeEditable)">
@@ -82,6 +91,18 @@
 
             undoAvailable = diagram.History.CanUndo;
             redoAvailable = diagram.History.CanRedo;
+            StateHasChanged();
+        });
+    }
+
+    private double? guideX, guideY;
+
+    private void HandleGuideChanged(double? x, double? y)
+    {
+        InvokeAsync(() =>
+        {
+            guideX = x;
+            guideY = y;
             StateHasChanged();
         });
     }

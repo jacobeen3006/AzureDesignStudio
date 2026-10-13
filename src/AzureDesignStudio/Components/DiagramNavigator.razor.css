@@ -1,0 +1,36 @@
+.ads-navigator {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    width: 200px;
+    height: 140px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.85);
+    cursor: crosshair;
+    touch-action: none;
+    user-select: none;
+    z-index: 5;
+}
+
+.ads-navigator svg {
+    display: block;
+}
+
+.ads-navigator-node {
+    fill: #50e6ff;
+    fill-opacity: 0.55;
+}
+
+.ads-navigator-group {
+    fill: none;
+    stroke: #0078d4;
+    stroke-width: 1;
+}
+
+.ads-navigator-viewport {
+    fill: none;
+    stroke: #323130;
+    stroke-width: 1;
+    stroke-dasharray: 4 3;
+}
