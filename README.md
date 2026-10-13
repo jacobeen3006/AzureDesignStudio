@@ -277,6 +277,8 @@ cd AzureDesignStudio
 - [Entra Setup & Desktop Build](docs/entra-setup.md) — App registration, auth configuration, MSIX packaging
 - [Development Guidelines](AGENTS.md) — Coding standards, conventions, and development workflow
 - [Changelog](CHANGELOG.md) — Release history
+- [Roadmap: v2 Plan](docs/v2-plan.md) — Live tenant analysis, drift, safe execution, decommissioning (phases 6–13)
+- [Improvement Backlog](docs/top-100-improvements.md) — The 100-item capability/competitive analysis behind the roadmap
 
 ---
 

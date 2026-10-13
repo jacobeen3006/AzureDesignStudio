@@ -124,3 +124,7 @@
 2. **3.x group reimplementation** — fork delta is small but load-bearing; keep fork branch until parity proven.
 3. **Retail-price meter mapping** — start with top-10 SKUs, mark unmapped as "estimate unavailable", never show wrong numbers silently.
 4. **ME fork longevity** — re-evaluate at Phase 3 start; org release preferred if .NET 10-ready.
+
+## Handoff
+
+v1 closed 2026-10-13 (Phases 0-5 all done). Continuation: `docs/v2-plan.md` (Phases 6-13 - live tenant discovery, topology, change intelligence, IaC breadth, safe execution, stacks, decommission), sequenced per `docs/top-100-improvements.md` section 3.
