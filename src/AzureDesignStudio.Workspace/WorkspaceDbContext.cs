@@ -15,6 +15,7 @@ public class WorkspaceDbContext(DbContextOptions<WorkspaceDbContext> options) : 
     public DbSet<CostCacheEntry> CostCache => Set<CostCacheEntry>();
     public DbSet<ExecutionPlanRecord> ExecutionPlans => Set<ExecutionPlanRecord>();
     public DbSet<AuditRecord> AuditRecords => Set<AuditRecord>();
+    public DbSet<NodePositionRecord> NodePositions => Set<NodePositionRecord>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -53,6 +54,7 @@ public class WorkspaceDbContext(DbContextOptions<WorkspaceDbContext> options) : 
         });
 
         model.Entity<AuditRecord>(e => e.HasIndex(a => a.Timestamp));
+        model.Entity<NodePositionRecord>(e => e.HasKey(p => p.NodeId));
     }
 }
 
@@ -75,9 +77,9 @@ public sealed class WorkspaceDb
         using var db = CreateContext();
         db.Database.EnsureCreated();
         EnsureAddedColumns(db);
+        EnsureAdditiveTables();
     }
 
-    // EnsureCreated never alters an existing schema; additive columns land here (SQLite ALTER is cheap).
     private void EnsureAddedColumns(WorkspaceDbContext db)
     {
         var conn = db.Database.GetDbConnection();
@@ -93,6 +95,27 @@ public sealed class WorkspaceDb
                 add.ExecuteNonQuery();
             }
         }
+        conn.Close();
+    }
+
+    // EnsureCreated skips new tables on an existing database; CREATE TABLE IF NOT EXISTS keeps
+    // the additive bootstrap idempotent for both fresh and upgraded workspace files.
+    private void EnsureAdditiveTables()
+    {
+        using var db = CreateContext();
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS "NodePositions" (
+                "NodeId" TEXT NOT NULL PRIMARY KEY,
+                "ContainerId" TEXT NOT NULL,
+                "X" REAL NOT NULL,
+                "Y" REAL NOT NULL,
+                "SavedAt" TEXT NOT NULL
+            );
+            """;
+        cmd.ExecuteNonQuery();
         conn.Close();
     }
 

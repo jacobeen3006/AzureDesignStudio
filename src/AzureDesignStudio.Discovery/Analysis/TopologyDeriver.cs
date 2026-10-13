@@ -30,13 +30,20 @@ public enum TopologyEdgeKind
 
 public sealed record TopologyNode(string Id, string Name, string Type, string? ResourceGroup, bool External)
 {
-    /// <summary>Parent by ARM id nesting (sql db → server, subnet → vnet); null at top level.</summary>
+    /// <summary>
+    /// Owner by ARM id nesting: child ids end /childType/childName, so the parent is two
+    /// segments up (subnet → vnet, sql db → server). Top-level resources have no parent node.
+    /// </summary>
     public string? ParentId
     {
         get
         {
-            var i = Id.LastIndexOf("/" + Name, StringComparison.OrdinalIgnoreCase);
-            return i > 0 ? Id[..i] : null;
+            var i = Id.LastIndexOf('/');
+            if (i <= 0) return null;
+            var j = Id.LastIndexOf('/', i - 1);
+            if (j <= 0) return null;
+            var candidate = Id[..j];
+            return candidate.Contains("/providers/", StringComparison.OrdinalIgnoreCase) ? candidate : null;
         }
     }
 }

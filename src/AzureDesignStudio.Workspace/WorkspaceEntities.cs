@@ -60,6 +60,18 @@ public class CostCacheEntry
     public DateTimeOffset ExpiresAt { get; set; }
 }
 
+/// <summary>Node placement keyed by ARM resource id: a rescan finds the same id and keeps
+/// the position (plan 8.2 - identity-stable layout). Coordinates are local to the frame
+/// container recorded in ContainerId (e.g. "rg:sub|myrg" or a parent resource id).</summary>
+public class NodePositionRecord
+{
+    public required string NodeId { get; set; }
+    public required string ContainerId { get; set; }
+    public double X { get; set; }
+    public double Y { get; set; }
+    public DateTimeOffset SavedAt { get; set; }
+}
+
 /// <summary>Executable change plan (Phase 9 guardrails persist these before anything runs).</summary>
 public class ExecutionPlanRecord
 {
