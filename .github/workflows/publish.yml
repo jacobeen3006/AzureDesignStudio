@@ -26,8 +26,10 @@ jobs:
         dotnet-version: ${{ env.DOTNET_VERSION }}
     - name: Publish
       run: dotnet publish src/AzureDesignStudio -c Release -o out/wasm --nologo
-    - name: Zip
-      run: cd out/wasm && zip -rq ../../ads-wasm.zip .
+    - name: Zip site (wwwroot contents at archive root, plus web.config)
+      run: |
+        (cd out/wasm/wwwroot && zip -rq "$GITHUB_WORKSPACE/ads-wasm.zip" .)
+        zip -j ads-wasm.zip out/wasm/web.config
     - uses: actions/upload-artifact@v4
       with:
         name: ads-wasm
