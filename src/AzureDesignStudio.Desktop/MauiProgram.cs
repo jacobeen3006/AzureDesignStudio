@@ -46,6 +46,9 @@ public static class MauiProgram
         // Grpc.Net.Client.Web shim from the WASM host is not needed here.
         // Client names match the shared service wrappers' GrpcClientFactory lookups;
         // the [Authorize] endpoints get their bearer token from the MSAL handler.
+        // Designs saved while the server is unreachable are kept under AppData
+        // and flushed on the next successful server interaction.
+        builder.Services.AddSingleton<IDesignOfflineStore, FileSystemDesignOfflineStore>();
         builder.Services.AddScoped<DesignGrpcService>();
         builder.Services.AddGrpcClient<Design.DesignClient>("DesignClientWithAuth", o => o.Address = new Uri(serverUrl))
             .AddHttpMessageHandler<MsalAuthTokenHandler>();

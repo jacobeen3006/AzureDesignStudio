@@ -328,7 +328,9 @@ namespace AzureDesignStudio.Components
             var statusCode = await designService.SaveDesign(designName, graph);
             if (statusCode >= 200 && statusCode <= 299)
             {
-                messageService.Success("The design is saved successfully.");
+                messageService.Success(designService.LastCallWasOffline
+                    ? "The design is saved on this device. It will sync when the server is reachable."
+                    : "The design is saved successfully.");
             }
             else
             {
