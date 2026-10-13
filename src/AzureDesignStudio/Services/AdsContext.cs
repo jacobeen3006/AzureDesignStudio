@@ -16,13 +16,18 @@ namespace AzureDesignStudio.Services
             Diagram.Mapper = mapper;
         }
 
+        /// <summary>Optional source override (desktop reads the bundled file); defaults to the site root fetch.</summary>
+        public Func<Task<IReadOnlyList<StencilModel>>>? StencilLoader { get; set; }
+
         public async Task InitializeAsync()
         {
             if (AllStencils == null)
             {
-                var httpClient = clientFactory.CreateClient("AzureDesignStudio.Root");
-                AllStencils = (await httpClient.GetFromJsonAsync<IReadOnlyList<StencilModel>>("ads-stencils.json"))!
-                    .OrderBy(s => s.Label).ToList();
+                var stencils = StencilLoader != null
+                    ? await StencilLoader()
+                    : (await clientFactory.CreateClient("AzureDesignStudio.Root")
+                        .GetFromJsonAsync<IReadOnlyList<StencilModel>>("ads-stencils.json"))!;
+                AllStencils = stencils.OrderBy(s => s.Label).ToList();
             }
         }
         public AdsDiagram Diagram { get; set; } = new AdsDiagram(CreateDiagramOptions());

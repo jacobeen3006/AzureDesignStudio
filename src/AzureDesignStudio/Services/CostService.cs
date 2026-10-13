@@ -24,20 +24,24 @@ namespace AzureDesignStudio.Services
     public class CostService
     {
         private readonly CostGrpcService _costGrpc;
-        private readonly HttpClient _http;
+        private readonly IHttpClientFactory _clientFactory;
+        private HttpClient? _http;
+        // WebView hosts initialize NavigationManager after the first render, so the
+        // client (and its base address) is resolved on first request, not in the ctor.
+        private HttpClient Http => _http ??= _clientFactory.CreateClient("AzureDesignStudio.Root");
         private List<CostMapEntry>? _costMap;
         private List<RetailMeter>? _snapshot;
 
         public CostService(CostGrpcService costGrpc, IHttpClientFactory clientFactory)
         {
             _costGrpc = costGrpc;
-            _http = clientFactory.CreateClient("AzureDesignStudio.Root");
+            _clientFactory = clientFactory;
         }
 
         public async Task<CostEstimateResult> EstimateAsync(IReadOnlyList<CostNodeInput> nodes, string region, string currency)
         {
             _costMap ??= JsonSerializer.Deserialize<List<CostMapEntry>>(
-                await _http.GetStringAsync("cost-map.json"),
+                await Http.GetStringAsync("cost-map.json"),
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
 
             var usedFallback = false;
@@ -87,7 +91,7 @@ namespace AzureDesignStudio.Services
             catch (Exception)
             {
                 _snapshot ??= JsonSerializer.Deserialize<List<RetailMeter>>(
-                    await _http.GetStringAsync("price-snapshot.json"),
+                    await Http.GetStringAsync("price-snapshot.json"),
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
                 var meters = _snapshot.Where(m => m.ServiceName == entry.ServiceName).ToList();
                 return (CostEstimator.Estimate(entry, nodeSku, meters), true);

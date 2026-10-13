@@ -23,5 +23,13 @@
         </NotFound>
     </Router>
     <AntContainer />
-    <ApplicationInsightsComponent />
+    @if (EnableTelemetry)
+    {
+        <ApplicationInsightsComponent />
+    }
 </CascadingAuthenticationState>
+
+@code {
+    /// <summary>Desktop host disables telemetry until MSAL/AI wiring lands (plan 4.2).</summary>
+    [Parameter] public bool EnableTelemetry { get; set; } = true;
+}

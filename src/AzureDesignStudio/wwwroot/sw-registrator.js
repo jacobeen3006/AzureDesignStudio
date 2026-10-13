@@ -42,3 +42,5 @@ window.registerServiceWorker = () => {
             });
     }
 }
+
+window.AdsHostSupportsServiceWorker = () => 'serviceWorker' in navigator;

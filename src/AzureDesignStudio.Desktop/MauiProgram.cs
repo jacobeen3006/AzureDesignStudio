@@ -1,0 +1,148 @@
+using System.Net;
+using System.Net.Http.Headers;
+using BlazorApplicationInsights;
+using AzureDesignStudio.Core.DTO;
+using AzureDesignStudio.Services;
+using AzureDesignStudio.SharedModels.Protos;
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+namespace AzureDesignStudio.Desktop;
+
+public static class MauiProgram
+{
+    public static IServiceProvider Services { get; private set; } = null!;
+
+    public static MauiApp CreateMauiApp()
+    {
+        var builder = MauiApp.CreateBuilder();
+        AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+            System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ads_desktop_crash.log"),
+                $"[{DateTime.Now:O}] UNHANDLED\n{e.ExceptionObject}\n\n");
+        TaskScheduler.UnobservedTaskException += (s, e) =>
+            System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ads_desktop_crash.log"),
+                $"[{DateTime.Now:O}] UNOBSERVED\n{e.Exception}\n\n");
+        builder
+            .UseMauiApp<App>()
+            .ConfigureFonts(fonts =>
+            {
+                fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
+            });
+
+        builder.Configuration.AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
+        var serverUrl = builder.Configuration["ServerUrl"] ?? "http://localhost:5203";
+        var resourceRoot = builder.Configuration["ResourceRoot"] ?? "/";
+
+        // Static content (stencils, icons, images) is served from the app package via
+        // the WebView virtual host. NavigationManager is circuit-scoped and initialized
+        // only after the first render, so it must NOT be touched from client factories;
+        // the origin is fixed instead (first BlazorWebView on Windows = 0.0.0.1).
+        var webViewOrigin = new Uri("https://0.0.0.1/");
+        builder.Services.AddHttpClient("AzureDesignStudio.Root", (sp, client) => client.BaseAddress = webViewOrigin)
+            .ConfigurePrimaryHttpMessageHandler(() => new PackageAssetHandler(webViewOrigin));
+        builder.Services.AddHttpClient("AzureDesignStudio.ResourceAccess", (sp, client) =>
+            client.BaseAddress = Uri.TryCreate(resourceRoot, UriKind.Absolute, out var abs) ? abs : webViewOrigin)
+            .ConfigurePrimaryHttpMessageHandler(() => new PackageAssetHandler(webViewOrigin));
+
+        // Native gRPC (HTTP/2) directly against the server; the browser-only
+        // Grpc.Net.Client.Web shim from the WASM host is not needed here.
+        // Client names match the shared service wrappers' GrpcClientFactory lookups.
+        builder.Services.AddScoped<DesignGrpcService>();
+        builder.Services.AddGrpcClient<Design.DesignClient>("DesignClientWithAuth", o => o.Address = new Uri(serverUrl));
+        builder.Services.AddScoped<DeployGrpcService>();
+        builder.Services.AddGrpcClient<Deploy.DeployClient>("DeployClientWithAuth", o => o.Address = new Uri(serverUrl));
+        builder.Services.AddScoped<CostGrpcService>();
+        builder.Services.AddScoped<CostService>();
+        builder.Services.AddGrpcClient<Cost.CostClient>("CostClient", o => o.Address = new Uri(serverUrl));
+
+        // Anonymous until MSAL sign-in lands (plan 4.2); components subscribe to this provider.
+        builder.Services.AddScoped<AuthenticationStateProvider, DesktopAuthenticationStateProvider>();
+        builder.Services.AddAuthorizationCore();
+
+        builder.Services.AddMauiBlazorWebView();
+        builder.Services.AddAntDesign();
+        builder.Services.AddBlazorApplicationInsights();
+        builder.Services.AddSingleton<AdsContext>();
+        builder.Services.AddAutoMapper(typeof(AzureNodeProfile));
+        builder.Services.AddAdsBicepDecompiler();
+
+        builder.Logging.AddConfiguration(builder.Configuration.GetSection("Logging"));
+        builder.Logging.AddProvider(new FileLoggerProvider(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ads_desktop_crash.log")));
+
+#if DEBUG
+        builder.Services.AddBlazorWebViewDeveloperTools();
+        builder.Logging.AddDebug();
+#endif
+
+        var app = builder.Build();
+        Services = app.Services;
+        return app;
+    }
+}
+
+internal sealed class FileLoggerProvider(string path) : ILoggerProvider
+{
+    public ILogger CreateLogger(string categoryName) => new FileLogger(path);
+    public void Dispose() { }
+
+    private sealed class FileLogger(string path) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Warning;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (!IsEnabled(logLevel)) return;
+            System.IO.File.AppendAllText(path, $"[{DateTime.Now:O}] {logLevel} {eventId}\n{formatter(state, exception)}\n{exception}\n\n");
+        }
+    }
+}
+
+// The WebView2 virtual host (https://0.0.0.1/) is only resolvable inside the WebView's
+// JS network stack; .NET HttpClient would hit an unreachable IP. Serve same-origin
+// requests straight from the packaged wwwroot, everything else goes to the real network.
+internal sealed class PackageAssetHandler(Uri webViewOrigin) : HttpMessageHandler
+{
+    private readonly HttpClient _network = new(new HttpClientHandler());
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var uri = request.RequestUri!;
+        if (uri.Host == webViewOrigin.Host && (uri.Scheme == "https" || uri.Scheme == "http"))
+        {
+            var path = uri.AbsolutePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+            var file = Path.Combine(AppContext.BaseDirectory, "wwwroot", path);
+            if (File.Exists(file))
+            {
+                var response = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    RequestMessage = request,
+                    Content = new ByteArrayContent(await File.ReadAllBytesAsync(file, cancellationToken)),
+                };
+                response.Content.Headers.ContentType = new MediaTypeHeaderValue(Path.GetExtension(file) switch
+                {
+                    ".json" => "application/json",
+                    ".svg" => "image/svg+xml",
+                    ".css" => "text/css",
+                    ".js" => "text/javascript",
+                    ".png" => "image/png",
+                    ".jpg" => "image/jpeg",
+                    _ => "application/octet-stream",
+                });
+                return response;
+            }
+            return new HttpResponseMessage(HttpStatusCode.NotFound) { RequestMessage = request };
+        }
+        return await _network.SendAsync(request, cancellationToken);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _network.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+}

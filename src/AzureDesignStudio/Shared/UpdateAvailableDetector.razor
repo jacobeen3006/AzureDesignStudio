@@ -6,6 +6,13 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // PWA-only feature: WebView hosts (desktop MAUI) ship no service worker, so the
+        // registrator function is absent there — skip instead of throwing.
+        var available = await _jsRuntime.InvokeAsync<bool>("AdsHostSupportsServiceWorker");
+        if (!available)
+        {
+            return;
+        }
         await RegisterForUpdateAvailableNotification();
     }
 

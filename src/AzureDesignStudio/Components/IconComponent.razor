@@ -10,9 +10,13 @@
     @<div></div>
     ;
 
-    protected override async Task OnInitializedAsync()
+    string? fetchedPath;
+
+    // Fetch after first render: WebView hosts initialize NavigationManager (and thus
+    // HttpClient base addresses) only after the initial render pass.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!string.IsNullOrEmpty(IconPath))
+        if (!string.IsNullOrEmpty(IconPath) && fetchedPath != IconPath)
         {
             var httpClient = clientFactory.CreateClient("AzureDesignStudio.ResourceAccess");
             string? svgMarkup;
@@ -25,12 +29,14 @@
                 // Decorative icon unavailable (e.g. local run without CDN assets); render empty.
                 return;
             }
+            fetchedPath = IconPath;
             component = builder =>
             {
                 builder.AddMarkupContent(0, svgMarkup);
             };
+            StateHasChanged();
         }
 
-        await base.OnInitializedAsync();
+        await base.OnAfterRenderAsync(firstRender);
     }
 }

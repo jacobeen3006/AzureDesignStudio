@@ -88,7 +88,7 @@
 
 **Goal:** installable Windows app sharing the component stack.
 
-- 4.1 `AzureDesignStudio.Desktop` MAUI project: `BlazorWebView` hosting Core components; JS interop paths + static assets verified under MAUI.
+- 4.1 `AzureDesignStudio.Desktop` MAUI project: `BlazorWebView` hosting Core components; JS interop paths + static assets verified under MAUI. **Done 2026-10-13:** root component reuses shared `App.razor` (telemetry gated via `EnableTelemetry=false`); WebView virtual host `https://0.0.0.1/` is JS-only, so host-side `HttpClient` named clients get a `PackageAssetHandler` serving packaged `wwwroot`; `NavigationManager` is circuit-scoped and late — client factories must not resolve it (stencils load from package files with web JSON defaults); PWA service-worker registration guarded by `AdsHostSupportsServiceWorker`. Verified: full boot with zero console/network errors, catalog icons+labels, WASM regression clean.
 - 4.2 Auth: MSAL device broker / web account (work + personal); no B2C.
 - 4.3 gRPC: native `Grpc.Net.Client` (drop `Grpc.Net.Client.Web`); server URL config + offline design cache (local save, sync online).
 - 4.4 MSIX packaging + publish workflow.

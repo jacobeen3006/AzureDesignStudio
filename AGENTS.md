@@ -6,7 +6,7 @@
 
 ## OVERVIEW
 
-Azure Design Studio — Blazor WASM app for visual Azure architecture design. Diagramming, validation, ARM/Bicep IaC generation, export. .NET 8, 7 projects in src/. Microsoft Global Hackathon 2022 winner.
+Azure Design Studio — Blazor app for visual Azure architecture design, hosted as WASM (AAD B2C) and MAUI Blazor Hybrid desktop (Windows). Diagramming, validation, ARM/Bicep IaC generation, export. .NET 10, 8 projects in src/. Microsoft Global Hackathon 2022 winner.
 
 ## STRUCTURE
 
@@ -23,7 +23,7 @@ AzureDesignStudio/
 │   │   ├── Services/                   # DesignService, DeployService, CryptoService
 │   │   ├── Models/                     # EF Core: DesignDbContext, DesignModel
 │   │   ├── Utils/                      # AdsTelemetryInitializer
-│   │   └── Dockerfile                  # .NET 8.0 multi-stage build
+│   │   └── Dockerfile                  # .NET 10.0 multi-stage build
 │   ├── AzureDesignStudio.Core/         # Shared components + domain models
 │   │   ├── Components/                 # AzureNodeComponent, AzureGroupComponent
 │   │   ├── DTO/                        # AzureNodeDto, AzureNodeProfile (AutoMapper)
@@ -35,7 +35,8 @@ AzureDesignStudio/
 │   │   └── Network|Compute|Web|...     # Generated ARM type models per service
 │   ├── AzureDesignStudio.SharedModels/ # Protobuf definitions (design_view_model, deploy_model)
 │   ├── AzureDesignStudio.SourceGeneration/ # Roslyn source generator (Scriban templates)
-│   └── AzureDesignStudio.Core.Tests/   # xUnit tests
+│   ├── AzureDesignStudio.Core.Tests/   # xUnit tests (offline + live-Azure categories)
+│   └── AzureDesignStudio.Desktop/      # MAUI BlazorWebView host (reuses App.razor; EnableTelemetry=false)
 ├── .github/workflows/                  # CI: build + CodeQL
 └── assets/ docs/                       # Screenshots, documentation
 ```
@@ -57,7 +58,7 @@ AzureDesignStudio/
 - **SDK projects**: `Microsoft.NET.Sdk.BlazorWebAssembly` (WASM), `Microsoft.NET.Sdk.Web` (Server), `Microsoft.NET.Sdk.Razor` (Core), `Microsoft.NET.Sdk` (others)
 - **Nullable**: enabled in all projects except AzureResources
 - **ImplicitUsings**: enabled in all SDK-style projects
-- **TFM**: `net8.0` everywhere; SourceGeneration targets `netstandard2.0`
+- **TFM**: `net10.0` (Desktop: `net10.0-windows10.0.19041.0`); SourceGeneration targets `netstandard2.0`
 - **No Directory.Build.props** — each csproj declares its own packages/versions
 - **gRPC**: protobuf in SharedModels, clients via `Grpc.Net.ClientFactory`, server via `Grpc.AspNetCore`
 - **Auth**: AAD B2C — MSAL in WASM, JWT + Microsoft.Identity.Web in Server

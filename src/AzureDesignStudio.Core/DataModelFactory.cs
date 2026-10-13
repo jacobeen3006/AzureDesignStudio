@@ -30,12 +30,13 @@ public static partial class DataModelFactory
 {
     public static void RegisterAzureModels(BlazorDiagram diagram)
     {
-        diagram.RegisterComponent<VirtualNetworkModel, AzureGroupComponent>();
-        diagram.RegisterComponent<SubnetModel, AzureGroupComponent>();
-        diagram.RegisterComponent<SqlServerModel, AzureGroupComponent>();
-        diagram.RegisterComponent<AppServicePlanModel, AzureGroupComponent>();
-        diagram.RegisterComponent<ContainerAppsEnvironmentModel, AzureGroupComponent>();
-        diagram.RegisterComponent<AvailabilitySetModel, AzureGroupComponent>();
+        // replace: true so circuit re-initializations (desktop reloads) re-register idempotently.
+        diagram.RegisterComponent<VirtualNetworkModel, AzureGroupComponent>(replace: true);
+        diagram.RegisterComponent<SubnetModel, AzureGroupComponent>(replace: true);
+        diagram.RegisterComponent<SqlServerModel, AzureGroupComponent>(replace: true);
+        diagram.RegisterComponent<AppServicePlanModel, AzureGroupComponent>(replace: true);
+        diagram.RegisterComponent<ContainerAppsEnvironmentModel, AzureGroupComponent>(replace: true);
+        diagram.RegisterComponent<AvailabilitySetModel, AzureGroupComponent>(replace: true);
     }
     public static NodeModel CreateNodeModelFromKey(string key, string name, string imagePath)
     {
