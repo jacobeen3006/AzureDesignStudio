@@ -46,7 +46,7 @@ public static class LiveDrift
                     ? LiveDriftStatus.Deleted
                     : LiveDriftStatus.Modified
                 : LiveDriftStatus.New;
-            items.Add(new LiveDriftItem(id, c.TargetResourceType, status, c.ChangeTime, c.ChangedBy, c.ClientType, c.Operation));
+            items.Add(new LiveDriftItem(id, c.TargetResourceType ?? "", status, c.ChangeTime, c.ChangedBy, c.ClientType, c.Operation));
         }
 
         return items
