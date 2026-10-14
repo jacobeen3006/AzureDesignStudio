@@ -66,4 +66,13 @@
 		<!-- For Bicep decompiler to work when trimmed. -->
 		<TrimmerRootAssembly Include="System.Collections.Immutable" />
 	</ItemGroup>
+
+	<!-- Azure.Bicep.Decompiler pulls Microsoft.VisualStudio.Threading.Analyzers in transitively;
+	     that is Bicep tooling internals - it must not police this project's threading style.
+	     Dropped from every compilation (targets run after NuGet populates @(Analyzer)). -->
+	<Target Name="DropForeignThreadingAnalyzers" BeforeTargets="CoreCompile">
+		<ItemGroup>
+			<Analyzer Remove="@(Analyzer)" Condition="'%(Analyzer.NuGetPackageId)' == 'Microsoft.VisualStudio.Threading.Analyzers'" />
+		</ItemGroup>
+	</Target>
 </Project>

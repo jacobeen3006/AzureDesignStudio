@@ -80,4 +80,11 @@
         <Content Include="..\AzureDesignStudio\wwwroot\ads-stencils.json" Link="ads-stencils.json" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
+    <!-- Analyzer donor from the referenced WASM app's Azure.Bicep.Decompiler; keep out. -->
+    <Target Name="DropForeignThreadingAnalyzers" BeforeTargets="CoreCompile">
+        <ItemGroup>
+            <Analyzer Remove="@(Analyzer)" Condition="'%(Analyzer.NuGetPackageId)' == 'Microsoft.VisualStudio.Threading.Analyzers'" />
+        </ItemGroup>
+    </Target>
+
 </Project>

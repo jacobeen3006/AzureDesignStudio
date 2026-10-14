@@ -63,7 +63,7 @@ public class OrphanAnalyzerTests
         const string Nsg = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/networkSecurityGroups/nsg1";
         var orphan = Item(Nsg, "Microsoft.Network/networkSecurityGroups", """{"securityRules":[{"name":"r1"}]}""");
         var findings = OrphanAnalyzer.Analyze([orphan]);
-        Assert.Single(findings.Where(f => f.Kind == FindingKind.Orphan));
+        Assert.Single(findings, f => f.Kind == FindingKind.Orphan);
 
         var referenced = new[]
         {
@@ -98,7 +98,7 @@ public class OrphanAnalyzerTests
 
         var findings = OrphanAnalyzer.Analyze([broken]);
 
-        Assert.Single(findings.Where(f => f.Kind == FindingKind.BrokenReference && f.Detail.Contains("gone")));
+        Assert.Single(findings, f => f.Kind == FindingKind.BrokenReference && f.Detail.Contains("gone"));
     }
 
     [Fact]

@@ -36,4 +36,11 @@
     </Content>
   </ItemGroup>
 
+  <!-- Analyzer donor via the WASM app's Azure.Bicep.Decompiler; keep out. -->
+  <Target Name="DropForeignThreadingAnalyzers" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <Analyzer Remove="@(Analyzer)" Condition="'%(Analyzer.NuGetPackageId)' == 'Microsoft.VisualStudio.Threading.Analyzers'" />
+    </ItemGroup>
+  </Target>
+
 </Project>

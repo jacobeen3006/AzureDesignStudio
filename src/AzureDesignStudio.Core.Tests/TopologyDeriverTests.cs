@@ -77,7 +77,7 @@ public class TopologyDeriverTests
 
         var g = Derive(vnet);
 
-        var edge = Assert.Single(g.Edges.Where(e => e.Kind == TopologyEdgeKind.PeersWith));
+        var edge = Assert.Single(g.Edges, e => e.Kind == TopologyEdgeKind.PeersWith);
         Assert.Equal(remote, edge.To);
         Assert.True(g.Nodes[edge.To].External);
         Assert.Equal("toPeer", edge.Detail);
@@ -97,7 +97,7 @@ public class TopologyDeriverTests
 
         Assert.False(g.Nodes[SubnetA].External);
         // one node only, casing preserved from first registration
-        Assert.Single(g.Nodes.Values.Where(n => n.Id.Equals(SubnetA, StringComparison.OrdinalIgnoreCase)));
+        Assert.Single(g.Nodes.Values, n => n.Id.Equals(SubnetA, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

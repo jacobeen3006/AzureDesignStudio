@@ -53,7 +53,10 @@ namespace AzureDesignStudio.Components
         {
             // Deselect the ant menu item. A bit strange way.
             // Tracked here: https://github.com/ant-design-blazor/ant-design-blazor/issues/2159
+            // BL0005: setting the Menu parameter from outside is the only known workaround.
+#pragma warning disable BL0005
             if (topMenu != null) topMenu.SelectedKeys = Array.Empty<string>();
+#pragma warning restore BL0005
             drawerRef = null;
             openedDrawer = string.Empty;
             return Task.CompletedTask;

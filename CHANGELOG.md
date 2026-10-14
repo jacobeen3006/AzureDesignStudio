@@ -11,6 +11,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 - Removed every UI-thread-reachable sync-over-async block in the scan stack (`ArmTransport` token fetch, `ResourceGraphClient` request build, `ScanControl.Pause` → `PauseAsync`) — each could freeze the desktop UI when the token cache was cold.
 - Tenant-scan drawer history timestamps rendered a literal `dd.MM HH:mm` (Razor treated the format suffix as text); now proper `ToString` calls.
 - Repeated "Tenant scan" menu clicks no longer stack duplicate drawers — the host seam closes the previous one first.
+
+### Changed
+- Build hygiene: `Azure.Bicep.Decompiler` transitively imported `Microsoft.VisualStudio.Threading.Analyzers`, which policed every project that referenced the WASM app (~150 foreign warnings); each affected project now drops the foreign analyzer from its compilation. Also fixed the genuine warnings: `ForwardedHeadersOptions.KnownNetworks` → `KnownIPNetworks` (.NET 10), `Assert.Single` predicate overloads in tests, and a scoped `BL0005` pragma around the documented AntDesign menu-deselect workaround. Solution and CI trio build with 0 errors / 0 warnings.
+
 ## [1.0.0] - 2026-10-13
 
 ### Added
