@@ -2,6 +2,7 @@ using Azure.Extensions.AspNetCore.Configuration.Secrets;
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
 using AzureDesignStudio.Server.Models;
+using AzureDesignStudio.Discovery.Iac.WhatIf;
 using AzureDesignStudio.Server.Services;
 using AzureDesignStudio.Server.Utils;
 using Microsoft.ApplicationInsights.Extensibility;
@@ -46,6 +47,8 @@ builder.Services.AddGrpc();
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient("RetailPrices", client => client.Timeout = TimeSpan.FromSeconds(30));
 
+builder.Services.AddSingleton(new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl));
+builder.Services.AddHttpClient("arm", client => client.Timeout = TimeSpan.FromSeconds(120));
 #if DEBUG
     builder.Services.AddGrpcReflection();
 #endif
@@ -59,6 +62,26 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 });
 
 var app = builder.Build();
+
+#if !DEBUG
+    // AdsPlanApprovals joins the model set new; EnsureCreated never adds tables to an
+    // existing database, so make sure this one table exists in production once.
+    using (var scope = app.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<DesignDbContext>();
+        if (db.Database.IsRelational())
+            db.Database.ExecuteSqlRaw("""
+                IF OBJECT_ID(N'AdsPlanApprovals', N'U') IS NULL
+                CREATE TABLE AdsPlanApprovals (
+                    PlanHash nvarchar(71) NOT NULL PRIMARY KEY,
+                    PlanJson nvarchar(max) NOT NULL,
+                    Status nvarchar(20) NOT NULL,
+                    ApprovedBy nvarchar(320) NOT NULL,
+                    ApprovedByUserId nvarchar(64) NOT NULL,
+                    ApprovedAtUtc datetime2 NOT NULL DEFAULT GETUTCDATE());
+                """);
+    }
+#endif
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

@@ -34,6 +34,47 @@
     </Form>
 </Modal>
 
+<Modal Title="Review what will change (What-If)" Visible="@_showWhatIfReview" MaskClosable="@false"
+       OkText="@("Approve & deploy")" OkDisabled="@(!WhatIfDeployAllowed)" OnOk="@ApproveAndDeployAsync" OnCancel="@CancelWhatIf">
+    @if (_whatIfLoading)
+    {
+        <p><Icon Type="loading" Theme="@IconThemeType.Outline" /> Running what-if against @_deployParams.ResourceGroup. This can take a minute...</p>
+    }
+    else if (_whatIfError is not null)
+    {
+        <Alert Type="@AlertType.Error" Message="@_whatIfError" ShowIcon="true" />
+    }
+    else if (_whatIfResult is not null)
+    {
+        <p>
+            <Tag Color="@("green")">@_whatIfResult.Creates create</Tag>
+            <Tag Color="@("blue")">@_whatIfResult.Modifies modify</Tag>
+            <Tag Color="@(_whatIfResult.Deletes > 0 ? "red" : "default")">@_whatIfResult.Deletes delete</Tag>
+        </p>
+        @if (_whatIfResult.Deletes > 0)
+        {
+            <Alert Type="@AlertType.Error" Message="What-If predicts deletes. This version never deploys delete-bearing plans." ShowIcon="true" Banner="true" />
+        }
+        else if (_whatIfChanges.Count == 0)
+        {
+            <p>No changes predicted for this template.</p>
+        }
+        <ul>
+            @foreach (var change in _whatIfChanges)
+            {
+                <li><strong>@change.ChangeType</strong> @change.ResourceId</li>
+            }
+        </ul>
+        <ul>
+            @foreach (var caveat in _whatIfResult.Caveats.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                <li><em>@caveat</em></li>
+            }
+        </ul>
+        <p>Plan <code>@_whatIfResult.PlanHash</code> - approving records @(_approverName ?? "your signed-in identity") as the named approver; the review expires after 15 minutes and applies exactly once.</p>
+    }
+</Modal>
+
 <Modal Title="Deploy to Azure" Visible="@_showDeployStatus" MaskClosable="@false" Closable="false" 
     Footer="@_modalFooter" OnOk="CloseDeployStatus">
     <Steps Direction="@StepsDirection.Vertical" Current="@_stepsStatus.CurrentStep" Status="@GetStepsStatus(_stepsStatus.Status)">

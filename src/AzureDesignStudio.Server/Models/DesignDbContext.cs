@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
 
 namespace AzureDesignStudio.Server.Models
@@ -17,6 +17,7 @@ namespace AzureDesignStudio.Server.Models
 
         public DbSet<DesignModel> AdsDesigns { get; set; } = null!;
         public DbSet<AzureSubscriptionModel> AzureSubscriptions { get; set; } = null!;
+        public DbSet<PlanApprovalModel> AdsPlanApprovals { get; set; } = null!;
     }
 
     public record DesignModel
@@ -39,5 +40,29 @@ namespace AzureDesignStudio.Server.Models
         public Guid TenantId { get; set; }
         public Guid ClientId { get; set; }
         public string ClientSecret { get; set; } = null!;
+    }
+
+    public record PlanApprovalModel
+    {
+        /// <summary>DeployPlanArtifact hash ("sha256:" + 64 hex) the approval is bound to.</summary>
+        [Key]
+        [StringLength(71, MinimumLength = 71)]
+        public string PlanHash { get; set; } = null!;
+
+        /// <summary>Canonical plan body stored at approval time; re-verified against the hash before apply.</summary>
+        [Required]
+        public string PlanJson { get; set; } = null!;
+
+        [StringLength(20, MinimumLength = 1)]
+        public string Status { get; set; } = "Approved";
+
+        /// <summary>Authenticated principal that approved (display name + oid) - never client-supplied.</summary>
+        [StringLength(320, MinimumLength = 1)]
+        public string ApprovedBy { get; set; } = null!;
+
+        [StringLength(64, MinimumLength = 36)]
+        public string ApprovedByUserId { get; set; } = null!;
+
+        public DateTime ApprovedAtUtc { get; set; }
     }
 }

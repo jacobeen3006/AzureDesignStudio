@@ -45,7 +45,26 @@ namespace AzureDesignStudio.Services
             return response.ResourceGroupName.ToList();
         }
 
-        public async Task CreateDeployment(string subscriptionId, string rgName, string armTemplate, string parameters, 
+        public async Task<WhatIfResponse?> WhatIfAsync(string subscriptionId, string rgName, string armTemplate, string parameters)
+        {
+            var request = new DeploymentRequest
+            {
+                SubscriptionId = subscriptionId,
+                ResourceGroupName = rgName,
+                ArmTemplate = armTemplate,
+                Parameters = parameters,
+            };
+
+            return await _deployClient.WhatIfAsync(request);
+        }
+
+        public async Task<PlanApprovalResponse?> ApprovePlanAsync(string planHash)
+        {
+            return await _deployClient.ApprovePlanAsync(new PlanApprovalRequest { PlanHash = planHash });
+        }
+
+        public async Task CreateDeployment(string subscriptionId, string rgName, string armTemplate, string parameters,
+            string whatIfToken, string planHash,
             Action<string, string> updateStatus)
         {
             var request = new DeploymentRequest
@@ -54,6 +73,8 @@ namespace AzureDesignStudio.Services
                 ResourceGroupName = rgName,
                 ArmTemplate = armTemplate,
                 Parameters = parameters,
+                WhatIfToken = whatIfToken,
+                PlanHash = planHash,
             };
 
             using var deploymentResponse = _deployClient.CreateDeployment(request);

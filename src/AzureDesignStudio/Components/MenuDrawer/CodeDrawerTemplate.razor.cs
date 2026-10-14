@@ -14,6 +14,8 @@ namespace AzureDesignStudio.Components.MenuDrawer
         public string Status { get; set; } = "starting";
         public string ErrorMessage { get; set; } = default!;
     }
+    internal sealed record WhatIfChangeRow(string ChangeType, string? ResourceId, int Delta);
+
     public partial class CodeDrawerTemplate
     {
         private static AntDesign.StepsStatus GetStepsStatus(string status) => status switch
@@ -36,6 +38,12 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private bool _paramFormLoading = true;
         private bool _showDeployStatus = false;
         private DeployStepStatus _stepsStatus = new();
+        private bool _showWhatIfReview = false;
+        private bool _whatIfLoading = false;
+        private WhatIfResponse? _whatIfResult = null;
+        private string? _whatIfError = null;
+        private IReadOnlyList<WhatIfChangeRow> _whatIfChanges = [];
+        private string? _approverName = null;
 
         #region Button style and download
         protected override async Task OnInitializedAsync()
@@ -54,6 +62,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
                 var user = authState.User;
                 if (user.Identity?.IsAuthenticated ?? false)
                 {
+                    _approverName = user.FindFirst("name")?.Value;
                     var subscriptions = await _deployService.GetLinkedSubscriptions();
                     if (subscriptions?.Count > 0)
                     {
@@ -148,12 +157,86 @@ namespace AzureDesignStudio.Components.MenuDrawer
                 return;
             }
 
+            _whatIfResult = null;
+            _whatIfError = null;
+            _whatIfChanges = [];
+            _whatIfLoading = true;
+            _showWhatIfReview = true;
+
+            try
+            {
+                var response = await _deployService.WhatIfAsync(_linkedSubscription!.SubscriptionId,
+                    _deployParams.ResourceGroup, _drawerContent.Content, _deployParams.ParametersJson);
+                if (response is null || response.StatusCode != 200)
+                    _whatIfError = response?.ErrorMessage ?? "What-If is not available right now.";
+                else
+                {
+                    _whatIfResult = response;
+                    _whatIfChanges = ParseWhatIfChanges(response.ChangesJson);
+                }
+            }
+            catch (Exception ex) when (ex is Grpc.Core.RpcException or InvalidOperationException or HttpRequestException)
+            {
+                _whatIfError = "The What-If call failed; nothing was deployed.";
+            }
+            finally
+            {
+                _whatIfLoading = false;
+            }
+        }
+
+        private static IReadOnlyList<WhatIfChangeRow> ParseWhatIfChanges(string changesJson)
+        {
+            if (string.IsNullOrWhiteSpace(changesJson))
+                return [];
+            try
+            {
+                return System.Text.Json.JsonSerializer.Deserialize<List<WhatIfChangeRow>>(changesJson,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return [];
+            }
+        }
+
+        private bool WhatIfDeployAllowed => _whatIfResult is not null && _whatIfResult.Deletes == 0;
+
+        private async Task ApproveAndDeployAsync(MouseEventArgs e)
+        {
+            if (_whatIfResult is null || !WhatIfDeployAllowed)
+                return;
+
+            var result = _whatIfResult;
+            var approval = await _deployService.ApprovePlanAsync(result.PlanHash);
+            if (approval is null || approval.StatusCode != 200)
+            {
+                _whatIfError = approval?.ErrorMessage ?? "Approval failed; nothing was deployed.";
+                _whatIfResult = null;
+                return;
+            }
+
+            _showWhatIfReview = false;
+            _whatIfResult = null;
+            await RunDeployment(result.WhatIfToken, result.PlanHash);
+        }
+
+        private void CancelWhatIf(MouseEventArgs e)
+        {
+            _showWhatIfReview = false;
+            _whatIfResult = null;
+            _whatIfError = null;
+        }
+
+        private async Task RunDeployment(string whatIfToken, string planHash)
+        {
             _stepsStatus.Status = "started";
             _showDeployStatus = true;
 
             await _deployService.CreateDeployment(_linkedSubscription!.SubscriptionId,
                 _deployParams.ResourceGroup, _drawerContent.Content, _deployParams.ParametersJson,
-                async (deploymentStatus, errorMessage) => 
+                whatIfToken, planHash,
+                async (deploymentStatus, errorMessage) =>
                 {
                     var stateHasChanged = false;
 

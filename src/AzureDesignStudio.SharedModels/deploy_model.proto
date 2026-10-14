@@ -8,6 +8,8 @@ service Deploy {
 	rpc SaveSubscriptionInfo(SubscriptionInfo) returns(SaveSubInfoResponse);
 	rpc LoadSubscriptionInfo(google.protobuf.Empty) returns(LoadSubInfoResponse);
 	rpc GetResourceGroups(GetRgsRequest) returns(GetRgsResponse);
+	rpc WhatIf(DeploymentRequest) returns(WhatIfResponse);
+	rpc ApprovePlan(PlanApprovalRequest) returns(PlanApprovalResponse);
 	rpc CreateDeployment(DeploymentRequest) returns(stream DeploymentResponse);
 }
 
@@ -47,6 +49,33 @@ message DeploymentRequest {
 	string resource_group_name = 2;
 	string arm_template = 3;
 	string parameters = 4;
+	string what_if_token = 5;
+	string plan_hash = 6;
+}
+
+message WhatIfResponse {
+	int32 status_code = 1;
+	string error_message = 2;
+	string what_if_token = 3;
+	string status = 4;
+	int32 creates = 5;
+	int32 modifies = 6;
+	int32 deletes = 7;
+	string changes_json = 8;
+	string caveats = 9;
+	string plan_hash = 10;
+}
+
+message PlanApprovalRequest {
+	string plan_hash = 1;
+}
+
+message PlanApprovalResponse {
+	int32 status_code = 1;
+	string error_message = 2;
+	string plan_hash = 3;
+	string approved_by = 4;
+	string approved_at = 5;
 }
 
 message DeploymentResponse {
