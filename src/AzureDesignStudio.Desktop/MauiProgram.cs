@@ -89,6 +89,7 @@ public static class MauiProgram
             sp.GetRequiredService<Azure.Core.TokenCredential>()));
         builder.Services.AddSingleton<TenantInventory>();
         builder.Services.AddSingleton<PermissionPreflight>();
+        builder.Services.AddSingleton<WorkspaceScans>();
         builder.Services.AddSingleton<WorkspaceChanges>();
         builder.Services.AddSingleton<ChangeFeedService>();
         builder.Services.AddSingleton<WorkspaceScanSink>();
