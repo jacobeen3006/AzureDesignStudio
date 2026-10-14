@@ -25,6 +25,12 @@ namespace AzureDesignStudio.Services
         private static bool IsTransportFailure(Exception e) =>
             e is RpcException { StatusCode: StatusCode.Unavailable } || e is HttpRequestException;
 
+        // A save the server cannot take right now: transport down, or the caller is not
+        // signed in. Both keep the design in the offline store; the flush retries once
+        // connectivity or sign-in returns, so work is never lost to a 401.
+        private static bool IsDeferredSaveFailure(Exception e) =>
+            IsTransportFailure(e) || e is RpcException { StatusCode: StatusCode.Unauthenticated };
+
         /// <summary>Push all pending offline saves; called when the server is reachable again. Best-effort.</summary>
         private async Task FlushPendingAsync()
         {
@@ -39,7 +45,7 @@ namespace AzureDesignStudio.Services
                     await _designClient.SaveAsync(new SaveDesignRequest { Name = name, Data = data });
                     await _offlineStore.ClearPendingAsync(name);
                 }
-                catch (Exception e) when (IsTransportFailure(e))
+                catch (Exception e) when (IsDeferredSaveFailure(e))
                 {
                     return; // still offline; keep pending
                 }
@@ -63,7 +69,7 @@ namespace AzureDesignStudio.Services
                 await FlushPendingAsync();
                 return response.StatusCode;
             }
-            catch (Exception e) when (_offlineStore != null && IsTransportFailure(e))
+            catch (Exception e) when (_offlineStore != null && IsDeferredSaveFailure(e))
             {
                 await _offlineStore.SaveAsync(designName, data);
                 LastCallWasOffline = true;

@@ -233,14 +233,24 @@ public static partial class DataModelFactory
         var nodesDto = new List<AzureNodeDto>();
         foreach (var node in source)
         {
-            if (node is JsonElement je)
+            // In-memory graphs (Adopt/Merge) hold typed DTOs; loaded JSON holds JsonElement.
+            if (node is AzureNodeDto d)
+            {
+                // The engines emit base AzureNodeDto; GetNodeModelFromDto resolves the map by
+                // RUNTIME type, so re-type base instances to their registered derived DTO.
+                if (d.GetType() == typeof(AzureNodeDto) && GetDtoTypeFromKey(d.TypeKey) is { } derived)
+                    nodesDto.Add((AzureNodeDto)JsonSerializer.Deserialize(JsonSerializer.Serialize(d), derived)!);
+                else
+                    nodesDto.Add(d);
+            }
+            else if (node is JsonElement je)
             {
                 var typeKey = je.GetProperty("TypeKey").GetString() ?? string.Empty;
                 var returnType = GetDtoTypeFromKey(typeKey) ?? typeof(AzureNodeDto);
 
                 var g = JsonSerializer.Deserialize(je, returnType);
-                if (g is AzureNodeDto d)
-                    nodesDto.Add(d);
+                if (g is AzureNodeDto dto)
+                    nodesDto.Add(dto);
             }
         }
         return nodesDto;

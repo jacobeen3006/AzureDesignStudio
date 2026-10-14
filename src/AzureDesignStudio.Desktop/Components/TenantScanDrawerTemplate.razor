@@ -9,6 +9,7 @@
 @implements IDisposable
 @inject TenantScanSession Session
 @using AzureDesignStudio.Core
+@using AzureDesignStudio.Core.DTO
 @using AzureDesignStudio.Core.Common
 @using AzureDesignStudio.Services
 @using AutoMapper
@@ -175,6 +176,12 @@
                             Disabled="@(adoptBusy || FilteredCount == 0 || FilteredCount > AdoptLimit)"
                             OnClick="MergePlaneAsync">@(adoptBusy ? "Merging…" : "Refresh live plane")</Button>
                 }
+                @if (reconcile is not null && NewInFilteredCount > 0)
+                {
+                    <Button Size="ButtonSize.Small"
+                            Disabled="@adoptBusy"
+                            OnClick="AddNewToDesignAsync">@(adoptBusy ? "Adding…" : $"+ Add {NewInFilteredCount} new to design")</Button>
+                }
                 @if (FilteredCount > AdoptLimit)
                 {
                     <span style="color:#faad14;font-size:12px;">too many to open on the canvas - narrow below @AdoptLimit</span>
@@ -196,12 +203,53 @@
                     }
                 </div>
             }
+
+            @if (reconcile is { } rec)
+            {
+                <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;font-size:12px;color:#666;">
+                    <span>vs '@adsContext.CurrentDesignName':</span>
+                    <Tag Color="@("green")">@(rec.CountIn(DesignState.InBothSynced)) in design</Tag>
+                    <Tag Color="@("orange")">@(rec.CountIn(DesignState.Drifted)) drift</Tag>
+                    <Tag Color="@("red")">@(rec.CountIn(DesignState.InLiveNotDesign)) new</Tag>
+                    <span>@rec.DesignOnly.Count design-only</span>
+                    @if (rec.UntrackedDesignNodes > 0)
+                    {
+                        <span>@rec.UntrackedDesignNodes untracked</span>
+                    }
+                </div>
+                @if (rec.CountIn(DesignState.Drifted) > 0)
+                {
+                    <div style="margin-bottom:8px;font-size:12px;color:#faad14;">drift = the canvas still says an old name/location; "Refresh live plane" adopts the live truth</div>
+                }
+                @if (rec.DesignOnly.Count > 0)
+                {
+                    <div style="margin-bottom:8px;font-size:12px;color:#999;">
+                        on the canvas but not in this scan: @string.Join(", ", rec.DesignOnly.Select(id => id.Split('/')[^1]).Take(8))@(rec.DesignOnly.Count > 8 ? " …" : "")
+                        - kept; deploy/detach verbs land behind the decommissioning safeguards
+                    </div>
+                }
+            }
             @foreach (var item in Filtered().Take(200))
             {
                 <div style="border-bottom:1px solid #fafafa;padding:4px 0;cursor:pointer;"
                      @onclick="@(() => expandedId = expandedId == item.Id ? null : item.Id)">
                     <b>@item.Name</b> <Tag>@item.ResourceTypeSegment</Tag>
                     <span style="color:#999;font-size:12px;">@item.Location · @item.ResourceGroup</span>
+                    @if (StateOf(item) is { } st)
+                    {
+                        @if (st == DesignState.InLiveNotDesign)
+                        {
+                            <Tag Color="@("red")">new</Tag>
+                        }
+                        else if (st == DesignState.Drifted)
+                        {
+                            <Tag Color="@("orange")">drift</Tag>
+                        }
+                        else
+                        {
+                            <Tag Color="@("green")">in design</Tag>
+                        }
+                    }
                     @if (expandedId == item.Id)
                     {
                         <pre style="max-height:260px;overflow:auto;background:#fafafa;padding:8px;font-size:12px;">@Pretty(item)</pre>
@@ -292,6 +340,11 @@
     private List<InventoryItem> browseItems = [];
     private InventoryFacets? facets;
 
+    // Reconcile [58] against the open design: per-row state recomputed from the live
+    // canvas snapshot on every browse load / tab switch; null while no design is open.
+    private ReconciliationReport? reconcile;
+    private Dictionary<string, DesignState> stateById = new(StringComparer.OrdinalIgnoreCase);
+
     private bool adoptBusy;
     private const int AdoptLimit = 500; // canvas is not virtualized yet ([92])
     private int FilteredCount => Filtered().Count();
@@ -349,6 +402,7 @@
     {
         activeTab = key;
         if (key == "report" && reportScan is null) await LoadReportAsync();
+        if (key == "browse" && browseScanId is not null) await RecomputeReconcileAsync();
         if (key == "topology" && topoScanId is null)
         {
             topoScanId = completed.FirstOrDefault()?.Id;
@@ -398,6 +452,7 @@
         facets = InventoryFacets.From(browseItems);
         browseOwner = null;
         expandedId = null;
+        await RecomputeReconcileAsync();
     }
 
     // Adopt [12.2]: the filtered scan rows become an editable design. Saved in the server
@@ -429,10 +484,7 @@
         try
         {
             var icons = BuildIconIndex();
-            var adoption = AdoptEngine.Adopt(items.Select(i =>
-                new AdoptableResource(i.Id, i.Type, i.Name,
-                    string.IsNullOrWhiteSpace(i.Location) ? null : i.Location)),
-                key => icons.GetValueOrDefault(key));
+            var adoption = AdoptEngine.Adopt(items.Select(ToAdoptable), key => icons.GetValueOrDefault(key));
             var designName = $"adopted-{browseScanId}";
             var status = await designService.SaveDesign(designName, JsonSerializer.Serialize(adoption.Graph));
             if (status != 200)
@@ -442,15 +494,7 @@
             }
 
             // Open it with the TopMenu.LoadDiagram contract: history tracks user edits only.
-            adsContext.Diagram.History.Suspend(() =>
-            {
-                adsContext.Diagram.Nodes.Clear();
-                adsContext.Diagram.Links.Clear();
-                adsContext.Diagram.Groups.Clear();
-            });
-            adsContext.Diagram.History.Suspend(() =>
-                DataModelFactory.LoadDiagramFromDto(adsContext.Diagram, adoption.Graph, mapper));
-            adsContext.Diagram.History.Clear();
+            ReloadCanvas(adoption.Graph);
             adsContext.CurrentDesignName = designName;
 
             var placeholders = adoption.Items.Count(x => !x.Mapped);
@@ -459,6 +503,11 @@
                 + $" into design '{designName}'.");
             if (FeedbackRef as DrawerRef<string> is { } dr)
                 await dr.CloseAsync(string.Empty);
+        }
+        catch (Exception e)
+        {
+            // A dead circuit looks exactly like a frozen drawer; report instead.
+            Message.Error($"Adoption failed: {e.Message}");
         }
         finally
         {
@@ -469,6 +518,93 @@
     private Dictionary<string, string> BuildIconIndex() => (adsContext.AllStencils ?? [])
         .GroupBy(s => s.Key, StringComparer.OrdinalIgnoreCase)
         .ToDictionary(g => g.Key, g => g.First().IconPath, StringComparer.OrdinalIgnoreCase);
+
+    private static string NormId(string id) => id.Trim().TrimStart('/');
+
+    private static AdoptableResource ToAdoptable(InventoryItem i) =>
+        new(i.Id, i.Type, i.Name, string.IsNullOrWhiteSpace(i.Location) ? null : i.Location);
+
+    private DesignState? StateOf(InventoryItem item) =>
+        reconcile is not null && stateById.TryGetValue(NormId(item.Id), out var st) ? st : null;
+
+    private int NewInFilteredCount =>
+        reconcile is null ? 0 : Filtered().Count(i => StateOf(i) == DesignState.InLiveNotDesign);
+
+    // Snapshot the canvas and classify every browse row against it. Pure read of the
+    // diagram; runs between renders on the UI thread.
+    private async Task RecomputeReconcileAsync()
+    {
+        reconcile = null;
+        stateById = new(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrEmpty(adsContext.CurrentDesignName) || browseItems.Count == 0)
+            return;
+        var intent = await DataModelFactory.SaveDiagramToDto(adsContext.Diagram, mapper);
+        var report = ReconcileEngine.Reconcile(intent, browseItems.Select(ToAdoptable));
+        reconcile = report;
+        foreach (var r in report.Rows)
+            stateById[r.Id] = r.State;
+    }
+
+    // The adopt verb of reconcile [58]: add ONLY the live-only rows of the current filter -
+    // a live-plane merge restricted to the untracked subset, so nothing matched is touched
+    // and no delete/update verb exists here. Ordinary save + canvas reload; the drawer
+    // stays open and the chips reclassify immediately.
+    private async Task AddNewToDesignAsync()
+    {
+        if (browseScanId is null || adoptBusy)
+            return;
+        var designName = adsContext.CurrentDesignName;
+        if (string.IsNullOrEmpty(designName))
+            return;
+        var items = Filtered().Where(i => StateOf(i) == DesignState.InLiveNotDesign).ToList();
+        if (items.Count == 0 || items.Count > AdoptLimit)
+            return;
+        if (!await Modal.ConfirmAsync(new ConfirmOptions
+        {
+            Title = "Add the new resources to the design?",
+            Content = $"Adds {items.Count} resource(s) from this scan to '{designName}'. Nothing is moved or deleted; the undo history resets.",
+            OkType = ButtonType.Primary,
+            OkText = "Add",
+            CancelText = "Cancel",
+        }))
+            return;
+
+        adoptBusy = true;
+        try
+        {
+            var intent = await DataModelFactory.SaveDiagramToDto(adsContext.Diagram, mapper);
+            var icons = BuildIconIndex();
+            var merged = LivePlaneMerger.Merge(intent, items.Select(ToAdoptable), key => icons.GetValueOrDefault(key));
+            var status = await designService.SaveDesign(designName, JsonSerializer.Serialize(merged.Graph));
+            if (status != 200)
+            {
+                Message.Error("The design could not be saved; the canvas is unchanged.");
+                return;
+            }
+
+            ReloadCanvas(merged.Graph);
+            await RecomputeReconcileAsync();
+            Message.Success($"Added {merged.Added.Count} resource(s) to '{designName}'.");
+        }
+        finally
+        {
+            adoptBusy = false;
+        }
+    }
+
+    // Reload the canvas from a freshly saved graph; the load itself is not an undoable edit.
+    private void ReloadCanvas(DiagramGraph graph)
+    {
+        adsContext.Diagram.History.Suspend(() =>
+        {
+            adsContext.Diagram.Nodes.Clear();
+            adsContext.Diagram.Links.Clear();
+            adsContext.Diagram.Groups.Clear();
+        });
+        adsContext.Diagram.History.Suspend(() =>
+            DataModelFactory.LoadDiagramFromDto(adsContext.Diagram, graph, mapper));
+        adsContext.Diagram.History.Clear();
+    }
 
     // Live-plane refresh [12.1]: fold current scan truth into the open design WITHOUT
     // destroying edits - matched resources take live name/location, live-only ones are
@@ -500,9 +636,7 @@
         {
             var intent = await DataModelFactory.SaveDiagramToDto(adsContext.Diagram, mapper);
             var icons = BuildIconIndex();
-            var merged = LivePlaneMerger.Merge(intent, items.Select(i =>
-                new AdoptableResource(i.Id, i.Type, i.Name,
-                    string.IsNullOrWhiteSpace(i.Location) ? null : i.Location)),
+            var merged = LivePlaneMerger.Merge(intent, items.Select(ToAdoptable),
                 key => icons.GetValueOrDefault(key));
             var status = await designService.SaveDesign(designName, JsonSerializer.Serialize(merged.Graph));
             if (status != 200)
@@ -511,15 +645,7 @@
                 return;
             }
 
-            adsContext.Diagram.History.Suspend(() =>
-            {
-                adsContext.Diagram.Nodes.Clear();
-                adsContext.Diagram.Links.Clear();
-                adsContext.Diagram.Groups.Clear();
-            });
-            adsContext.Diagram.History.Suspend(() =>
-                DataModelFactory.LoadDiagramFromDto(adsContext.Diagram, merged.Graph, mapper));
-            adsContext.Diagram.History.Clear();
+            ReloadCanvas(merged.Graph);
 
             Message.Success($"Merged into '{designName}': {merged.Updated} confirmed, {merged.Added.Count} new"
                 + (merged.MissingInLive.Count > 0 ? $", {merged.MissingInLive.Count} no longer in Azure (kept on the canvas)" : "")

@@ -37,7 +37,7 @@ public static class MauiProgram
             });
 
         builder.Configuration.AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
-        var serverUrl = builder.Configuration["ServerUrl"] ?? "http://localhost:5203";
+        var serverUrl = builder.Configuration["ServerUrl"] ?? "http://localhost:5204";
         var resourceRoot = builder.Configuration["ResourceRoot"] ?? "/";
 
         var webViewOrigin = new Uri("https://0.0.0.1/");

@@ -83,6 +83,7 @@ AzureDesignStudio/
 ```bash
 dotnet build src/AzureDesignStudio.sln       # Full solution build (Windows)
 dotnet build src/AzureDesignStudio.Server -c Release && dotnet build src/AzureDesignStudio -c Release && dotnet build src/AzureDesignStudio.Core.Tests -c Release  # CI project set (Linux-safe; skips MAUI Desktop - ubuntu slnf parsing is broken in SDK 10.0.4xx and net10.0-windows cannot build there)
+dotnet run --project src/AzureDesignStudio.Server  # dev gRPC server; Desktop native gRPC hits its loopback h2c listener http://localhost:5204 (Desktop `ServerUrl`) - URL endpoints stay HTTP/1.1 for browser gRPC-Web
 dotnet test src/AzureDesignStudio.Core.Tests --filter "Category!=LiveAzure"  # Offline tests
 docker build -f src/AzureDesignStudio.Server/Dockerfile .  # Docker image
 dotnet publish src/AzureDesignStudio.Desktop -c Release -f net10.0-windows10.0.19041.0 -p:WindowsPackageType=MSIX -p:RuntimeIdentifier=win-x64 -p:WindowsAppSDKSelfContained=true  # MSIX package

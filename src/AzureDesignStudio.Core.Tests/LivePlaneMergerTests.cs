@@ -232,7 +232,7 @@ public class LivePlaneMergerTests
         var mapper = new Mapper(new MapperConfiguration(cfg => cfg.AddProfile<AzureNodeProfile>()));
         var adoption = AdoptEngine.Adopt(new[] { Storage(), Vnet(), SubnetOf() });
         var diagram = new BlazorDiagram();
-        // Production feeds the loader serialized graphs (JsonElement members), not live DTOs.
+        // The TopMenu load path feeds the loader deserialized JSON (JsonElement members).
         var loaded = AdsDesignText.Read(AdsDesignText.Write(adoption.Graph)).Graph;
         DataModelFactory.LoadDiagramFromDto(diagram, loaded, mapper);
         Assert.Equal(3, diagram.Nodes.Count + diagram.Groups.Count);
@@ -243,5 +243,24 @@ public class LivePlaneMergerTests
         var adoptedIds = adoption.Graph.Nodes.Concat(adoption.Graph.Groups).OfType<AzureNodeDto>().Select(n => n.Id).ToList();
         Assert.Equal(3, adoptedIds.Count);
         Assert.Equal(adoptedIds.OrderBy(x => x, StringComparer.Ordinal), savedArmIds.OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void Merge_LiveOnlySubset_AddsOnlySelected_LeavesOmittedDesignNodesAlone()
+    {
+        // The drawer's "+ add new" verb merges a live-only SUBSET: nodes the subset omits
+        // must keep their exact intent and survive - the restricted merge must never
+        // behave like a full-scan reconcile.
+        var keptId = $"{Sub}/resourceGroups/rg-a/providers/Microsoft.Storage/storageAccounts/stkeep1a2b";
+        var intent = new DiagramGraph();
+        intent.Nodes.Add(Node(keptId, "storage-account", "stkeep1a2b", 10, 20));
+
+        var result = LivePlaneMerger.Merge(intent, new[] { Storage() });
+
+        Assert.Equal(2, result.Graph.Nodes.Count);
+        Assert.Equal(0, result.Updated);
+        var kept = result.Graph.Nodes.OfType<AzureNodeDto>().Single(n => n.Id == keptId);
+        Assert.Equal(Key(Node(keptId, "storage-account", "stkeep1a2b", 10, 20)), Key(kept));
+        Assert.Contains("Microsoft.Storage/storageAccounts/strefresh1a2b", string.Join(",", result.Added));
     }
 }

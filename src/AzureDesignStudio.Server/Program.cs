@@ -13,6 +13,12 @@ using Microsoft.Identity.Web;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Desktop talks native gRPC (HTTP/2) directly; cleartext HTTP/2 (h2c) needs its own
+// loopback listener because ALPN negotiation requires TLS. Browsers keep the
+// URL-configured endpoints and gRPC-Web over HTTP/1.1.
+builder.WebHost.ConfigureKestrel(options =>
+    options.ListenLocalhost(5204, listen => listen.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http2));
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
 builder.Services.Configure<JwtBearerOptions>(
