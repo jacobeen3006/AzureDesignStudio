@@ -8,6 +8,10 @@ namespace AzureDesignStudio.Core.DTO
         public string ImagePath { get; set; } = string.Empty;
         // Key data from NodeModel
         public string Id { get; set; } = string.Empty;
+        // Canvas Model.Id is a regenerated Guid per session, so it cannot carry identity across
+        // save/load. Adopted/refreshed nodes stamp the trimmed ARM id here; it round-trips the
+        // canvas by AutoMapper convention (same name on AzureNodeBase) and is the reconcile key.
+        public string ArmId { get; set; } = string.Empty;
         public bool Locked { get; set; }
         public Point Position { get; set; } = Point.Zero;
         public Size Size { get; set; } = Size.Zero;

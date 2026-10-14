@@ -60,6 +60,7 @@ public class AdoptEngineTests
 
         Assert.Equal("storage-account", node.GetProperty("TypeKey").GetString());
         Assert.Equal("subscriptions/SUB-1/resourceGroups/rg-a/providers/Microsoft.Storage/storageAccounts/stadoptprod1a2b", node.GetProperty("Id").GetString()); // leading slash trimmed, rest kept
+        Assert.Equal(node.GetProperty("Id").GetString(), node.GetProperty("ArmId").GetString()); // durable identity rides alongside the canvas id
         Assert.Equal("stadoptprod1a2b", node.GetProperty("Name").GetString());
         Assert.Equal("westeurope", node.GetProperty("Location").GetString());
         Assert.Equal("assets/azure/storage-account.svg", node.GetProperty("ImagePath").GetString()); // catalog icon convention

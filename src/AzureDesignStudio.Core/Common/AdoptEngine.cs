@@ -129,6 +129,7 @@ public static class AdoptEngine
         var dto = new AzureNodeDto
         {
             Id = item.Id,
+            ArmId = item.Id,
             TypeKey = item.TypeKey,
             Name = item.Source.Name,
             Location = item.Source.Location ?? string.Empty,

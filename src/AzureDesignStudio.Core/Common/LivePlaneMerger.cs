@@ -20,8 +20,8 @@ public sealed record PlaneMergeResult(
 /// <summary>
 /// Live-plane refresh (v2 plan 12.1): merge live inventory into an existing design without
 /// destroying edits - the failure Eraser avoids and Cloudcraft's convert-on-edit causes.
-/// Identity is the trimmed ARM id adoption stamps on <see cref="AzureNodeDto.Id"/>.
-/// Matched nodes take the live name/location (live-plane truth); position, size, group
+/// Identity is the trimmed ARM id adoption stamps on <see cref="AzureNodeDto.ArmId"/>
+/// (legacy designs carry it in <see cref="AzureNodeDto.Id"/>; canvas GUIDs never collide).
 /// membership and links are intent and are never touched. Live-only resources are added:
 /// group children continue the host frame's child grid, top-levels continue the slot grid
 /// one column past the current bounding box. Design-only nodes are KEPT and only reported -
@@ -46,12 +46,12 @@ public static class LivePlaneMerger
         var byId = new Dictionary<string, AzureNodeDto>(StringComparer.OrdinalIgnoreCase);
         var frames = new Dictionary<string, AzureNodeDto>(StringComparer.OrdinalIgnoreCase);
         foreach (var node in graph.Nodes.OfType<AzureNodeDto>())
-            if (node.Id.Length > 0) byId[node.Id] = node;
+            if (Identity(node).Length > 0) byId[Identity(node)] = node;
         foreach (var frame in graph.Groups.OfType<AzureNodeDto>())
         {
-            if (frame.Id.Length == 0) continue;
-            byId[frame.Id] = frame;
-            frames[frame.Id] = frame;
+            if (Identity(frame).Length == 0) continue;
+            byId[Identity(frame)] = frame;
+            frames[Identity(frame)] = frame;
         }
 
         var items = live
@@ -77,6 +77,9 @@ public static class LivePlaneMerger
                 // chose (position, size, frame membership, links, type) stays.
                 existing.Name = resource.Name;
                 existing.Location = resource.Location ?? string.Empty;
+                // Self-heal legacy designs: identity migrates onto ArmId so it survives the
+                // next save/load, where Id becomes a fresh canvas GUID.
+                existing.ArmId = resource.Id;
                 updated++;
                 continue;
             }
@@ -110,6 +113,7 @@ public static class LivePlaneMerger
             var dto = new AzureNodeDto
             {
                 Id = resource.Id,
+                ArmId = resource.Id,
                 TypeKey = typeKey,
                 Name = resource.Name,
                 Location = resource.Location ?? string.Empty,
@@ -145,6 +149,10 @@ public static class LivePlaneMerger
         return maxRight == 0 ? 0 : Math.Floor(maxRight / AdoptEngine.CellWidth + 0.999) * AdoptEngine.CellWidth;
     }
 
+    /// <summary>Reconcile identity: durable ArmId, falling back to Id for pre-ArmId designs.</summary>
+    internal static string Identity(AzureNodeDto node) =>
+        node.ArmId.Length > 0 ? node.ArmId : node.Id;
+
     private static AzureNodeDto? FindFrame(string id, Dictionary<string, AzureNodeDto> frames)
     {
         AzureNodeDto? best = null;
@@ -171,6 +179,7 @@ public static class LivePlaneMerger
         TypeKey = n.TypeKey,
         ImagePath = n.ImagePath,
         Id = n.Id,
+        ArmId = n.ArmId,
         Locked = n.Locked,
         Position = n.Position,
         Size = n.Size,

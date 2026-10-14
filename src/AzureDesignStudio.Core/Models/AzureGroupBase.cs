@@ -26,6 +26,10 @@ namespace AzureDesignStudio.Core.Models
         }
         protected PortModel AddAzurePort(PortAlignment alignment) => AddPort(new AzurePort(this, alignment));
         public string ImagePath { get; set; } = string.Empty;
+        /// <summary>Trimmed ARM resource id for adopted/refreshed frames; survives save/load
+        /// (Model.Id is a session Guid) and keys the live-plane merge and reconcile.
+        /// Round-trips with AzureNodeDto.ArmId by AutoMapper name convention.</summary>
+        public string ArmId { get; set; } = string.Empty;
 
         #region IAzureNode
         public virtual string ServiceName => string.Empty;

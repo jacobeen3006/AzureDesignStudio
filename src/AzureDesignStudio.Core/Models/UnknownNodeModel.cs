@@ -39,6 +39,7 @@ namespace AzureDesignStudio.Core.Models
                 TypeKey = StencilKey,
                 ImagePath = ImagePath,
                 Id = Id,
+                ArmId = ArmId,
                 Locked = Locked,
                 Position = Position ?? Point.Zero,
                 Size = Size ?? new Size(81, 81),

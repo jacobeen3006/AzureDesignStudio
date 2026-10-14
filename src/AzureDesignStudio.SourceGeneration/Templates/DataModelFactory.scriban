@@ -36,7 +36,7 @@ public static partial class DataModelFactory
 			{{ if !(map.TypeKey | string.empty) ~}}
 			{{ map.TypeKey }} => mapper.Map<{{ map.SourceType }}>(dto),
 			{{ end; end ~}}
-            _ => new AzureDesignStudio.Core.Models.UnknownNodeModel { StencilKey = dto.TypeKey, Name = dto.Name },
+            _ => new AzureDesignStudio.Core.Models.UnknownNodeModel { StencilKey = dto.TypeKey, Name = dto.Name, ArmId = dto.ArmId },
         };
     }
 }

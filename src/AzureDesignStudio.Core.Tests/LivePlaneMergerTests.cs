@@ -1,8 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
+using AutoMapper;
+using Blazor.Diagrams;
+using AzureDesignStudio.Core;
 using AzureDesignStudio.Core.Common;
 using AzureDesignStudio.Core.DTO;
+using Blazor.Diagrams.Core;
 using Blazor.Diagrams.Core.Geometry;
 using Xunit;
 
@@ -129,8 +134,8 @@ public class LivePlaneMergerTests
     {
         var result = LivePlaneMerger.Merge(new DiagramGraph(), new[] { SubnetOf(), Vnet() }); // shuffled input order
 
-        var vnet = Assert.Single(result.Graph.Groups.OfType<AzureNodeDto>().Where(g => g.GroupId.Length == 0));
-        var subnet = Assert.Single(result.Graph.Groups.OfType<AzureNodeDto>().Where(g => g.GroupId.Length > 0));
+        var vnet = Assert.Single(result.Graph.Groups.OfType<AzureNodeDto>(), g => g.GroupId.Length == 0);
+        var subnet = Assert.Single(result.Graph.Groups.OfType<AzureNodeDto>(), g => g.GroupId.Length > 0);
         Assert.Empty(result.Graph.Nodes);
         Assert.Equal(vnet.Id, subnet.GroupId);
         Assert.Equal(0, vnet.Position.X);
@@ -215,5 +220,28 @@ public class LivePlaneMergerTests
 
         var node = Assert.IsType<AzureNodeDto>(Assert.Single(result.Graph.Nodes));
         Assert.Equal("custom/storage-account.svg", node.ImagePath);
+    }
+
+    // The whole refresh story keys on the trimmed ARM id surviving the canvas round-trip.
+    // Model.Id is a session Guid (read-only in Z.Blazor.Diagrams), so identity rides on
+    // ArmId through the AutoMapper name convention. If this ever breaks, a refresh after
+    // reopen would re-add every resource as a duplicate - so it is pinned.
+    [Fact]
+    public async Task CanvasRoundTrip_PreservesArmIdentity_AcrossSaveLoad()
+    {
+        var mapper = new Mapper(new MapperConfiguration(cfg => cfg.AddProfile<AzureNodeProfile>()));
+        var adoption = AdoptEngine.Adopt(new[] { Storage(), Vnet(), SubnetOf() });
+        var diagram = new BlazorDiagram();
+        // Production feeds the loader serialized graphs (JsonElement members), not live DTOs.
+        var loaded = AdsDesignText.Read(AdsDesignText.Write(adoption.Graph)).Graph;
+        DataModelFactory.LoadDiagramFromDto(diagram, loaded, mapper);
+        Assert.Equal(3, diagram.Nodes.Count + diagram.Groups.Count);
+
+        var saved = await DataModelFactory.SaveDiagramToDto(diagram, mapper);
+
+        var savedArmIds = saved.Nodes.Concat(saved.Groups).OfType<AzureNodeDto>().Select(n => n.ArmId).ToList();
+        var adoptedIds = adoption.Graph.Nodes.Concat(adoption.Graph.Groups).OfType<AzureNodeDto>().Select(n => n.Id).ToList();
+        Assert.Equal(3, adoptedIds.Count);
+        Assert.Equal(adoptedIds.OrderBy(x => x, StringComparer.Ordinal), savedArmIds.OrderBy(x => x, StringComparer.Ordinal));
     }
 }
