@@ -91,6 +91,8 @@
 
 **Status (2026-10-14):** 10.2 follow-up done - per-type api-versions. `AzureApiVersions` (Core/Common) derives ARM type -> api-version from the generated models' `[AzureResource]` attributes (single source of truth, stable beats preview, case-insensitive, built once); `TerraformText.Generate` takes the optional table, pins real versions per resource and says so in the header, unknown types keep the uniform fallback. Native azurerm top-30 mapping stays deferred (needs per-type property curation). 5 new offline tests (table contents, case-insensitivity, pin+fallback, real-table integration).
 
+**Status (2026-10-14):** 10.3 wired into the deploy path - `ArmTemplateValidator.TryFindBlockingErrors` is now Server's pre-deploy gate inside `CreateDeployment`: any Error-severity finding (or unparseable parameters) returns 400 with the stable-code list *before* any credential lookup or Azure round-trip; warnings never block, parameter content is checked for parseability only and never echoed. No proto change - clients already surface `error_message`. 4 new offline tests.
+
 ## Phase 11 — Safe execution
 
 - 11.1 **[50]** What-if mandatory preflight (FullResourcePayloads; surface limits + `reference()` caveat honestly).

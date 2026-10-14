@@ -35,6 +35,7 @@
   <ItemGroup>
     <ProjectReference Include="..\AzureDesignStudio.SharedModels\AzureDesignStudio.SharedModels.csproj" />
     <ProjectReference Include="..\AzureDesignStudio\AzureDesignStudio.csproj" />
+    <ProjectReference Include="..\AzureDesignStudio.Discovery\AzureDesignStudio.Discovery.csproj" />
   </ItemGroup>
 
   <!-- Analyzer donor from the referenced WASM app's Azure.Bicep.Decompiler; keep out. -->

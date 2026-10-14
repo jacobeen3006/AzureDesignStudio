@@ -196,4 +196,30 @@ public static partial class ArmTemplateValidator
             return null;
         }
     }
+
+    /// <summary>
+    /// Pre-deploy gate for hosts (Server's CreateDeployment calls this before any Azure
+    /// round-trip): errors block, warnings never do. The message lists findings by stable
+    /// code for the client to show; parameter payloads are checked for parseability only and
+    /// their content (which may hold secrets) is never echoed.
+    /// </summary>
+    public static bool TryFindBlockingErrors(string templateJson, string? parametersJson, out string message)
+    {
+        var errors = Validate(templateJson).Where(d => d.Severity == ArmDiagnosticSeverity.Error).ToList();
+        if (!string.IsNullOrWhiteSpace(parametersJson))
+        {
+            try
+            {
+                JsonDocument.Parse(parametersJson).Dispose();
+            }
+            catch (JsonException)
+            {
+                errors.Add(new ArmDiagnostic(ArmDiagnosticSeverity.Error, "parameters.json",
+                    "Deployment parameters are not valid JSON."));
+            }
+        }
+
+        message = string.Join(Environment.NewLine, errors.Select(e => $"{e.Code}: {e.Message}"));
+        return errors.Count > 0;
+    }
 }

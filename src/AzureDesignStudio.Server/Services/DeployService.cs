@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.Identity.Web.Resource;
 using AzureDesignStudio.SharedModels.Protos;
+using AzureDesignStudio.Discovery.Iac;
 using AzureDesignStudio.Server.Models;
 using Grpc.Core;
 using Microsoft.EntityFrameworkCore;
@@ -145,6 +146,15 @@ namespace AzureDesignStudio.Server.Services
                 _logger.LogWarning("ArmTemplate is empty");
                 response.StatusCode = StatusCodes.Status400BadRequest;
                 response.ErrorMessage = "Template is empty.";
+                await responseStream.WriteAsync(response);
+                return;
+            }
+
+            if (ArmTemplateValidator.TryFindBlockingErrors(request.ArmTemplate, request.Parameters, out var validationErrors))
+            {
+                _logger.LogWarning("Template blocked before deploy: {Errors}", validationErrors);
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = validationErrors;
                 await responseStream.WriteAsync(response);
                 return;
             }

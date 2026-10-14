@@ -89,4 +89,51 @@ public class ArmTemplateValidatorTests
         var escaped = Template("""{"name":"a","type":"Microsoft.Storage/storageAccounts","apiVersion":"2023-01-01","note":"[[parameters('x')]"}""");
         Assert.DoesNotContain(ArmTemplateValidator.Validate(escaped), d => d.Code.StartsWith("expression."));
     }
+
+    [Fact]
+    public void Preflight_CleanTemplateAndParameters_NotBlocked()
+    {
+        var text = Template(
+            """{"name":"st1","type":"Microsoft.Storage/storageAccounts","apiVersion":"2023-01-01","location":"[parameters('location')]"}""",
+            parameters: """{ "location": { "type": "string" } }""");
+
+        Assert.False(ArmTemplateValidator.TryFindBlockingErrors(text, """{ "location": { "value": "westeurope" } }""", out var message));
+        Assert.Equal("", message);
+    }
+
+    [Fact]
+    public void Preflight_Errors_BlockWithStableCodes_ParametersCheckedNotEchoed()
+    {
+        var text = Template(
+            """{"name":"a","type":"Microsoft.Storage/storageAccounts","apiVersion":"2023-01-01","dependsOn":["b"]},"""
+            + """{"name":"b","type":"Microsoft.Network/virtualNetworks","dependsOn":["a"]}""");
+
+        Assert.True(ArmTemplateValidator.TryFindBlockingErrors(text, "not json", out var message));
+        Assert.Contains("dependency.cycle", message);
+        Assert.Contains("resource.api_version", message);
+        Assert.Contains("parameters.json", message);
+    }
+
+    [Fact]
+    public void Preflight_Warnings_AloneNeverBlock()
+    {
+        var text = Template(
+            """{"name":"st1","type":"Microsoft.Storage/storageAccounts","apiVersion":"2023-01-01"}""",
+            parameters: """{ "spare": { "type": "string" } }""");
+
+        Assert.True(Has(ArmTemplateValidator.Validate(text), "parameter.unused", ArmDiagnosticSeverity.Warning)); // the warning is there...
+        Assert.False(ArmTemplateValidator.TryFindBlockingErrors(text, null, out _)); // ...and it never stops a deploy
+    }
+
+    [Fact]
+    public void Preflight_SecretDefault_BlocksWithoutEchoingTheSecret()
+    {
+        var text = Template(
+            """{"name":"sql1","type":"Microsoft.Sql/servers","apiVersion":"2023-01-01","properties":{"administratorLoginPassword":"[parameters('adminPassword')]"}}""",
+            parameters: """{ "adminPassword": { "type": "secureString", "defaultValue": "hunter2" } }""");
+
+        Assert.True(ArmTemplateValidator.TryFindBlockingErrors(text, null, out var message));
+        Assert.Contains("parameter.secret_default", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
 }
