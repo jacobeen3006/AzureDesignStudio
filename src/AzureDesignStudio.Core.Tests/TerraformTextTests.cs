@@ -97,6 +97,29 @@ public class TerraformTextTests
         Assert.True(text.IndexOf("\"a\" = \"$${x}\"", System.StringComparison.Ordinal) < text.IndexOf("\"z\" = \"1\"", System.StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void Generate_PinsPerTypeVersions_WithUniformFallback()
+    {
+        var pins = new Dictionary<string, string> { ["Microsoft.Compute/virtualMachines"] = "2024-03-01" };
+        var storage = Item("/subscriptions/sub-1/resourceGroups/rg1/providers/Microsoft.Storage/storageAccounts/st1", "st1", "Microsoft.Storage/storageAccounts");
+
+        var text = TerraformText.Generate([Vm(), storage], typeApiVersions: pins);
+
+        Assert.Contains("Microsoft.Compute/virtualMachines@2024-03-01", text);
+        Assert.Contains($"Microsoft.Storage/storageAccounts@{TerraformText.DefaultApiVersion}", text);
+        Assert.Contains("api-version pinned per type from the ARM model table", text);
+        Assert.DoesNotContain("applied uniformly", text);
+    }
+
+    [Fact]
+    public void Generate_KeepsUniformHeader_WithoutTable()
+    {
+        var text = TerraformText.Generate([Vm()]);
+
+        Assert.Contains($"Microsoft.Compute/virtualMachines@{TerraformText.DefaultApiVersion}", text);
+        Assert.Contains("applied uniformly", text);
+    }
+
     private static int Count(string haystack, string needle)
     {
         var n = 0;

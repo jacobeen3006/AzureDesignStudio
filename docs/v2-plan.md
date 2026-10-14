@@ -89,6 +89,8 @@
 
 **Status (2026-10-14):** 10.3 first cut done - `Discovery/Iac`: `ArmTemplateValidator` = in-process validate-before-show over generated ARM templates (stable diagnostic codes): unresolved/cyclic `dependsOn` (cycle named end-to-end), undeclared `parameters()`/`variables()` references, duplicate resource identities, missing api-versions, unused-parameter warnings, and a hard error for any `secureString`/`secureObject` default - the finding never echoes the secret value. `BicepParamsText` = typed `.bicepparam` generation: secure parameters emit Key Vault reference objects only (a supplied plaintext value is dropped and said so in the file), typed literals per bicep, missing required values commented rather than silently defaulted. ARM provider-side rules stay what-if/deploy-time; Bicep/TF syntax validation needs out-of-process binaries (CI-side). 11 offline tests.
 
+**Status (2026-10-14):** 10.2 follow-up done - per-type api-versions. `AzureApiVersions` (Core/Common) derives ARM type -> api-version from the generated models' `[AzureResource]` attributes (single source of truth, stable beats preview, case-insensitive, built once); `TerraformText.Generate` takes the optional table, pins real versions per resource and says so in the header, unknown types keep the uniform fallback. Native azurerm top-30 mapping stays deferred (needs per-type property curation). 5 new offline tests (table contents, case-insensitivity, pin+fallback, real-table integration).
+
 ## Phase 11 — Safe execution
 
 - 11.1 **[50]** What-if mandatory preflight (FullResourcePayloads; surface limits + `reference()` caveat honestly).
