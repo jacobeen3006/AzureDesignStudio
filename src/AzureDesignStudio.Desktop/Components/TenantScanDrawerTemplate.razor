@@ -313,6 +313,10 @@
                         Disabled="@(decomSelected.Count == 0)" OnClick="RunDecomPreview">Preview teardown (@decomSelected.Count)</Button>
                 <Button Size="ButtonSize.Small" Disabled="@(decomPlan is null || DecomConfirmed.Count == 0)"
                         OnClick="SaveManifestAsync">Save retention manifest@(decomManifest is null ? "" : $" ({decomManifest.Rows.Count})")</Button>
+                <span style="font-size:12px;color:#888;margin-left:8px;">undo window (days)</span>
+                <input type="number" min="1" max="365" @bind="decomPurgeDays" style="width:52px;padding:4px;" />
+                <Button Size="ButtonSize.Small" Disabled="@(decomPlan is not { Allowed: true })"
+                        OnClick="SaveRunbookAsync">Save runbook</Button>
             </div>
 
             @foreach (var item in DecomFiltered().Take(200))
@@ -476,6 +480,7 @@
     private readonly HashSet<string> decomSelected = new(StringComparer.OrdinalIgnoreCase);
     private DecommissionPlan? decomPlan;
     private RetentionManifest? decomManifest;
+    private int decomPurgeDays = 7;
 
     private int enabledCount => subscriptions.Count(s => s.State == "Enabled");
 
@@ -906,6 +911,50 @@
         catch (Exception e)
         {
             Message.Error($"Could not write the manifest: {e.Message}");
+        }
+    }
+
+    // [69][71] Runbook-as-code: the three review artifacts under one plan hash. Writing them
+    // is local file IO, not execution - the purge scripts carry the T+N epoch guard and refuse
+    // to touch ARM until the undo window closes. Abort lines live inside the same scripts.
+    private async Task SaveRunbookAsync()
+    {
+        if (decomPlan is not { Allowed: true } || decomScanId is null)
+            return;
+        if (decomPurgeDays is < 1 or > 365)
+        {
+            Message.Error("Undo window must be 1-365 days - the plan hash depends on it.");
+            return;
+        }
+        try
+        {
+            var rb = DecommissionRunbook.Generate(decomPlan, decomItems,
+                new RunbookOptions(DateTimeOffset.UtcNow, TimeSpan.FromDays(decomPurgeDays)));
+            // Folder named by scan + deterministic window id: re-running the same plan shape
+            // lands on the same reviewed bytes, so the folder is the review record.
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads",
+                $"decom-{decomScanId}-{rb.Window.WindowId}");
+            Directory.CreateDirectory(dir);
+            await File.WriteAllTextAsync(Path.Combine(dir, "runbook.md"), rb.Markdown());
+            await File.WriteAllTextAsync(Path.Combine(dir, "purge.sh"), rb.CliScript());
+            await File.WriteAllTextAsync(Path.Combine(dir, "purge.ps1"), rb.PowerShellScript());
+            var md = Path.Combine(dir, "runbook.md");
+            try
+            {
+                await Launcher.OpenAsync(new OpenFileRequest("Decommission runbook", new ReadOnlyFile(md)));
+            }
+            catch (Exception)
+            {
+                // No markdown handler - the files are still on disk where the message says they are.
+            }
+            Message.Success($"Runbook {rb.PlanHash} - runbook.md + purge.sh + purge.ps1 in {dir}; "
+                + $"purge refuses to run until {rb.PurgeNotBefore.ToUniversalTime():O}");
+        }
+        catch (Exception e)
+        {
+            // The planner is the oracle: an allowed plan never throws here, but a refusal that
+            // raced a re-plan must not take the drawer down.
+            Message.Error($"Could not render the runbook: {e.Message}");
         }
     }
 
