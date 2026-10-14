@@ -11,6 +11,7 @@ service Deploy {
 	rpc WhatIf(DeploymentRequest) returns(WhatIfResponse);
 	rpc ApprovePlan(PlanApprovalRequest) returns(PlanApprovalResponse);
 	rpc CreateDeployment(DeploymentRequest) returns(stream DeploymentResponse);
+	rpc GetDeploymentOperations(DeploymentOperationsRequest) returns(DeploymentOperationsResponse);
 }
 
 message SubscriptionInfo {
@@ -82,4 +83,23 @@ message DeploymentResponse {
 	int32 status_code = 1;
 	string deployment_status = 2;
 	string error_message = 3;
+}
+
+message DeploymentOperationsRequest {
+	string subscription_id = 1;
+	string resource_group_name = 2;
+}
+
+message ResourceOperationRow {
+	string resource_key = 1;
+	string state = 2;
+	string status_code = 3;
+	string timestamp_utc = 4;
+}
+
+message DeploymentOperationsResponse {
+	int32 status_code = 1;
+	string error_message = 2;
+	string deployment_status = 3;
+	repeated ResourceOperationRow operations = 4;
 }

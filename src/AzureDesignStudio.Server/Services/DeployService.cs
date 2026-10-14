@@ -17,6 +17,7 @@ using SubscriptionResource = Azure.ResourceManager.Resources.SubscriptionResourc
 using Azure;
 using Azure.ResourceManager.Resources.Deployments;
 using Azure.ResourceManager.Resources.Deployments.Models;
+using System.Text.Json;
 
 namespace AzureDesignStudio.Server.Services
 {
@@ -263,6 +264,96 @@ namespace AzureDesignStudio.Server.Services
             catch (RequestFailedException ex)
             {
                 _logger.LogWarning(ex, "What-if resource lookup failed.");
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = $"HTTP {ex.Status}: {ex.ErrorCode}";
+                return response;
+            }
+        }
+
+        /// <summary>
+        /// Read-only per-resource monitor for the pipeline's deployment on (subscription, RG)
+        /// (v2 plan 11.2/[56]): GETs deployment + operations over ArmTransport and folds them
+        /// through DeploymentOperationsParser - newest state per resource, unrecognized display
+        /// statuses stay Unknown. Reads only: mutates nothing and consumes no what-if token.
+        /// </summary>
+        public override async Task<DeploymentOperationsResponse> GetDeploymentOperations(DeploymentOperationsRequest request, ServerCallContext context)
+        {
+            var response = new DeploymentOperationsResponse();
+
+            var userIdClaim = ServiceTools.GetUserId(context);
+            if (string.IsNullOrWhiteSpace(userIdClaim))
+            {
+                response.StatusCode = StatusCodes.Status401Unauthorized;
+                response.ErrorMessage = "Access denied.";
+                return response;
+            }
+            var userId = new Guid(userIdClaim);
+
+            if (!Guid.TryParse(request.SubscriptionId, out var subscriptionId) || string.IsNullOrWhiteSpace(request.ResourceGroupName))
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "Subscription and resource group are required.";
+                return response;
+            }
+
+            var subModel = await GetSubscriptionInfo(userId, subscriptionId);
+            if (subModel == null)
+            {
+                response.StatusCode = StatusCodes.Status404NotFound;
+                response.ErrorMessage = "No subscription is found.";
+                return response;
+            }
+
+            try
+            {
+                var credential = new ClientSecretCredential(subModel.TenantId.ToString(),
+                    subModel.ClientId.ToString(), subModel.ClientSecret);
+                var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), credential,
+                    ArmEndpointSet.AzureCloud);
+                var deploymentUrl = $"{transport.Endpoints.ManagementEndpoint}/subscriptions/{subscriptionId}/resourcegroups/{request.ResourceGroupName}/providers/Microsoft.Resources/deployments/{WhatIfClient.DeploymentName}";
+                var apiVersion = transport.Endpoints.ApiVersion;
+
+                try
+                {
+                    using var statusDoc = JsonDocument.Parse(await transport.GetAsync($"{deploymentUrl}?api-version={apiVersion}", context.CancellationToken));
+                    response.DeploymentStatus = statusDoc.RootElement.GetProperty("properties").GetProperty("provisioningState").GetString() ?? "";
+                }
+                catch (ResourceGraphException ex) when (ex.StatusCode == StatusCodes.Status404NotFound)
+                {
+                    response.StatusCode = StatusCodes.Status404NotFound;
+                    response.ErrorMessage = "No deployment is found for this resource group yet.";
+                    return response;
+                }
+
+                var entries = await transport.GetListAsync($"{deploymentUrl}/operations?api-version={apiVersion}", "value", context.CancellationToken);
+                var (operations, diagnostics) = DeploymentOperationsParser.ParsePages(entries.Select(entry => entry.GetRawText()));
+                foreach (var operation in operations)
+                {
+                    response.Operations.Add(new ResourceOperationRow
+                    {
+                        ResourceKey = operation.ResourceKey,
+                        State = operation.State.ToString(),
+                        StatusCode = operation.StatusCode ?? "",
+                        TimestampUtc = operation.TimestampUtc?.ToString("O") ?? "",
+                    });
+                }
+
+                // Honest degradation: folded rows stay usable while parser warnings are surfaced.
+                response.ErrorMessage = string.Join(Environment.NewLine,
+                    diagnostics.Select(d => $"{d.Code}: {d.Message}"));
+                response.StatusCode = StatusCodes.Status200OK;
+                return response;
+            }
+            catch (ResourceGraphException ex)
+            {
+                _logger.LogWarning(ex, "Deployment operations lookup failed.");
+                response.StatusCode = ex.StatusCode == 0 ? StatusCodes.Status502BadGateway : ex.StatusCode;
+                response.ErrorMessage = $"{ex.Code}: {ex.Message}";
+                return response;
+            }
+            catch (RequestFailedException ex)
+            {
+                _logger.LogWarning(ex, "Deployment operations lookup failed.");
                 response.StatusCode = StatusCodes.Status400BadRequest;
                 response.ErrorMessage = $"HTTP {ex.Status}: {ex.ErrorCode}";
                 return response;

@@ -40,6 +40,35 @@ public static class DeploymentOperationsParser
             return ([], [new(ArmDiagnosticSeverity.Error, "InvalidOperationsPayload", "Operations payload is not valid JSON.")]);
         }
 
+        return ParsePayload(root);
+    }
+
+    /// <summary>Folds already-paged operation entries (e.g. from ArmTransport.GetListAsync) with the
+    /// same newest-wins rules as <see cref="Parse"/>; a malformed entry is reported, never dropped
+    /// silently.</summary>
+    public static (IReadOnlyList<ResourceOperation> Operations, IReadOnlyList<ArmDiagnostic> Diagnostics) ParsePages(IEnumerable<string> operationJsons)
+    {
+        var value = new JsonArray();
+        var diagnostics = new List<ArmDiagnostic>();
+        foreach (var json in operationJsons)
+        {
+            try
+            {
+                value.Add(JsonNode.Parse(json));
+            }
+            catch (JsonException)
+            {
+                diagnostics.Add(new(ArmDiagnosticSeverity.Error, "InvalidOperationsPayload", "An operations entry is not valid JSON."));
+            }
+        }
+
+        var (operations, foldDiagnostics) = ParsePayload(new JsonObject { ["value"] = value });
+        diagnostics.AddRange(foldDiagnostics);
+        return (operations, diagnostics);
+    }
+
+    private static (IReadOnlyList<ResourceOperation> Operations, IReadOnlyList<ArmDiagnostic> Diagnostics) ParsePayload(JsonNode? root)
+    {
         if (root?["value"] is not JsonArray value)
         {
             return ([], [new(ArmDiagnosticSeverity.Error, "InvalidOperationsPayload", "Operations payload has no value array.")]);

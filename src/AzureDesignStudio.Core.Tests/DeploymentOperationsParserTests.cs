@@ -117,4 +117,18 @@ public class DeploymentOperationsParserTests
         Assert.Equal(first, second);
         Assert.Equal(["microsoft.storage/storageaccounts/alpha", "microsoft.web/sites/zeta"], first);
     }
+
+    [Fact]
+    public void ParsePages_FoldsAcrossPagesAndReportsMalformedEntry()
+    {
+        var (operations, diagnostics) = DeploymentOperationsParser.ParsePages(new[]
+        {
+            Operation("Microsoft.Storage/storageAccounts", "sa1", "Running", "2026-10-14T10:00:00Z"),
+            "not json",
+            Operation("Microsoft.Storage/storageAccounts", "sa1", "Succeeded", "2026-10-14T10:01:00Z"),
+        });
+
+        Assert.Equal(ResourceApplyState.Succeeded, Assert.Single(operations).State);
+        Assert.Contains(diagnostics, d => d.Code == "InvalidOperationsPayload" && d.Severity == ArmDiagnosticSeverity.Error);
+    }
 }
