@@ -8,6 +8,15 @@
 @using AzureDesignStudio.Workspace
 @implements IDisposable
 @inject TenantScanSession Session
+@using AzureDesignStudio.Core
+@using AzureDesignStudio.Core.Common
+@using AzureDesignStudio.Services
+@using AutoMapper
+@inject DesignGrpcService designService
+@inject AdsContext adsContext
+@inject IMapper mapper
+@inject MessageService Message
+@inject ModalService Modal
 
 @* Tenant discovery drawer (plan 7.8): scan a tenant, browse the snapshot with facets,
    read the orphan/retirement report. Desktop-only; opened through AdsHostFeatures. *@
@@ -157,6 +166,13 @@
                     }
                 </select>
                 <a @onclick="@(() => browseScanId = null)">back</a>
+                <Button Type="ButtonType.Primary" Size="ButtonSize.Small"
+                        Disabled="@(adoptBusy || FilteredCount == 0 || FilteredCount > AdoptLimit)"
+                        OnClick="AdoptAsync">@(adoptBusy ? "Adopting…" : $"Adopt {FilteredCount} as design")</Button>
+                @if (FilteredCount > AdoptLimit)
+                {
+                    <span style="color:#faad14;font-size:12px;">too many to open on the canvas - narrow below @AdoptLimit</span>
+                }
             </div>
 
             @if (facets is { } f)
@@ -270,6 +286,10 @@
     private List<InventoryItem> browseItems = [];
     private InventoryFacets? facets;
 
+    private bool adoptBusy;
+    private const int AdoptLimit = 500; // canvas is not virtualized yet ([92])
+    private int FilteredCount => Filtered().Count();
+
     private string? topoScanId;
     private List<InventoryItem> topoItems = [];
     private IReadOnlySet<string>? topoChanged;
@@ -372,6 +392,74 @@
         facets = InventoryFacets.From(browseItems);
         browseOwner = null;
         expandedId = null;
+    }
+
+    // Adopt [12.2]: the filtered scan rows become an editable design. Saved in the server
+    // design shape (the same DiagramGraph JSON TopMenu.LoadDiagram reads, not the .ads.json
+    // text format), then opened on the canvas; unknown types stay as placeholder nodes.
+    private async Task AdoptAsync()
+    {
+        if (browseScanId is null || adoptBusy)
+            return;
+        var items = Filtered().ToList();
+        if (items.Count == 0 || items.Count > AdoptLimit)
+            return;
+        // Never destroy unsaved canvas work without an explicit yes: adoption clears both the
+        // diagram and its undo history, and the replaced design stays only as the user saved it.
+        if (adsContext.Diagram.Nodes.Count + adsContext.Diagram.Links.Count + adsContext.Diagram.Groups.Count > 0)
+        {
+            if (!await Modal.ConfirmAsync(new ConfirmOptions
+            {
+                Title = "Replace the design on the canvas?",
+                Content = $"Adoption clears '{adsContext.CurrentDesignName ?? "the current design"}' and its undo history - save it first if it holds unsaved work.",
+                OkType = ButtonType.Primary,
+                OkText = "Replace",
+                CancelText = "Cancel",
+            }))
+                return;
+        }
+
+        adoptBusy = true;
+        try
+        {
+            var icons = (adsContext.AllStencils ?? [])
+                .GroupBy(s => s.Key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First().IconPath, StringComparer.OrdinalIgnoreCase);
+            var adoption = AdoptEngine.Adopt(items.Select(i =>
+                new AdoptableResource(i.Id, i.Type, i.Name,
+                    string.IsNullOrWhiteSpace(i.Location) ? null : i.Location)),
+                key => icons.GetValueOrDefault(key));
+            var designName = $"adopted-{browseScanId}";
+            var status = await designService.SaveDesign(designName, JsonSerializer.Serialize(adoption.Graph));
+            if (status != 200)
+            {
+                Message.Error("The adopted design could not be saved; the canvas is unchanged.");
+                return;
+            }
+
+            // Open it with the TopMenu.LoadDiagram contract: history tracks user edits only.
+            adsContext.Diagram.History.Suspend(() =>
+            {
+                adsContext.Diagram.Nodes.Clear();
+                adsContext.Diagram.Links.Clear();
+                adsContext.Diagram.Groups.Clear();
+            });
+            adsContext.Diagram.History.Suspend(() =>
+                DataModelFactory.LoadDiagramFromDto(adsContext.Diagram, adoption.Graph, mapper));
+            adsContext.Diagram.History.Clear();
+            adsContext.CurrentDesignName = designName;
+
+            var placeholders = adoption.Items.Count(x => !x.Mapped);
+            Message.Success($"Adopted {adoption.Items.Count} resource(s)"
+                + (placeholders > 0 ? $", {placeholders} unknown type(s) kept as placeholders" : "")
+                + $" into design '{designName}'.");
+            if (FeedbackRef as DrawerRef<string> is { } dr)
+                await dr.CloseAsync(string.Empty);
+        }
+        finally
+        {
+            adoptBusy = false;
+        }
     }
 
     private async Task LoadTopologyAsync()
