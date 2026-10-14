@@ -84,3 +84,10 @@
     right: 0px;
     color: #ff4d4f;
 }
+
+/* Live-plane link badge (v2 12.1): sits inline after the title. */
+::deep .ads-node-live {
+    color: #52c41a;
+    font-size: 12px;
+    margin-left: 4px;
+}

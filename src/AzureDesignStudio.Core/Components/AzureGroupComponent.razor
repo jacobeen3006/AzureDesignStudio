@@ -12,6 +12,12 @@
         <img src="@(configuration["ResourceRoot"] + Group.ImagePath)" alt=@Group.Name draggable="false" />
     }
     <span class="title">@Group.Name</span>
+    @if (Group.ArmId.Length > 0)
+    {
+        <Tooltip Title="Linked to a live Azure resource (adopted from a scan). A refresh updates its facts.">
+            <Icon Type="link" Theme="@IconThemeType.Outline" Class="ads-node-live" />
+        </Tooltip>
+    }
     @if (!Group.IsValid)
     {
         <Icon Type="exclamation-circle" Theme="@IconThemeType.Fill" Class="ads-node-status"/>

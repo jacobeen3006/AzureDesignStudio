@@ -91,3 +91,14 @@
     right: 0px;
     color: #ff4d4f;
 }
+
+/*
+ *   Live-plane link badge (v2 12.1)
+*/
+::deep .ads-node-live {
+    position: absolute;
+    top: 0px;
+    left: 2px;
+    color: #52c41a;
+    font-size: 12px;
+}
