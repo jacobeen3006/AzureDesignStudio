@@ -40,7 +40,35 @@ public sealed class ArmTransport(HttpClient http, TokenCredential credential, Ar
     public Task<string> GetAsync(string url, CancellationToken ct = default) => SendAsync(HttpMethod.Get, url, null, ct);
     public Task<string> PostAsync(string url, string json, CancellationToken ct = default) => SendAsync(HttpMethod.Post, url, json, ct);
 
-    private async Task<string> SendAsync(HttpMethod method, string url, string? body, CancellationToken ct)
+    /// <summary>POST that follows the LRO shape (202 + <c>Location</c>, poll to completion):
+    /// Cost Management queries run as async jobs for anything but tiny windows.</summary>
+    public async Task<string> PostAsyncPolled(string url, string json, int maxPolls = 30, CancellationToken ct = default)
+    {
+        var r = await SendWithThrottleAsync(HttpMethod.Post, url, json, ct).ConfigureAwait(false);
+        for (var poll = 0; r.Status == HttpStatusCode.Accepted && r.Location is not null; poll++)
+        {
+            if (poll >= maxPolls)
+                throw new ResourceGraphException("Timeout", $"ARM operation did not finish within {maxPolls} polls: {url}", 408);
+            await _delay(r.RetryAfter ?? TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+            r = await SendWithThrottleAsync(HttpMethod.Get, r.Location, null, ct).ConfigureAwait(false);
+        }
+
+        if (r.IsSuccess) return r.Body;
+        throw ResourceGraphException.FromErrorBody((int)r.Status, r.Body);
+    }
+
+    private Task<string> SendAsync(HttpMethod method, string url, string? body, CancellationToken ct) =>
+        FinishAsync(method, url, body, ct);
+
+    private async Task<string> FinishAsync(HttpMethod method, string url, string? body, CancellationToken ct)
+    {
+        var r = await SendWithThrottleAsync(method, url, body, ct).ConfigureAwait(false);
+        if (r.IsSuccess) return r.Body;
+        throw ResourceGraphException.FromErrorBody((int)r.Status, r.Body);
+    }
+
+    /// <summary>One logical send with the shared 429/Retry-After budget; never throws on status.</summary>
+    private async Task<Response> SendWithThrottleAsync(HttpMethod method, string url, string? body, CancellationToken ct)
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -71,9 +99,8 @@ public sealed class ArmTransport(HttpClient http, TokenCredential credential, Ar
                 }
 
                 var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-                if (!response.IsSuccessStatusCode)
-                    throw ResourceGraphException.FromErrorBody((int)response.StatusCode, text);
-                return text;
+                return new Response(response.StatusCode, text, response.Headers.Location?.ToString(),
+                    response.Headers.RetryAfter?.Delta, response.IsSuccessStatusCode);
             }
             finally
             {
@@ -81,6 +108,8 @@ public sealed class ArmTransport(HttpClient http, TokenCredential credential, Ar
             }
         }
     }
+
+    private sealed record Response(HttpStatusCode Status, string Body, string? Location, TimeSpan? RetryAfter, bool IsSuccess);
 }
 
 /// <summary>Cloud endpoint set (7.6: sovereign clouds swap all four, never a hardcoded host).</summary>
