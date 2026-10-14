@@ -303,10 +303,25 @@ public static partial class DeployScopePlanner
     /// <summary>
     /// Pre-deploy gate for the single-scope pipeline until multi-scope staged apply is wired
     /// (v2 plan 11.2): staging errors block, and so does any batch beyond the deployment's
-    /// ambient scope - this pipeline approves and deploys exactly one (subscription, resource
-    /// group) scope, so a plan that stages more must never reach ARM. Warnings never block.
+    /// ambient scope - this pipeline approves and deploys exactly one scope, so a plan that
+    /// stages more must never reach ARM. Without a target identity, explicit resource-group
+    /// scope paths cannot be proven to hit the approved target and block unbound. Warnings
+    /// never block.
     /// </summary>
-    public static bool TryFindBlockingErrors(string templateJson, DeployScopeKind ambientScope, out string message)
+    public static bool TryFindBlockingErrors(string templateJson, DeployScopeKind ambientScope, out string message) =>
+        TryFindBlockingErrorsCore(templateJson, ambientScope, null, null, out message);
+
+    /// <summary>
+    /// RG-ambient gate bound to the approved (subscription, resource group) target: an explicit
+    /// literal <c>scope</c> path must name exactly that target (ARM ids are case-insensitive),
+    /// or the plan is rejected <c>ScopeTargetMismatch</c> - the approval artifact binds one
+    /// exact scope, so an off-target policy/authorization path must never ride the approved
+    /// token into a deployment at a different scope.
+    /// </summary>
+    public static bool TryFindBlockingErrors(string templateJson, string subscriptionId, string resourceGroup, out string message) =>
+        TryFindBlockingErrorsCore(templateJson, DeployScopeKind.ResourceGroup, subscriptionId, resourceGroup, out message);
+
+    private static bool TryFindBlockingErrorsCore(string templateJson, DeployScopeKind ambientScope, string? subscriptionId, string? resourceGroup, out string message)
     {
         var plan = Create(templateJson, ambientScope);
         var errors = plan.Diagnostics.Where(d => d.Severity == ArmDiagnosticSeverity.Error).ToList();
@@ -317,7 +332,87 @@ public static partial class DeployScopePlanner
                 $"The staged plan requires batches beyond the {ambientScope} scope ({string.Join(", ", beyond)}); this pipeline deploys exactly one scope - multi-scope staged apply is not wired yet."));
         }
 
+        if (ambientScope == DeployScopeKind.ResourceGroup)
+        {
+            var bound = !string.IsNullOrWhiteSpace(subscriptionId) && !string.IsNullOrWhiteSpace(resourceGroup);
+            foreach (var (key, scope) in ExplicitResourceGroupScopes(templateJson))
+            {
+                if (!bound)
+                {
+                    errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeTargetUnbound",
+                        $"'{key}' carries an explicit resource-group scope '{scope}'; without a bound (subscription, resource group) target the gate cannot prove it matches what was approved."));
+                }
+                else if (!ScopeMatchesTarget(scope, subscriptionId!, resourceGroup!))
+                {
+                    errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeTargetMismatch",
+                        $"'{key}' carries an explicit scope '{scope}' outside the approved target /subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}."));
+                }
+            }
+        }
+
         message = string.Join(Environment.NewLine, errors.Select(e => $"{e.Code}: {e.Message}"));
         return errors.Count > 0;
+    }
+
+    /// <summary>Literal <c>scope</c> paths the classifier reads as resource-group scope. Expression scopes are
+    /// skipped (Create already failed the plan closed); empty scope inherits the ambient deployment target.</summary>
+    private static IEnumerable<(string Key, string Scope)> ExplicitResourceGroupScopes(string templateJson)
+    {
+        JsonNode? root;
+        try
+        {
+            root = JsonNode.Parse(templateJson);
+        }
+        catch (JsonException)
+        {
+            yield break;
+        }
+
+        if (root is not JsonObject template || template["resources"] is not JsonArray resources)
+        {
+            yield break;
+        }
+
+        foreach (var item in resources)
+        {
+            if (item is not JsonObject resource)
+            {
+                continue;
+            }
+
+            var scope = Str(resource, "scope");
+            if (scope.Length == 0 || scope.Contains('[') || ScopeKindFromPath(scope) != DeployScopeKind.ResourceGroup)
+            {
+                continue;
+            }
+
+            yield return (Key(Str(resource, "type"), Str(resource, "name")), scope);
+        }
+    }
+
+    private static bool ScopeMatchesTarget(string scope, string subscriptionId, string resourceGroup)
+    {
+        var segments = scope.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var sub = -1;
+        var rg = -1;
+        for (var i = 0; i < segments.Length - 1; i++)
+        {
+            if (sub < 0)
+            {
+                if (segments[i].Equals("subscriptions", StringComparison.OrdinalIgnoreCase))
+                {
+                    sub = i;
+                }
+            }
+            else if (segments[i].Equals("resourceGroups", StringComparison.OrdinalIgnoreCase))
+            {
+                rg = i;
+                break;
+            }
+        }
+
+        return sub >= 0 && rg > sub
+            && segments[sub + 1].Equals(subscriptionId, StringComparison.OrdinalIgnoreCase)
+            && segments[rg + 1].Equals(resourceGroup, StringComparison.OrdinalIgnoreCase);
     }
 }

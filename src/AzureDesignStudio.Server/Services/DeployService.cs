@@ -171,7 +171,7 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            if (DeployScopePlanner.TryFindBlockingErrors(request.ArmTemplate, DeployScopeKind.ResourceGroup, out var scopeErrors))
+            if (DeployScopePlanner.TryFindBlockingErrors(request.ArmTemplate, request.SubscriptionId, request.ResourceGroupName, out var scopeErrors))
             {
                 _logger.LogWarning("Staged plan blocked before what-if: {Errors}", scopeErrors);
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -352,7 +352,7 @@ namespace AzureDesignStudio.Server.Services
                 return;
             }
 
-            if (DeployScopePlanner.TryFindBlockingErrors(request.ArmTemplate, DeployScopeKind.ResourceGroup, out var scopeErrors))
+            if (DeployScopePlanner.TryFindBlockingErrors(request.ArmTemplate, request.SubscriptionId, request.ResourceGroupName, out var scopeErrors))
             {
                 _logger.LogWarning("Staged plan blocked before deploy: {Errors}", scopeErrors);
                 response.StatusCode = StatusCodes.Status400BadRequest;

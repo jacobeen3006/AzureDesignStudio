@@ -160,6 +160,38 @@ public class DeployScopePlannerTests
     }
 
     [Fact]
+    public void ExplicitResourceGroupScope_MustMatchTheApprovedTarget()
+    {
+        // A role assignment scoped to a different RG shares the ResourceGroup kind with the
+        // approved target, so a kind-only gate would let it ride the approved token.
+        var offTarget = Template(
+            """{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"/subscriptions/AAA/resourceGroups/other-rg"}""");
+        Assert.True(DeployScopePlanner.TryFindBlockingErrors(offTarget, "bbb", "target-rg", out var mismatch));
+        Assert.Contains("ScopeTargetMismatch", mismatch);
+
+        // Same shape when the path names the target: clears, ARM ids are case-insensitive.
+        var matching = Template(
+            """{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"/subscriptions/BBB/resourceGroups/TARGET-RG"}""");
+        Assert.False(DeployScopePlanner.TryFindBlockingErrors(matching, "bbb", "target-rg", out _));
+
+        // A deeper provider path inside the target RG still matches the target.
+        var nested = Template(
+            """{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"/subscriptions/bbb/resourceGroups/target-rg/providers/Microsoft.Network/virtualNetworks/vn1"}""");
+        Assert.False(DeployScopePlanner.TryFindBlockingErrors(nested, "bbb", "target-rg", out _));
+
+        // The classifier reads an unparseable path as resource-group scope; without provable
+        // identity it fails closed instead of riding the deployment.
+        var junk = Template(
+            """{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"/nonsense/"}""");
+        Assert.True(DeployScopePlanner.TryFindBlockingErrors(junk, "bbb", "target-rg", out var junkMessage));
+        Assert.Contains("ScopeTargetMismatch", junkMessage);
+
+        // Without a bound target identity the gate cannot prove the path, so it blocks unbound.
+        Assert.True(DeployScopePlanner.TryFindBlockingErrors(offTarget, DeployScopeKind.ResourceGroup, out var unbound));
+        Assert.Contains("ScopeTargetUnbound", unbound);
+    }
+
+    [Fact]
     public void SingleScopeGate_BlocksOnlyErrorsAndBeyondScopeBatches()
     {
         // Single-RG template clears; outputs warning alone never blocks.
