@@ -83,11 +83,13 @@ public sealed class ResourceGraphException : Exception
         {
             if (JsonNode.Parse(body)?["error"] is JsonObject error)
             {
-                code = error["code"]?.GetValue<string>() ?? code;
-                message = error["message"]?.GetValue<string>() ?? message;
+                code = AsText(error["code"]) ?? code;
+                message = AsText(error["message"]) ?? message;
             }
         }
         catch (JsonException) { /* keep raw body as message */ }
+        // AsText: a mis-typed code/message (number/object) must not mask the real status.
+        static string? AsText(JsonNode? node) => node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
         return new ResourceGraphException(code, message, statusCode);
     }
 }
