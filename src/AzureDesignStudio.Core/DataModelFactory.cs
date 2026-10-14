@@ -319,8 +319,12 @@ public static partial class DataModelFactory
                     ?? nodeById.GetValueOrDefault(linkDto.TargetPortParentId)
                     ?? throw new Exception($"Cannot find the target node. TargetParentId = {linkDto.TargetPortParentId}");
 
-            var sourcePort = sourceNode.Ports.Single(p => p.Alignment == linkDto.SourcePortAlignment);
-            var targetPort = targetNode.Ports.Single(p => p.Alignment == linkDto.TargetPortAlignment);
+            // A saved alignment with no matching port means the document predates the node's
+            // port set (or is corrupt); name the offender instead of a bare 'no matching element'.
+            var sourcePort = sourceNode.Ports.FirstOrDefault(p => p.Alignment == linkDto.SourcePortAlignment)
+                    ?? throw new Exception($"Cannot find the link's source port. SourceParentId = {linkDto.SourcePortParentId}, Alignment = {linkDto.SourcePortAlignment}");
+            var targetPort = targetNode.Ports.FirstOrDefault(p => p.Alignment == linkDto.TargetPortAlignment)
+                    ?? throw new Exception($"Cannot find the link's target port. TargetParentId = {linkDto.TargetPortParentId}, Alignment = {linkDto.TargetPortAlignment}");
             var link = diagram.Options.Links.Factory!(diagram, sourcePort, new SinglePortAnchor(targetPort));
             if (link is not null)
                 diagram.Links.Add(link);
