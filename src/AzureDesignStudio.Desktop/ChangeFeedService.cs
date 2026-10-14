@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AzureDesignStudio.Discovery.ChangeFeed;
 using AzureDesignStudio.Discovery.Drift;
+using AzureDesignStudio.Discovery.Exposure;
 using AzureDesignStudio.Discovery.Inventory;
 using AzureDesignStudio.Discovery.ResourceGraph;
 using AzureDesignStudio.Workspace;
@@ -50,6 +51,10 @@ public sealed class ChangeFeedService(ResourceGraphClient graph, WorkspaceChange
         var feed = await changes.ListSinceAsync(scannedAt, take: int.MaxValue);
         return LiveDrift.Overlay(snapshot, feed.Select(ToEntry).ToList(), scannedAt);
     }
+
+    /// <summary>Internet-exposure findings for a persisted scan (v2 plan 9.4).</summary>
+    public async Task<IReadOnlyList<ExposureFinding>> ExposureAsync(string scanId) =>
+        ExposureAnalyzer.Analyze(ToItems(await scans.GetSnapshotsAsync(scanId)));
 
     /// <summary>Snapshot rows → typeless inventory rows, re-run duplicates folded (last wins).</summary>
     private static IReadOnlyList<InventoryItem> ToItems(IReadOnlyList<ResourceSnapshotRecord> rows)
