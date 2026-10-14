@@ -115,6 +115,8 @@
 **Gate:** round trip adopt→edit→what-if→apply→rescan shows zero drift; stack guard tests green.
 **Effort:** 3–4 weeks.
 
+**Status (2026-10-14):** 12.2 read-only core done — `AdoptEngine` (Core/Common) turns an ARM-agnostic inventory (`AdoptableResource`: id/type/name/location/sku/kind/tags/resourceGroup) into an editable `.ads.json` graph: catalog-derived ARM-type→stencil table (probes every `DataModelFactory` key, claims only the model's own `GetArmResources()[0]` type; 41/46 keys mapped, case-insensitive), ARM-nesting parent resolution (subnet→vnet, db→server) landing children inside parent frames with `GroupId`, deterministic ordinal grid layout, unknown types degraded to openable placeholder nodes and reported in `AdoptionResult`. Host icon seam via optional `iconPathByStencilKey`. Honest gaps: aks-cluster/app-gateway/azure-bastions/azure-firewall (exports need diagram links) and function-app (shares `Microsoft.Web/sites` with web-app, which wins the claim). 7 tests in `AdoptEngineTests`. Reconcile actions (adopt/update/detach/delete) and the two-plane canvas (12.1) remain; delete stays gated behind Phase 13.
+
 ## Phase 13 — Decommissioning (last, carefully)
 
 - 13.1 **[36-final]** Guardrails enforced on every destructive path (blocks listed in 100-list §3).
