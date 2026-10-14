@@ -251,8 +251,15 @@ public static class DecommissionPlanner
 
         // --- staged order: Kahn topological batches over the explicit set, ordinal-stable picking ---
 
+        // A refused candidate is never staged: while its refusal stands it does not delete, and a
+        // stage row listing it would promise an order for a resource the plan already rejected.
+        var refused = new HashSet<string>(
+            blockers.Where(b => b.Severity == DecommissionSeverity.Refusal).Select(b => b.ResourceId),
+            StringComparer.OrdinalIgnoreCase);
+
         var stages = new List<IReadOnlyList<string>>();
         var remaining = new HashSet<string>(known.Keys, StringComparer.OrdinalIgnoreCase);
+        remaining.ExceptWith(refused);
         var incoming = remaining.ToDictionary(id => id, id => 0, StringComparer.OrdinalIgnoreCase);
         foreach (var (before, after) in precedence)
             if (remaining.Contains(before) && remaining.Contains(after))

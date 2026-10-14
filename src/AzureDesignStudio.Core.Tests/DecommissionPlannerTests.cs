@@ -109,6 +109,7 @@ public class DecommissionPlannerTests
         var blocker = Assert.Single(plan.Blockers, b => b.Severity == DecommissionSeverity.Refusal);
         Assert.Equal(Nic, blocker.ResourceId);
         Assert.Equal("referenced-externally", blocker.Kind);
+        Assert.Empty(plan.Stages);
         Assert.Contains(Vm, blocker.Detail);
     }
 
@@ -389,5 +390,17 @@ public class DecommissionPlannerTests
         Assert.True(plan.Allowed);
         Assert.Empty(plan.Stages);
         Assert.Empty(plan.Candidates);
+    }
+
+    [Fact]
+    public void RefusedCandidateIsNeverStaged_CleanSiblingsStillStage()
+    {
+        var storage = Rg + "/providers/Microsoft.Storage/storageAccounts/stclean";
+        var plan = PlanAll(new[] { VmItem(), NicItem(), Item(storage, "microsoft.storage/storageaccounts") },
+            new[] { Nic, storage });
+
+        Assert.False(plan.Allowed);
+        Assert.Contains(plan.Blockers, b => b.Severity == DecommissionSeverity.Refusal && b.ResourceId == Nic);
+        Assert.Equal(new[] { new[] { storage } }, plan.Stages.Select(s => s.ToArray()).ToArray());
     }
 }

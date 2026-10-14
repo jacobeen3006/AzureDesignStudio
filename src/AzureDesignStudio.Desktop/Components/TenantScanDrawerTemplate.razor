@@ -4,6 +4,7 @@
 @using AzureDesignStudio.Discovery.Analysis
 @using AzureDesignStudio.Discovery.Arm
 @using AzureDesignStudio.Discovery.Inventory
+@using AzureDesignStudio.Discovery.Decommission
 @using AzureDesignStudio.Discovery.Preflight
 @using AzureDesignStudio.Workspace
 @implements IDisposable
@@ -24,7 +25,7 @@
 
 <div style="padding:0 4px;">
     <div style="display:flex;gap:8px;margin-bottom:12px;">
-        @foreach (var (key, label) in new[] { ("scan", "Scan"), ("browse", "Inventory"), ("topology", "Topology"), ("report", "Report") })
+        @foreach (var (key, label) in new[] { ("scan", "Scan"), ("browse", "Inventory"), ("topology", "Topology"), ("decom", "Decommission"), ("report", "Report") })
         {
             <Button Type="@(activeTab == key ? ButtonType.Primary : ButtonType.Default)"
                     Size="ButtonSize.Small" OnClick="@(() => SwitchTabAsync(key))">@label</Button>
@@ -281,7 +282,115 @@
             <TopologyView Items="topoItems" Positions="Session.Positions" ChangedIds="topoChanged" />
         }
     }
-    else if (reportScan is null)
+    else if (activeTab == "decom")
+    {
+        <div style="font-size:12px;color:#666;margin-bottom:8px;">
+            Plans only - this tab never calls Azure and deletes nothing. Locks, RBAC and backups are not
+            evaluated here: the planner reports them as caveats, never as an all-clear.
+        </div>
+        @if (decomScanId is null)
+        {
+            @if (completed.Count == 0)
+            {
+                <span>No completed scans yet.</span>
+            }
+            else
+            {
+                <select @bind="decomScanId" @bind:after="LoadDecomAsync">
+                    @foreach (var scan in completed)
+                    {
+                        <option value="@scan.Id">@(scan.StartedAt.LocalDateTime.ToString("dd.MM HH:mm")) · @scan.Scope · @scan.ResourceCount rows</option>
+                    }
+                </select>
+            }
+        }
+        else
+        {
+            <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
+                <input style="flex:1;padding:4px;" placeholder="search name / id" @bind="decomSearch" @bind:event="oninput" />
+                <a @onclick="@(() => { decomScanId = null; decomPlan = null; decomManifest = null; decomSelected.Clear(); })">back</a>
+                <Button Type="ButtonType.Primary" Size="ButtonSize.Small"
+                        Disabled="@(decomSelected.Count == 0)" OnClick="RunDecomPreview">Preview teardown (@decomSelected.Count)</Button>
+                <Button Size="ButtonSize.Small" Disabled="@(decomPlan is null || DecomConfirmed.Count == 0)"
+                        OnClick="SaveManifestAsync">Save retention manifest@(decomManifest is null ? "" : $" ({decomManifest.Rows.Count})")</Button>
+            </div>
+
+            @foreach (var item in DecomFiltered().Take(200))
+            {
+                <div style="border-bottom:1px solid #fafafa;padding:2px 0;font-size:13px;">
+                    <label>
+                        <input type="checkbox" checked="@decomSelected.Contains(item.Id)"
+                               @onchange="@(e => ToggleDecom(item.Id, e))" />
+                        <b>@item.Name</b> <Tag>@item.ResourceTypeSegment</Tag>
+                        <span style="color:#999;font-size:12px;">@item.Location</span>
+                    </label>
+                </div>
+            }
+            @if (DecomFiltered().Count() > 200)
+            {
+                <div style="color:#999;font-size:12px;">showing first 200 - narrow with search</div>
+            }
+
+            @if (decomPlan is { } plan)
+            {
+                <h4 style="margin-top:12px;">Teardown plan</h4>
+                @if (plan.Allowed)
+                {
+                    <div style="color:#389e0d;font-size:13px;margin-bottom:6px;">Nothing refuses - the plan stages in @plan.Stages.Count batch(es). No execution verb exists yet: this stays behind the deploy gates.</div>
+                }
+                else
+                {
+                    <div style="color:#cf1322;font-size:13px;margin-bottom:6px;"><b>Refused</b> - something selected is protected or still referenced by a survivor; nothing may proceed.</div>
+                }
+
+                @for (var s = 0; s < plan.Stages.Count; s++)
+                {
+                    <div style="font-size:13px;margin-bottom:4px;"><b>Stage @(s + 1)</b>: @string.Join(", ", plan.Stages[s].Select(NameOf))</div>
+                }
+
+                @if (plan.Blockers.Count > 0)
+                {
+                    <h4>Blockers</h4>
+                    @foreach (var b in plan.Blockers)
+                    {
+                        <div style="border-bottom:1px solid #fafafa;padding:3px 0;font-size:13px;">
+                            <Tag Color="@SeverityColor(b.Severity)">@b.Severity</Tag>
+                            <b>@NameOf(b.ResourceId)</b> <span style="color:#999">@b.Kind</span>
+                            <div style="color:#666;">@b.Detail</div>
+                        </div>
+                    }
+                }
+
+                @if (plan.Impacts.Count > 0)
+                {
+                    <h4>Impact preview</h4>
+                    @foreach (var im in plan.Impacts)
+                    {
+                        <div style="border-bottom:1px solid #fafafa;padding:3px 0;font-size:13px;">
+                            <Tag Color="@SeverityColor(im.Severity)">@im.Severity</Tag>
+                            <b>@NameOf(im.ResourceId)</b> <span style="color:#999">@im.Kind</span>
+                            <div style="color:#666;">@im.Detail</div>
+                        </div>
+                    }
+                }
+
+                @if (plan.ImplicitChildren.Count > 0)
+                {
+                    <div style="font-size:12px;color:#faad14;margin-top:6px;">@plan.ImplicitChildren.Count child resource(s) die with their selected parent without being selected: @string.Join(", ", plan.ImplicitChildren.Select(c => NameOf(c.ChildId)).Take(8))@(plan.ImplicitChildren.Count > 8 ? " ..." : "")</div>
+                }
+
+                @if (plan.Caveats.Count > 0)
+                {
+                    <h4>Not evaluated</h4>
+                    @foreach (var cav in plan.Caveats)
+                    {
+                        <div style="font-size:12px;color:#999;">@cav</div>
+                    }
+                }
+            }
+        }
+    }
+    else if (activeTab == "report" && reportScan is null)
     {
         <span>No completed scan to analyze yet - run one first.</span>
     }
@@ -358,6 +467,15 @@
     private IReadOnlyList<AnalysisFinding> reportFindings = [];
     private IReadOnlyList<(InventoryItem Item, DeprecationEntry Entry)> watched = [];
     private DeprecationCatalog catalog = DeprecationCatalog.Seed;
+
+    // Decommission preview [91]: pure read of one scan snapshot - no ARM calls, no evidence
+    // fetch, no mutation. The planner's own caveats carry everything it could not check.
+    private string? decomScanId;
+    private List<InventoryItem> decomItems = [];
+    private string decomSearch = "";
+    private readonly HashSet<string> decomSelected = new(StringComparer.OrdinalIgnoreCase);
+    private DecommissionPlan? decomPlan;
+    private RetentionManifest? decomManifest;
 
     private int enabledCount => subscriptions.Count(s => s.State == "Enabled");
 
@@ -712,6 +830,92 @@
             yield return item;
         }
     }
+
+    private async Task LoadDecomAsync()
+    {
+        decomPlan = null;
+        decomManifest = null;
+        decomSelected.Clear();
+        decomItems = [];
+        if (decomScanId is null)
+            return;
+        var rows = await Session.GetSnapshotsAsync(decomScanId);
+        decomItems = rows.Select(ToItem).ToList();
+    }
+
+    private IEnumerable<InventoryItem> DecomFiltered() =>
+        string.IsNullOrEmpty(decomSearch)
+            ? decomItems
+            : decomItems.Where(i => i.Name.Contains(decomSearch, StringComparison.OrdinalIgnoreCase)
+                                 || i.Id.Contains(decomSearch, StringComparison.OrdinalIgnoreCase));
+
+    private void ToggleDecom(string id, ChangeEventArgs e)
+    {
+        if (e.Value is true or "true") decomSelected.Add(id); else decomSelected.Remove(id);
+    }
+
+    private void RunDecomPreview()
+    {
+        if (decomSelected.Count == 0)
+            return;
+        decomManifest = null;
+        decomPlan = DecommissionPlanner.Plan(decomItems, decomSelected.ToList());
+    }
+
+    // Confirmed set for [66]: everything selected that no refusal blocked. Manifest writing
+    // stays a LOCAL file write - the plan is evidence-caveated, not a deploy approval.
+    private IReadOnlyList<string> DecomConfirmed
+    {
+        get
+        {
+            if (decomPlan is null)
+                return [];
+            var refused = new HashSet<string>(
+                decomPlan.Blockers.Where(b => b.Severity == DecommissionSeverity.Refusal).Select(b => b.ResourceId),
+                StringComparer.OrdinalIgnoreCase);
+            return decomPlan.Candidates.Where(c => !refused.Contains(c)).ToList();
+        }
+    }
+
+    private async Task SaveManifestAsync()
+    {
+        var confirmed = DecomConfirmed;
+        if (decomPlan is null || confirmed.Count == 0 || decomScanId is null)
+            return;
+        decomManifest = RetainBeforeRetire.Build(decomItems, confirmed, backupItems: null);
+        var json = JsonSerializer.Serialize(decomManifest, new JsonSerializerOptions { WriteIndented = true });
+        try
+        {
+            // MAUI 10 has no save-file picker; Downloads + open-with-default is the honest route,
+            // and the manifest's whole point is to survive the teardown it documents.
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, $"retention-manifest-{decomScanId}.json");
+            await File.WriteAllTextAsync(path, json);
+            try
+            {
+                await Launcher.OpenAsync(new OpenFileRequest("Retention manifest", new ReadOnlyFile(path)));
+            }
+            catch (Exception)
+            {
+                // No JSON handler - the file is still on disk where the message says it is.
+            }
+            Message.Success($"Retention manifest: {decomManifest.Rows.Count} row(s), "
+                + $"{decomManifest.Caveats.Count} caveat(s) - written to {path}");
+        }
+        catch (Exception e)
+        {
+            Message.Error($"Could not write the manifest: {e.Message}");
+        }
+    }
+
+    private static string SeverityColor(DecommissionSeverity s) => s switch
+    {
+        DecommissionSeverity.Refusal => "red",
+        DecommissionSeverity.Warning => "orange",
+        DecommissionSeverity.Info => "blue",
+        _ => "default",
+    };
 
     private static InventoryItem ToItem(ResourceSnapshotRecord r) => new(
         r.ResourceId, r.Name, r.ResourceType, r.Location ?? "", r.ResourceGroup ?? "", r.SubscriptionId ?? "",
