@@ -18,6 +18,7 @@ namespace AzureDesignStudio.Server.Models
         public DbSet<DesignModel> AdsDesigns { get; set; } = null!;
         public DbSet<AzureSubscriptionModel> AzureSubscriptions { get; set; } = null!;
         public DbSet<PlanApprovalModel> AdsPlanApprovals { get; set; } = null!;
+        public DbSet<PlanApplyAuditModel> AdsPlanApplies { get; set; } = null!;
     }
 
     public record DesignModel
@@ -64,5 +65,36 @@ namespace AzureDesignStudio.Server.Models
         public string ApprovedByUserId { get; set; } = null!;
 
         public DateTime ApprovedAtUtc { get; set; }
+    }
+
+    /// <summary>
+    /// Immutable per-apply audit row (v2 plan [62]/11.3): consumed approvals are removed from
+    /// AdsPlanApprovals, but every apply is appended here before the ARM mutation starts, so
+    /// "who applied which plan, when, where" survives consumption forever.
+    /// </summary>
+    public record PlanApplyAuditModel
+    {
+        public int Id { get; set; }
+
+        [StringLength(71, MinimumLength = 71)]
+        public string PlanHash { get; set; } = null!;
+
+        [StringLength(64, MinimumLength = 1)]
+        public string SubscriptionId { get; set; } = null!;
+
+        [StringLength(90, MinimumLength = 1)]
+        public string ResourceGroupName { get; set; } = null!;
+
+        [StringLength(64, MinimumLength = 1)]
+        public string DeploymentName { get; set; } = null!;
+
+        [StringLength(320, MinimumLength = 1)]
+        public string ApprovedBy { get; set; } = null!;
+
+        [StringLength(64, MinimumLength = 36)]
+        public string ApprovedByUserId { get; set; } = null!;
+
+        public DateTime ApprovedAtUtc { get; set; }
+        public DateTime AppliedAtUtc { get; set; }
     }
 }

@@ -458,6 +458,20 @@ namespace AzureDesignStudio.Server.Services
             }
 
             // Consume the approval: one apply per approval, re-deploy needs a fresh review.
+            // The apply itself is written durably to AdsPlanApplies *before* any ARM mutation
+            // starts (v2 plan [62]/11.3), so consumption of the approval row never erases the
+            // "who applied what, when, where" trail.
+            _designContext.AdsPlanApplies.Add(new PlanApplyAuditModel
+            {
+                PlanHash = approval.PlanHash,
+                SubscriptionId = subscriptionId.ToString(),
+                ResourceGroupName = request.ResourceGroupName,
+                DeploymentName = WhatIfClient.DeploymentName,
+                ApprovedBy = approval.ApprovedBy,
+                ApprovedByUserId = approval.ApprovedByUserId,
+                ApprovedAtUtc = approval.ApprovedAtUtc,
+                AppliedAtUtc = DateTime.UtcNow,
+            });
             _designContext.AdsPlanApprovals.Remove(approval);
             await _designContext.SaveChangesAsync(context.CancellationToken);
             _logger.LogInformation("Plan applied hash={PlanHash} approver={ApprovedBy} user={UserId} target={Subscription}/{ResourceGroup}",

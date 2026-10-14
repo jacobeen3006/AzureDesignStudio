@@ -84,6 +84,17 @@ var app = builder.Build();
                     ApprovedBy nvarchar(320) NOT NULL,
                     ApprovedByUserId nvarchar(64) NOT NULL,
                     ApprovedAtUtc datetime2 NOT NULL DEFAULT GETUTCDATE());
+                IF OBJECT_ID(N'AdsPlanApplies', N'U') IS NULL
+                CREATE TABLE AdsPlanApplies (
+                    Id int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                    PlanHash nvarchar(71) NOT NULL,
+                    SubscriptionId nvarchar(64) NOT NULL,
+                    ResourceGroupName nvarchar(90) NOT NULL,
+                    DeploymentName nvarchar(64) NOT NULL,
+                    ApprovedBy nvarchar(320) NOT NULL,
+                    ApprovedByUserId nvarchar(64) NOT NULL,
+                    ApprovedAtUtc datetime2 NOT NULL,
+                    AppliedAtUtc datetime2 NOT NULL);
                 """);
         }
     }
