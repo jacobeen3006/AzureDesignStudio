@@ -34,6 +34,9 @@ namespace AzureDesignStudio.Components
                 case "save":
                     await OpenSaveDrawer();
                     break;
+                case "guardrails":
+                    await OpenGuardrailsDrawer();
+                    break;
                 case "user":
                     await OpenUserDrawer();
                     break;
@@ -273,6 +276,19 @@ namespace AzureDesignStudio.Components
             };
 
             await drawerService.CreateAsync<CodeDrawerTemplate, CodeDrawerContent, string>(options, content);
+        }
+
+        private async Task OpenGuardrailsDrawer()
+        {
+            var currentWindowSize = await JS.InvokeAsync<WindowSize>("getWindowSize");
+            var options = new DrawerOptions
+            {
+                Title = "Do-not-touch guardrails",
+                Placement = DrawerPlacement.Bottom,
+                Height = currentWindowSize.Height.ToString()
+            };
+
+            await drawerService.CreateAsync<GuardrailsDrawerTemplate, GuardrailsDrawerContent, string>(options, new GuardrailsDrawerContent());
         }
 
         private async Task InvokePrintJS()

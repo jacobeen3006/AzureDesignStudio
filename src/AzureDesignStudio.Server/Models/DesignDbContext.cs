@@ -21,6 +21,7 @@ namespace AzureDesignStudio.Server.Models
         public DbSet<AzureSubscriptionModel> AzureSubscriptions { get; set; } = null!;
         public DbSet<PlanApprovalModel> AdsPlanApprovals { get; set; } = null!;
         public DbSet<PlanApplyEventModel> AdsPlanApplyEvents { get; set; } = null!;
+        public DbSet<GuardrailPolicyModel> AdsGuardrailPolicies { get; set; } = null!;
     }
 
     public record DesignModel
@@ -71,5 +72,26 @@ namespace AzureDesignStudio.Server.Models
         /// <summary>Pre-deploy snapshot + undo entries derived from the live preview (v2 11.4);
         /// persisted with the approval so the record carries exactly what existed before apply.</summary>
         public string? RevertPlanJson { get; set; }
+    }
+
+    /// <summary>Server-side do-not-touch list (v2 13.1/[36-final]): one row (Id=1), the policy every
+    /// review and apply is judged against. Written only through SetGuardrailPolicy by an
+    /// authenticated principal; deploys never consult a client-supplied copy.</summary>
+    public record GuardrailPolicyModel
+    {
+        [Key]
+        public int Id { get; set; }
+
+        /// <summary>GuardrailPolicy.FromJson shape (scopes/tags/types). Validated on write.</summary>
+        [Required]
+        public string Json { get; set; } = "";
+
+        [StringLength(320)]
+        public string UpdatedBy { get; set; } = "";
+
+        [StringLength(64)]
+        public string UpdatedByUserId { get; set; } = "";
+
+        public DateTime UpdatedAtUtc { get; set; }
     }
 }

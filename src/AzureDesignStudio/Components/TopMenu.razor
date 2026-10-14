@@ -31,6 +31,11 @@
         <div title="Validate the design"><MenuItem Key="validate" Icon="@IconType.Outline.CheckCircle" RouterMatch="@NavLinkMatch.Prefix" /></div>
         <div title="Estimate monthly cost"><MenuItem Key="cost" Icon="@IconType.Outline.DollarCircle" RouterMatch="@NavLinkMatch.Prefix" /></div>
         <div title="Save/Load"><MenuItem Key="save" Icon="@IconType.Outline.Save" RouterMatch="@NavLinkMatch.Prefix" /></div>
+        <AuthorizeView>
+            <Authorized>
+                <div title="Do-not-touch guardrails"><MenuItem Key="guardrails" Icon="@IconType.Outline.Safety" RouterMatch="@NavLinkMatch.Prefix" /></div>
+            </Authorized>
+        </AuthorizeView>
         @if (features.TenantScanLabel is { } scanLabel)
         {
             <div title="@scanLabel"><MenuItem Key="scan" Icon="@IconType.Outline.Global" RouterMatch="@NavLinkMatch.Prefix" /></div>

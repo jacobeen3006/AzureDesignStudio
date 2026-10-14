@@ -39,23 +39,30 @@ public sealed record GuardrailPolicy(
     }
 
     /// <summary>Which guardrail protects this item, if any - the matched pattern is the audit reason.</summary>
-    public string? ProtectionReason(Inventory.InventoryItem item)
+    public string? ProtectionReason(Inventory.InventoryItem item) => ProtectionReasonFor(item.Id, item.Type, item.Tags);
+
+    /// <summary>
+    /// Enforcement shape (v2 13.1): the same rules over bare (id, type, tags) so a deploy plan -
+    /// whose resources are ARM ids and what-if payloads, not scan items - is judged identically.
+    /// </summary>
+    public string? ProtectionReasonFor(string id, string type, IReadOnlyDictionary<string, string> tags)
     {
         foreach (var scope in ProtectedScopes)
-            if (ScopeMatches(item.Id, scope))
+            if (ScopeMatches(id, scope))
                 return "guardrail-scope:" + scope;
 
         foreach (var tag in ProtectedTags)
-            if (item.Tags.TryGetValue(tag.Key, out var value)
+            if (tags.TryGetValue(tag.Key, out var value)
                 && (tag.Value is null || string.Equals(value, tag.Value, StringComparison.OrdinalIgnoreCase)))
                 return "guardrail-tag:" + tag.Key + (tag.Value is null ? "" : "=" + tag.Value);
 
-        foreach (var type in ProtectedTypes)
-            if (TypeMatches(item.Type, type))
-                return "guardrail-type:" + type;
+        foreach (var type2 in ProtectedTypes)
+            if (TypeMatches(type, type2))
+                return "guardrail-type:" + type2;
 
         // Legacy blanket flag survives any config (InventoryItem.HasCostEscalationSignal).
-        if (item.HasCostEscalationSignal) return "tag:do-not-touch";
+        if (tags.TryGetValue("do-not-touch", out var dnt) && bool.TryParse(dnt, out var flagged) && flagged)
+            return "tag:do-not-touch";
 
         return null;
     }

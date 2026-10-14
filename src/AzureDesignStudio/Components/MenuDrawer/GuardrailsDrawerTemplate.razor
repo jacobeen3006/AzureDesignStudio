@@ -1,0 +1,40 @@
+@using AzureDesignStudio.Models
+@using AzureDesignStudio.Services
+@inherits FeedbackComponent<GuardrailsDrawerContent, string>
+@inject DeployGrpcService _deployService
+@inject MessageService _messageService
+@if (_error is not null)
+{
+    <Alert Type="@AlertType.Error" Message="@_error" ShowIcon="true" Style="margin-bottom:12px" />
+}
+
+<p>
+    The do-not-touch list is the server-side guardrail (v2 13.1): every plan is judged against it at
+    What-If review <em>and</em> again at apply time. A plan that touches a protected resource gets no
+    deploy token - approval is impossible until the list changes.
+</p>
+<Alert Type="@AlertType.Info" ShowIcon="true" Style="margin-bottom:12px"
+       Message="Tightening the list stops already-reviewed plans too: the apply re-judges live. Editing this list requires a signed-in user and is recorded with who and when." />
+
+
+<label>Policy JSON</label>
+<TextArea @bind-Value="@_json" Rows="14"
+          Placeholder='{"scopes":["subscriptions/<id>/resourceGroups/<rg>"],"tags":[{"key":"environment","value":"prod"}],"types":["microsoft.keyvault/vaults"]}' />
+
+<div style="margin-top:12px">
+    <Button Type="@ButtonType.Primary" OnClick="SaveAsync" Disabled="@(_busy)" Loading="@(_busy)">Save policy</Button>
+    <Button OnClick="LoadAsync" Disabled="@(_busy)">Reload</Button>
+    <span style="margin-left:12px;color:#888">
+        @if (string.IsNullOrEmpty(_updatedBy))
+        {
+            <em>no policy stored yet - nothing is protected</em>
+        }
+        else
+        {
+            <em>last changed by @_updatedBy at @_updatedAt</em>
+        }
+    </span>
+</div>
+
+@code {
+}

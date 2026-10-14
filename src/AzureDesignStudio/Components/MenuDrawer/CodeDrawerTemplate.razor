@@ -36,7 +36,7 @@
 </Modal>
 
 <Modal Title="Review what will change (What-If)" Visible="@_showWhatIfReview" MaskClosable="@false"
-       OkText="@(_deployAsStack ? "Approve & deploy as stack" : "Approve & deploy")" OnOk="@ApproveAndDeployAsync" OnCancel="@CancelWhatIf">
+       OkText="@(GuardrailBlocked ? "Blocked by guardrails" : _deployAsStack ? "Approve & deploy as stack" : "Approve & deploy")" OnOk="@ApproveAndDeployAsync" OnCancel="@CancelWhatIf">
     @if (_retryTemplate is not null)
     {
         <Alert Type="@AlertType.Info" Message="Targeted retry: only the failed resources will be previewed and deployed - not the full template." ShowIcon="true" Style="margin-bottom:8px" />
@@ -60,7 +60,11 @@
         {
             <Alert Type="@AlertType.Error" Message="What-If predicts deletes. This version never deploys delete-bearing plans." ShowIcon="true" Banner="true" />
         }
-        else if (_whatIfChanges.Count == 0)
+        @if (GuardrailBlocked)
+        {
+            <Alert Type="@AlertType.Warning" Message="@($"{_guardrailFlags.Count} resource(s) protected by do-not-touch guardrails. This plan cannot be approved or deployed until the guardrail policy changes.")" ShowIcon="true" Banner="true" Style="margin-bottom:8px" />
+        }
+        @if (_whatIfResult.Deletes == 0 && !GuardrailBlocked && _whatIfChanges.Count == 0)
         {
             <p>No changes predicted for this template.</p>
         }
@@ -72,6 +76,10 @@
                     @if (change.Delta > 0)
                     {
                         <span> · @change.Delta property change(s)</span>
+                    }
+                    @if (change.ResourceId is not null && _guardrailFlags.TryGetValue(change.ResourceId, out var protectReason))
+                    {
+                        <Tag Color="@("orange")">protected: @protectReason</Tag>
                     }
                     @if (change.Before is not null || change.After is not null)
                     {

@@ -14,6 +14,10 @@ service Deploy {
 	rpc GetDeploymentOperations(DeploymentOperationsRequest) returns(DeploymentOperationsResponse);
 	rpc PrepareRetry(PrepareRetryRequest) returns(PrepareRetryResponse);
 	rpc CreateStack(CreateStackRequest) returns(CreateStackResponse);
+	// v2 plan 13.1/[36-final]: the do-not-touch list is server-side truth - enforcement
+	// reads it at review and apply, so a client can never deploy around it by omitting it.
+	rpc SetGuardrailPolicy(GuardrailPolicyRequest) returns(GuardrailPolicyResponse);
+	rpc GetGuardrailPolicy(google.protobuf.Empty) returns(GuardrailPolicyResponse);
 }
 
 message SubscriptionInfo {
@@ -67,6 +71,27 @@ message WhatIfResponse {
 	string changes_json = 8;
 	string caveats = 9;
 	string plan_hash = 10;
+	// Guardrails (v2 13.1): every touched resource that matches the do-not-touch list, and
+	// the block verdict. A blocked review carries NO token - it cannot be approved or applied.
+	repeated GuardrailFlag guardrail_flags = 11;
+	bool guardrail_blocked = 12;
+}
+
+message GuardrailFlag {
+	string resource_id = 1;
+	string reason = 2;
+}
+
+message GuardrailPolicyRequest {
+	string json = 1;
+}
+
+message GuardrailPolicyResponse {
+	int32 status_code = 1;
+	string error_message = 2;
+	string json = 3;
+	string updated_by = 4;
+	string updated_at = 5;
 }
 
 message PlanApprovalRequest {

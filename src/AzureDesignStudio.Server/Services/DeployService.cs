@@ -7,6 +7,7 @@ using SubscriptionInfo = AzureDesignStudio.SharedModels.Protos.SubscriptionInfo;
 using AzureDesignStudio.Discovery.Iac;
 using AzureDesignStudio.Discovery.Iac.WhatIf;
 using AzureDesignStudio.Discovery.ResourceGraph;
+using AzureDesignStudio.Discovery.Unmanaged;
 using AzureDesignStudio.Server.Models;
 using Grpc.Core;
 using Microsoft.EntityFrameworkCore;
@@ -247,8 +248,35 @@ namespace AzureDesignStudio.Server.Services
                 // it rides the live preview so approval persists the undo trail; the plan hash
                 // keeps its scope + template + parameters identity untouched.
                 var revert = RevertPlan.Build(summary, preview.Caveat);
-                var token = _whatIfGate.Issue(subscriptionId.ToString(), request.ResourceGroupName,
-                    request.ArmTemplate, parametersJson, summary, plan.CanonicalJson, plan.PlanHash, revert.DocumentJson);
+
+                // Guardrails [36]/13.1: the do-not-touch list blocks the review itself - ARM's
+                // resolved ids and payloads are the match surface. A protected plan earns no
+                // token, so it can never be approved or applied; the review still shows every
+                // row with its flag, and tightening the list later cannot be reviewed around.
+                var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(context.CancellationToken);
+                if (guardrailPolicy is null)
+                {
+                    _logger.LogWarning("Guardrail policy unreadable: {Error}", policyError);
+                    response.StatusCode = StatusCodes.Status400BadRequest;
+                    response.ErrorMessage = policyError;
+                    return response;
+                }
+                var guardrails = GuardrailEnforcement.Evaluate(guardrailPolicy, summary.Changes);
+                string? token = null;
+                if (guardrails.Count > 0)
+                {
+                    response.GuardrailBlocked = true;
+                    foreach (var finding in guardrails)
+                        response.GuardrailFlags.Add(new GuardrailFlag { ResourceId = finding.ResourceId, Reason = finding.Reason });
+                    _logger.LogWarning("Plan blocked by guardrails: {Count} protected resource(s), hash={PlanHash}",
+                        guardrails.Count, plan.PlanHash);
+                }
+                else
+                {
+                    token = _whatIfGate.Issue(subscriptionId.ToString(), request.ResourceGroupName,
+                        request.ArmTemplate, parametersJson, summary, plan.CanonicalJson, plan.PlanHash, revert.DocumentJson,
+                        GuardrailEnforcement.Targets(summary.Changes));
+                }
 
                 response.StatusCode = StatusCodes.Status200OK;
                 response.Status = summary.Status;
@@ -262,10 +290,12 @@ namespace AzureDesignStudio.Server.Services
                     caveats.Add(preview.Caveat);
                 }
                 caveats.Add($"Revert plan: {revert.Entries.Count} undo entries recorded ({revert.UnrevertableCount} unrevertable). {RevertPlan.ExecutableNote}");
+                if (response.GuardrailBlocked)
+                    caveats.Add($"Guardrails: {guardrails.Count} protected resource(s) - this plan is not deployable until the do-not-touch policy changes.");
 
                 response.Caveats = string.Join("\n", caveats);
                 response.PlanHash = plan.PlanHash;
-                response.WhatIfToken = token;
+                response.WhatIfToken = token ?? "";
                 return response;
             }
             catch (WhatIfException ex)
@@ -646,8 +676,21 @@ namespace AzureDesignStudio.Server.Services
                 return;
             }
 
+            // Guardrails are re-judged at apply time against the live policy, so a list tightened
+            // after the review still stops the apply - the veto runs before consumption and never
+            // burns the single-use token.
+            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(context.CancellationToken);
+            if (guardrailPolicy is null)
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.DeploymentStatus = "failed";
+                response.ErrorMessage = policyError;
+                await responseStream.WriteAsync(response);
+                return;
+            }
             var whatIfCheck = _whatIfGate.ValidateAndConsume(request.WhatIfToken, subscriptionId.ToString(),
-                request.ResourceGroupName, request.ArmTemplate, parametersJson);
+                request.ResourceGroupName, request.ArmTemplate, parametersJson,
+                targets => GuardrailVeto(guardrailPolicy, targets));
             if (!whatIfCheck.IsOk)
             {
                 _logger.LogWarning("Deploy blocked by what-if gate: {Code}", whatIfCheck.Code);
@@ -867,8 +910,16 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
+            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(context.CancellationToken);
+            if (guardrailPolicy is null)
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = policyError;
+                return response;
+            }
             var whatIfCheck = _whatIfGate.ValidateAndConsume(request.WhatIfToken, subscriptionId.ToString(),
-                request.ResourceGroupName, request.ArmTemplate, parametersJson);
+                request.ResourceGroupName, request.ArmTemplate, parametersJson,
+                targets => GuardrailVeto(guardrailPolicy, targets));
             if (!whatIfCheck.IsOk)
             {
                 _logger.LogWarning("Stack deploy blocked by what-if gate: {Code}", whatIfCheck.Code);
@@ -952,6 +1003,122 @@ namespace AzureDesignStudio.Server.Services
             };
             return response;
         }
+
+        private const int GuardrailRowId = 1;
+
+        /// <summary>
+        /// Loads the server-side do-not-touch list. A missing row is an empty policy (vacuous
+        /// enforcement); an unreadable one fails closed - deploys refuse rather than guess the list.
+        /// </summary>
+        private async Task<(GuardrailPolicy? Policy, string? Error)> LoadGuardrailPolicy(CancellationToken ct)
+        {
+            var row = await _designContext.AdsGuardrailPolicies.AsNoTracking()
+                .FirstOrDefaultAsync(e => e.Id == GuardrailRowId, ct);
+            if (row is null || string.IsNullOrWhiteSpace(row.Json)) return (GuardrailPolicy.Empty, null);
+            try
+            {
+                return (GuardrailPolicy.FromJson(row.Json), null);
+            }
+            catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+            {
+                return (null, "GUARDRAIL_POLICY_UNREADABLE: the stored do-not-touch policy is not a valid guardrail JSON object - repair it via the guardrails editor before deploying.");
+            }
+        }
+
+        /// <summary>Apply-time veto: the plan's bound targets against the live policy. The message
+        /// lists every protected resource so the operator sees exactly what the list shields.</summary>
+        private static string? GuardrailVeto(GuardrailPolicy policy, IReadOnlyList<GuardrailTarget> targets)
+        {
+            var findings = GuardrailEnforcement.EvaluateTargets(policy, targets);
+            return findings.Count == 0
+                ? null
+                : "the plan touches do-not-touch resources: " + string.Join("; ", findings.Select(f => $"{f.ResourceId} ({f.Reason})"));
+        }
+
+        /// <summary>
+        /// Reads the server-side do-not-touch list (v2 13.1). 200 with empty json = no policy stored.
+        /// </summary>
+        public override async Task<GuardrailPolicyResponse> GetGuardrailPolicy(Empty request, ServerCallContext context)
+        {
+            var response = new GuardrailPolicyResponse();
+            var userIdClaim = ServiceTools.GetUserId(context);
+            if (string.IsNullOrWhiteSpace(userIdClaim))
+            {
+                response.StatusCode = StatusCodes.Status401Unauthorized;
+                response.ErrorMessage = "Access denied.";
+                return response;
+            }
+
+            var row = await _designContext.AdsGuardrailPolicies.AsNoTracking()
+                .FirstOrDefaultAsync(e => e.Id == GuardrailRowId, context.CancellationToken);
+            response.StatusCode = StatusCodes.Status200OK;
+            response.Json = row?.Json ?? "";
+            response.UpdatedBy = row?.UpdatedBy ?? "";
+            response.UpdatedAt = row?.UpdatedAtUtc.ToString("O") ?? "";
+            return response;
+        }
+
+        /// <summary>
+        /// Replaces the do-not-touch list (v2 13.1). Only valid GuardrailPolicy JSON is stored -
+        /// malformed input is rejected, never silently emptied, because an empty list silently means
+        /// "protect nothing". The authenticated principal is recorded; the wire carries no author.
+        /// Tightening takes effect on the next review AND every already-reviewed plan (apply-time
+        /// re-judgement); who changed the list is in this row, deploy-time enforcement in the apply trail.
+        /// </summary>
+        public override async Task<GuardrailPolicyResponse> SetGuardrailPolicy(GuardrailPolicyRequest request, ServerCallContext context)
+        {
+            var response = new GuardrailPolicyResponse();
+            var userIdClaim = ServiceTools.GetUserId(context);
+            if (string.IsNullOrWhiteSpace(userIdClaim))
+            {
+                response.StatusCode = StatusCodes.Status401Unauthorized;
+                response.ErrorMessage = "Access denied.";
+                return response;
+            }
+
+            var json = string.IsNullOrWhiteSpace(request.Json) ? "{}" : request.Json.Trim();
+            if (json.Length > 65536)
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "GUARDRAIL_POLICY_TOO_LARGE: the do-not-touch list is a list, not a dump (64 KiB cap).";
+                return response;
+            }
+
+            try
+            {
+                GuardrailPolicy.FromJson(json);
+            }
+            catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "GUARDRAIL_POLICY_MALFORMED: expected a JSON object with scopes/tags/types arrays.";
+                return response;
+            }
+
+            var displayName = context.GetHttpContext().User.FindFirst("name")?.Value;
+            var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
+
+            var row = await _designContext.AdsGuardrailPolicies.FindAsync([GuardrailRowId], context.CancellationToken);
+            if (row is null)
+            {
+                row = new GuardrailPolicyModel { Id = GuardrailRowId };
+                _designContext.AdsGuardrailPolicies.Add(row);
+            }
+
+            row.Json = json;
+            row.UpdatedBy = principal;
+            row.UpdatedByUserId = userIdClaim;
+            row.UpdatedAtUtc = DateTime.UtcNow;
+            await _designContext.SaveChangesAsync(context.CancellationToken);
+
+            _logger.LogInformation("Guardrail policy updated by {Principal} ({Length} bytes).", principal, json.Length);
+            response.StatusCode = StatusCodes.Status200OK;
+            response.Json = json;
+            response.UpdatedBy = principal;
+            response.UpdatedAt = row.UpdatedAtUtc.ToString("O");
+            return response;
+        }
+
 
         private static string? TryGetProvisioningState(string json)
         {

@@ -10,13 +10,14 @@ public enum WhatIfTokenStatus
     Stale,
     PayloadChanged,
     HasDelete,
+    GuardrailProtected,
 }
 
-public sealed record WhatIfTokenCheck(WhatIfTokenStatus Status, string? Detail, bool HasDelete = false, IReadOnlyList<string>? DeleteResourceIds = null)
+public sealed record WhatIfTokenCheck(WhatIfTokenStatus Status, string? Detail, bool HasDelete = false,
+    IReadOnlyList<string>? DeleteResourceIds = null, IReadOnlyList<Unmanaged.GuardrailTarget>? Targets = null)
 {
     public bool IsOk => Status == WhatIfTokenStatus.Ok;
     public IReadOnlyList<string> Deletes => DeleteResourceIds ?? [];
-
     /// <summary>Stable machine-readable code the client can switch on (never localized).</summary>
     public string Code => Status switch
     {
@@ -24,6 +25,7 @@ public sealed record WhatIfTokenCheck(WhatIfTokenStatus Status, string? Detail, 
         WhatIfTokenStatus.Stale => "WHAT_IF_STALE",
         WhatIfTokenStatus.PayloadChanged => "WHAT_IF_PAYLOAD_CHANGED",
         WhatIfTokenStatus.HasDelete => "WHAT_IF_HAS_DELETE",
+        WhatIfTokenStatus.GuardrailProtected => "GUARDRAIL_PROTECTED",
         _ => "OK",
     };
 }
@@ -45,7 +47,8 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
     private DateTimeOffset Now => (clock ?? (() => DateTimeOffset.UtcNow))();
 
     private sealed record Entry(string PayloadHash, DateTimeOffset Expires, bool HasDelete,
-        IReadOnlyList<string> DeleteResourceIds, string CanonicalPlanJson, string PlanHash, string? RevertPlanJson);
+        IReadOnlyList<string> DeleteResourceIds, string CanonicalPlanJson, string PlanHash, string? RevertPlanJson,
+        IReadOnlyList<Unmanaged.GuardrailTarget>? GuardrailTargets);
 
     /// <summary>
     /// Record a completed what-if review; returns the token the later deploy must present.
@@ -54,7 +57,8 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
     /// scope + template + parameters identity.
     /// </summary>
     public string Issue(string subscriptionId, string resourceGroupName, string armTemplate, string parameters,
-        WhatIfSummary summary, string canonicalPlanJson, string planHash, string? revertPlanJson = null)
+        WhatIfSummary summary, string canonicalPlanJson, string planHash, string? revertPlanJson = null,
+        IReadOnlyList<Unmanaged.GuardrailTarget>? guardrailTargets = null)
     {
         // Fail closed: an indeterminate prediction never earns a deploy token, no matter
         // what the caller's checks looked like. This is the single choke point.
@@ -63,7 +67,8 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
 
         var token = Guid.NewGuid().ToString("N");
         var entry = new Entry(Hash(subscriptionId, resourceGroupName, armTemplate, parameters),
-            Now.Add(ttl), summary.HasDelete, summary.DeleteResourceIds, canonicalPlanJson, planHash, revertPlanJson);
+            Now.Add(ttl), summary.HasDelete, summary.DeleteResourceIds, canonicalPlanJson, planHash, revertPlanJson,
+            guardrailTargets);
 
         lock (_sync)
         {
@@ -95,9 +100,13 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
         }
     }
 
-    /// <summary>Validate and consume. A failed check never burns the token; a passed one is single-use.</summary>
+    /// <summary>
+    /// Validate and consume. A failed check never burns the token; a passed one is single-use.
+    /// The optional guardrail veto runs on the targets bound at issue time - a vetoed plan is
+    /// refused without spending the token, exactly like the read-only approval checks upstream.
+    /// </summary>
     public WhatIfTokenCheck ValidateAndConsume(string? token, string subscriptionId, string resourceGroupName,
-        string armTemplate, string parameters)
+        string armTemplate, string parameters, Func<IReadOnlyList<Unmanaged.GuardrailTarget>, string?>? guardrailVeto = null)
     {
         if (string.IsNullOrWhiteSpace(token))
             return new WhatIfTokenCheck(WhatIfTokenStatus.Missing, "Run What-If on this exact template and parameters before deploying.");
@@ -120,8 +129,12 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
                     "What-If predicts delete-bearing changes, which this version never deploys: " + string.Join(", ", entry.DeleteResourceIds),
                     HasDelete: true, DeleteResourceIds: entry.DeleteResourceIds);
 
+            var targets = entry.GuardrailTargets ?? [];
+            if (guardrailVeto is not null && guardrailVeto(targets) is { } vetoDetail)
+                return new WhatIfTokenCheck(WhatIfTokenStatus.GuardrailProtected, vetoDetail, Targets: targets);
+
             _tokens.Remove(token);
-            return new WhatIfTokenCheck(WhatIfTokenStatus.Ok, null);
+            return new WhatIfTokenCheck(WhatIfTokenStatus.Ok, null, Targets: targets);
         }
     }
 

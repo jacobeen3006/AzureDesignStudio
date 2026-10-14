@@ -44,6 +44,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private WhatIfResponse? _whatIfResult = null;
         private string? _whatIfError = null;
         private IReadOnlyList<WhatIfChangeRow> _whatIfChanges = [];
+        private Dictionary<string, string> _guardrailFlags = new(StringComparer.OrdinalIgnoreCase);
         private bool _deployAsStack = false;
         private string _stackName = "ads-stack";
         private string? _approverName = null;
@@ -170,6 +171,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
             _whatIfResult = null;
             _whatIfError = null;
             _whatIfChanges = [];
+            _guardrailFlags = new(StringComparer.OrdinalIgnoreCase);
             _whatIfLoading = true;
             _showWhatIfReview = true;
 
@@ -183,6 +185,9 @@ namespace AzureDesignStudio.Components.MenuDrawer
                 {
                     _whatIfResult = response;
                     _whatIfChanges = ParseWhatIfChanges(response.ChangesJson);
+                    _guardrailFlags = new(StringComparer.OrdinalIgnoreCase);
+                    foreach (var flag in response.GuardrailFlags)
+                        _guardrailFlags[flag.ResourceId] = flag.Reason;
                 }
             }
             catch (Exception ex) when (ex is Grpc.Core.RpcException or InvalidOperationException or HttpRequestException)
@@ -210,7 +215,10 @@ namespace AzureDesignStudio.Components.MenuDrawer
             }
         }
 
-        private bool WhatIfDeployAllowed => _whatIfResult is not null && _whatIfResult.Deletes == 0;
+        private bool WhatIfDeployAllowed => _whatIfResult is not null && _whatIfResult.Deletes == 0 && !_whatIfResult.GuardrailBlocked;
+
+        /// <summary>Plan touches do-not-touch resources: server issued no token, approval is moot.</summary>
+        private bool GuardrailBlocked => _whatIfResult?.GuardrailBlocked ?? false;
 
         private async Task ApproveAndDeployAsync(MouseEventArgs e)
         {

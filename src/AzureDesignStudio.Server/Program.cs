@@ -117,6 +117,13 @@ var app = builder.Build();
                 ALTER TABLE AdsPlanApplyEvents ADD RevertPlanHash nvarchar(71) NULL;
                 IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApplyEvents', N'RevertPlanJson') IS NULL
                 ALTER TABLE AdsPlanApplyEvents ADD RevertPlanJson nvarchar(max) NULL;
+                IF OBJECT_ID(N'AdsGuardrailPolicies', N'U') IS NULL
+                CREATE TABLE AdsGuardrailPolicies (
+                    Id int NOT NULL PRIMARY KEY,
+                    Json nvarchar(max) NOT NULL,
+                    UpdatedBy nvarchar(320) NOT NULL,
+                    UpdatedByUserId nvarchar(64) NOT NULL,
+                    UpdatedAtUtc datetime2 NOT NULL);
                 """);
         }
     }

@@ -63,6 +63,18 @@ namespace AzureDesignStudio.Services
             return await _deployClient.ApprovePlanAsync(new PlanApprovalRequest { PlanHash = planHash });
         }
 
+        /// <summary>Reads the server-side do-not-touch list (v2 13.1). Empty json = no policy.</summary>
+        public async Task<GuardrailPolicyResponse?> GetGuardrailPolicyAsync()
+        {
+            return await _deployClient.GetGuardrailPolicyAsync(new Empty());
+        }
+
+        /// <summary>Replaces the server-side do-not-touch list; non-200 carries the rejection reason.</summary>
+        public async Task<GuardrailPolicyResponse?> SetGuardrailPolicyAsync(string json)
+        {
+            return await _deployClient.SetGuardrailPolicyAsync(new GuardrailPolicyRequest { Json = json });
+        }
+
         /// <summary>Deploys the reviewed payload as a deployment-stack (v2 12.3): same what-if token
         /// and plan hash the review produced; the unmanage policy stays Detach-flavored - Delete is
         /// refused server-side until the Phase 13 gates ship.</summary>
