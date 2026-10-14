@@ -6,6 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Added
+- **Change feed spine (v2 plan 9.1):** `ChangeFeedCollector` queries the Azure Resource Graph `resourcechanges` table for a time window — newest-first, with Change Actor attribution (who changed it, which client, which RBAC operation); the existing Reader role covers it, no new permission. Rows persist idempotently into the workspace SQLite (`ChangeFeed` table, deduped by resource + change key) and the desktop `ChangeFeedService` exposes collect / feed / "what moved since the scan" reads, offline-capable.
+
 ### Fixed
 - Desktop sign-in hang: the WAM broker requires `AcquireTokenInteractive` on the UI thread (MSAL `WamUiThread` contract); interactive acquisition now runs directly on the Blazor renderer thread instead of a timer-deferred sync block.
 - Removed every UI-thread-reachable sync-over-async block in the scan stack (`ArmTransport` token fetch, `ResourceGraphClient` request build, `ScanControl.Pause` → `PauseAsync`) — each could freeze the desktop UI when the token cache was cold.
