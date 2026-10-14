@@ -243,6 +243,36 @@ public class WhatIfTests
     }
 
     [Fact]
+    public void ChangesRows_CarryPayloads_ForReviewInspection()
+    {
+        using var doc = JsonDocument.Parse(WhatIfParser.Parse(ResultJson).ToChangesJson());
+        var modify = doc.RootElement.EnumerateArray()
+            .Single(r => r.GetProperty("changeType").GetString() == "Modify");
+
+        Assert.Contains("subnets", modify.GetProperty("before").GetString());
+        Assert.Contains("subnets", modify.GetProperty("after").GetString());
+        Assert.False(modify.GetProperty("beforeTruncated").GetBoolean());
+    }
+
+    [Fact]
+    public void ChangesRows_TruncateOversizedPayloadsWithFlag()
+    {
+        var big = new string('x', WhatIfSummary.PayloadCap + 500);
+        var summary = new WhatIfSummary
+        {
+            Status = "Succeeded",
+            Changes = [new WhatIfChange(WhatIfChangeKind.Modify, "/x", big, null, 0)],
+        };
+
+        using var doc = JsonDocument.Parse(summary.ToChangesJson());
+        var row = doc.RootElement.EnumerateArray().Single();
+
+        Assert.Equal(WhatIfSummary.PayloadCap, row.GetProperty("before").GetString()!.Length);
+        Assert.True(row.GetProperty("beforeTruncated").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("after").ValueKind);
+    }
+
+    [Fact]
     public void Gate_PlanApprovableOnlyWhilePreviewLive()
     {
         var now = DateTimeOffset.UtcNow;

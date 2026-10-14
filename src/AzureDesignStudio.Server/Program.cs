@@ -64,12 +64,17 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 var app = builder.Build();
 
 #if !DEBUG
-    // AdsPlanApprovals joins the model set new; EnsureCreated never adds tables to an
-    // existing database, so make sure this one table exists in production once.
+    // Full EF schema first: on a database that predates this release, EnsureCreated
+    // brings up missing tables; on a brand-new one it creates the database itself
+    // (raw DDL alone would fail against a nonexistent database). The guard then makes
+    // certain the audit table exists even when the database was created before the
+    // approval model joined the model set.
     using (var scope = app.Services.CreateScope())
     {
         var db = scope.ServiceProvider.GetRequiredService<DesignDbContext>();
         if (db.Database.IsRelational())
+        {
+            db.Database.EnsureCreated();
             db.Database.ExecuteSqlRaw("""
                 IF OBJECT_ID(N'AdsPlanApprovals', N'U') IS NULL
                 CREATE TABLE AdsPlanApprovals (
@@ -80,6 +85,7 @@ var app = builder.Build();
                     ApprovedByUserId nvarchar(64) NOT NULL,
                     ApprovedAtUtc datetime2 NOT NULL DEFAULT GETUTCDATE());
                 """);
+        }
     }
 #endif
 

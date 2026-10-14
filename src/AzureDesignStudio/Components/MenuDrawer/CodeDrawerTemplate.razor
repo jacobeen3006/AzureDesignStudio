@@ -62,7 +62,27 @@
         <ul>
             @foreach (var change in _whatIfChanges)
             {
-                <li><strong>@change.ChangeType</strong> @change.ResourceId</li>
+                <li>
+                    <strong>@change.ChangeType</strong> @change.ResourceId
+                    @if (change.Delta > 0)
+                    {
+                        <span> · @change.Delta property change(s)</span>
+                    }
+                    @if (change.Before is not null || change.After is not null)
+                    {
+                        <details>
+                            <summary>resource payload</summary>
+                            @if (change.Before is not null)
+                            {
+                                <pre>@change.Before@(change.BeforeTruncated ? " …[truncated]" : "")</pre>
+                            }
+                            @if (change.After is not null)
+                            {
+                                <pre>@change.After@(change.AfterTruncated ? " …[truncated]" : "")</pre>
+                            }
+                        </details>
+                    }
+                </li>
             }
         </ul>
         <ul>

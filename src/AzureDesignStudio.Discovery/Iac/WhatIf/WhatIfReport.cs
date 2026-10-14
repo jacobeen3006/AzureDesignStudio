@@ -65,7 +65,14 @@ public sealed class WhatIfSummary
 
     private int Count(WhatIfChangeKind kind) => Changes.Count(c => c.Kind == kind);
 
-    /// <summary>Compact deterministic review rows (changeType/resourceId/delta size), capped, for transport to the UI.</summary>
+    /// <summary>Per-payload character cap for UI transport; truncation is flagged in the row.</summary>
+    public const int PayloadCap = 1500;
+
+    /// <summary>
+    /// Deterministic review rows (changeType/resourceId/delta count plus truncated before/after
+    /// payloads - ARM's default FullResourcePayloads detail), capped by <paramref name="maxRows"/>;
+    /// row and payload truncation are the caller's to surface.
+    /// </summary>
     public string ToChangesJson(int maxRows = 200)
     {
         var rows = Changes
@@ -77,9 +84,18 @@ public sealed class WhatIfSummary
                 changeType = c.Kind.ToString(),
                 resourceId = c.ResourceId,
                 delta = c.DeltaCount,
+                before = Truncate(c.BeforeJson),
+                after = Truncate(c.AfterJson),
+                beforeTruncated = IsTruncated(c.BeforeJson),
+                afterTruncated = IsTruncated(c.AfterJson),
             });
         return JsonSerializer.Serialize(rows);
     }
+
+    private static string? Truncate(string? payload) =>
+        payload is null || payload.Length <= PayloadCap ? payload : payload[..PayloadCap];
+
+    private static bool IsTruncated(string? payload) => payload is not null && payload.Length > PayloadCap;
 }
 
 /// <summary>Strict parser over the ARM <c>WhatIfOperationResult</c> document (2025-04-01 shape).</summary>

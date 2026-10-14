@@ -12,4 +12,9 @@
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Narrow seam: offline tests assert the what-if wire-body contract directly. -->
+    <InternalsVisibleTo Include="AzureDesignStudio.Core.Tests" />
+  </ItemGroup>
+
 </Project>

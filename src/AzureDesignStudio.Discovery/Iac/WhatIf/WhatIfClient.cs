@@ -28,7 +28,7 @@ public sealed class WhatIfClient(ArmTransport transport)
         return WhatIfParser.Parse(responseJson);
     }
 
-    public static string BuildRequestBody(string location, string armTemplate, string parameters)
+    internal static string BuildRequestBody(string location, string armTemplate, string parameters)
     {
         using var template = ParseObject(armTemplate, "template");
         using var parametersDoc = string.IsNullOrWhiteSpace(parameters) ? null : ParseObject(parameters, "parameters");

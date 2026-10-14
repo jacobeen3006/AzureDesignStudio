@@ -14,7 +14,8 @@ namespace AzureDesignStudio.Components.MenuDrawer
         public string Status { get; set; } = "starting";
         public string ErrorMessage { get; set; } = default!;
     }
-    internal sealed record WhatIfChangeRow(string ChangeType, string? ResourceId, int Delta);
+    internal sealed record WhatIfChangeRow(string ChangeType, string? ResourceId, int Delta,
+        string? Before = null, string? After = null, bool BeforeTruncated = false, bool AfterTruncated = false);
 
     public partial class CodeDrawerTemplate
     {
