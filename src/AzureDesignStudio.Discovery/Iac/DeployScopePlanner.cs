@@ -299,4 +299,25 @@ public static partial class DeployScopePlanner
         node is JsonObject o && o.TryGetPropertyValue(property, out var value) && value?.GetValueKind() == JsonValueKind.String
             ? value.GetValue<string>()
             : "";
+
+    /// <summary>
+    /// Pre-deploy gate for the single-scope pipeline until multi-scope staged apply is wired
+    /// (v2 plan 11.2): staging errors block, and so does any batch beyond the deployment's
+    /// ambient scope - this pipeline approves and deploys exactly one (subscription, resource
+    /// group) scope, so a plan that stages more must never reach ARM. Warnings never block.
+    /// </summary>
+    public static bool TryFindBlockingErrors(string templateJson, DeployScopeKind ambientScope, out string message)
+    {
+        var plan = Create(templateJson, ambientScope);
+        var errors = plan.Diagnostics.Where(d => d.Severity == ArmDiagnosticSeverity.Error).ToList();
+        var beyond = plan.Batches.Where(b => b.Kind != ambientScope).Select(b => b.Kind.ToString()).Distinct().ToList();
+        if (beyond.Count > 0)
+        {
+            errors.Add(new(ArmDiagnosticSeverity.Error, "MultiScopeNotDeployable",
+                $"The staged plan requires batches beyond the {ambientScope} scope ({string.Join(", ", beyond)}); this pipeline deploys exactly one scope - multi-scope staged apply is not wired yet."));
+        }
+
+        message = string.Join(Environment.NewLine, errors.Select(e => $"{e.Code}: {e.Message}"));
+        return errors.Count > 0;
+    }
 }

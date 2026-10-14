@@ -171,6 +171,14 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
+            if (DeployScopePlanner.TryFindBlockingErrors(request.ArmTemplate, DeployScopeKind.ResourceGroup, out var scopeErrors))
+            {
+                _logger.LogWarning("Staged plan blocked before what-if: {Errors}", scopeErrors);
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = scopeErrors;
+                return response;
+            }
+
             var userIdClaim = ServiceTools.GetUserId(context);
             if (string.IsNullOrWhiteSpace(userIdClaim))
             {
@@ -340,6 +348,15 @@ namespace AzureDesignStudio.Server.Services
                 _logger.LogWarning("Template blocked before deploy: {Errors}", validationErrors);
                 response.StatusCode = StatusCodes.Status400BadRequest;
                 response.ErrorMessage = validationErrors;
+                await responseStream.WriteAsync(response);
+                return;
+            }
+
+            if (DeployScopePlanner.TryFindBlockingErrors(request.ArmTemplate, DeployScopeKind.ResourceGroup, out var scopeErrors))
+            {
+                _logger.LogWarning("Staged plan blocked before deploy: {Errors}", scopeErrors);
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = scopeErrors;
                 await responseStream.WriteAsync(response);
                 return;
             }

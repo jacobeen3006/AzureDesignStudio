@@ -160,6 +160,31 @@ public class DeployScopePlannerTests
     }
 
     [Fact]
+    public void SingleScopeGate_BlocksOnlyErrorsAndBeyondScopeBatches()
+    {
+        // Single-RG template clears; outputs warning alone never blocks.
+        Assert.False(DeployScopePlanner.TryFindBlockingErrors(
+            Template("""{"name":"st1","type":"Microsoft.Storage/storageAccounts","apiVersion":"2023-01-01"}""",
+                outputs: """{ "o": { "type": "string", "value": "x" } }"""),
+            DeployScopeKind.ResourceGroup, out _));
+
+        // A management-group batch cannot be deployed by the single-scope pipeline: blocked.
+        Assert.True(DeployScopePlanner.TryFindBlockingErrors(Template(
+                """{"name":"g1","type":"Microsoft.Management/managementGroups","apiVersion":"2023-04-01"}"""),
+            DeployScopeKind.ResourceGroup, out var scopeMessage));
+        Assert.Contains("MultiScopeNotDeployable", scopeMessage);
+
+        // The same template is fine when the pipeline deploys at management-group scope.
+        Assert.False(DeployScopePlanner.TryFindBlockingErrors(
+            """{"contentVersion":"1.0.0.0","resources":[{"name":"g1","type":"Microsoft.Management/managementGroups","apiVersion":"2023-04-01"}]}""",
+            DeployScopeKind.ManagementGroup, out _));
+
+        // Staging errors block the gate too.
+        Assert.True(DeployScopePlanner.TryFindBlockingErrors("not json", DeployScopeKind.ResourceGroup, out var errorMessage));
+        Assert.Contains("InvalidTemplate", errorMessage);
+    }
+
+    [Fact]
     public void Staging_IsDeterministic()
     {
         var text = Template(
