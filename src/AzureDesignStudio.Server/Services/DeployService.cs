@@ -497,9 +497,19 @@ namespace AzureDesignStudio.Server.Services
                     rejected ? PlanApplyEventModel.Failed : PlanApplyEventModel.OutcomeUnknown,
                     rejected ? $"submission refused: HTTP {ex.Status}: {ex.ErrorCode}"
                              : $"submission outcome unconfirmable: HTTP {ex.Status}: {ex.ErrorCode}");
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.DeploymentStatus = "failed";
-                response.ErrorMessage = $"HTTP {ex.Status}: {ex.ErrorCode}";
+                if (rejected)
+                {
+                    response.StatusCode = StatusCodes.Status400BadRequest;
+                    response.DeploymentStatus = "failed";
+                    response.ErrorMessage = $"HTTP {ex.Status}: {ex.ErrorCode}";
+                }
+                else
+                {
+                    // "failed" here would be a second lie: ARM's answer was ambiguous.
+                    response.StatusCode = StatusCodes.Status202Accepted;
+                    response.DeploymentStatus = "unknown";
+                    response.ErrorMessage = $"Outcome unconfirmable (HTTP {ex.Status}: {ex.ErrorCode}). The deployment may still be running - verify its state in Azure (audit apply {applyId}).";
+                }
                 try { await responseStream.WriteAsync(response); }
                 catch (Exception wex)
                 {
@@ -553,6 +563,17 @@ namespace AzureDesignStudio.Server.Services
                     {
                         await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
                             PlanApplyEventModel.OutcomeUnknown, $"provisioning state unconfirmable after {consecutivePollFailures} consecutive status-query failures: HTTP {ex.Status}: {ex.ErrorCode}");
+                        try
+                        {
+                            response.StatusCode = StatusCodes.Status202Accepted;
+                            response.DeploymentStatus = "unknown";
+                            response.ErrorMessage = $"Provisioning state unconfirmable after {consecutivePollFailures} consecutive status-query failures (HTTP {ex.Status}). The deployment may still be running - verify its state in Azure (audit apply {applyId}).";
+                            await responseStream.WriteAsync(response);
+                        }
+                        catch (Exception wex)
+                        {
+                            _logger.LogWarning(wex, "Deploy unknown-outcome write failed for apply {ApplyId}; the outcome is already recorded durably", applyId);
+                        }
                         return;
                     }
                 }

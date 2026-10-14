@@ -270,6 +270,12 @@ namespace AzureDesignStudio.Components.MenuDrawer
                         stateHasChanged = true;
                     }
 
+                    else if (deploymentStatus == "unknown")
+                    {
+                        _stepsStatus.Status = "unknown";
+                        _stepsStatus.ErrorMessage = errorMessage;
+                        stateHasChanged = true;
+                    }
                     if (stateHasChanged)
                         await InvokeAsync(StateHasChanged);
                 });

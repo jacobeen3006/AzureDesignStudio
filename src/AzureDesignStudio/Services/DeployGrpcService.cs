@@ -82,6 +82,13 @@ namespace AzureDesignStudio.Services
             while (await responseStream.MoveNext(default))
             {
                 var response = responseStream.Current;
+                if (response.DeploymentStatus == "unknown")
+                {
+                    // The server could not confirm ARM's outcome: not a failure - the truth
+                    // lives in Azure until verified. Surface it as such, not via the error gate.
+                    updateStatus("unknown", response.ErrorMessage);
+                    return;
+                }
                 if (response.StatusCode != 200)
                 {
                     // Something bad happening

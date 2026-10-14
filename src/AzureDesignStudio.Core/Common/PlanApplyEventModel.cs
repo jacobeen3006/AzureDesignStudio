@@ -5,30 +5,32 @@ namespace AzureDesignStudio.Core.Common;
 /// <summary>
 /// Append-only apply audit event (v2 plan [62]/11.3). One apply correlates by ApplyId:
 /// Started (canonical plan body + consumed what-if preview evidence, written before any
-/// ARM mutation) is followed by exactly one true terminal event - Completed (ARM reported
-/// provisioningState=Succeeded) or Failed (ARM refused the submission, or provisioning
-/// finished failed/partial). Transport failure is not a provisioning outcome: when the
-/// client stream is lost mid-deployment a non-terminal TransportLost marker lands and ARM
-/// polling continues for the real outcome; OutcomeUnknown is recorded only when terminal
-/// truth was genuinely unreachable. A failed start never claims "applied"; events are
-/// never updated or deleted. Lives in Core so the persisted-column contract is testable
-/// offline.
+/// ARM mutation) is followed by at most one VERIFIED terminal - Completed (ARM reported
+/// provisioningState=Succeeded) or Failed (ARM's own 4xx proved refusal, or provisioning
+/// finished failed/partial). OutcomeUnknown is the terminal-without-truth: ARM's answer
+/// became unreachable; it never claims the deployment failed. Transport failure is not a
+/// provisioning outcome: a lost client stream lands the non-terminal TransportLost marker
+/// while ARM polling continues for the real result. Crash window: a server that dies
+/// before appending its terminal leaves a lone Started row - the real outcome then exists
+/// solely in ARM and is never reconstructed here. A failed start never claims "applied";
+/// events are never updated or deleted. Lives in Core so the persisted-column contract
+/// is testable offline.
 /// </summary>
 public record PlanApplyEventModel
 {
     /// <summary>Approval consumed; ARM mutation about to begin.</summary>
     public const string Started = "Started";
 
-    /// <summary>True terminal: deployment finished with provisioningState=Succeeded.</summary>
+    /// <summary>Verified terminal: deployment finished with provisioningState=Succeeded.</summary>
     public const string Completed = "Completed";
 
-    /// <summary>True terminal: ARM refused the submission, or provisioning finished failed/partial.</summary>
+    /// <summary>Verified terminal: ARM's 4xx proved refusal, or provisioning finished failed/partial.</summary>
     public const string Failed = "Failed";
 
     /// <summary>Non-terminal: client stream lost mid-deployment; ARM polling continues for the real outcome.</summary>
     public const string TransportLost = "TransportLost";
 
-    /// <summary>Terminal without truth: submission was accepted but the real outcome became unconfirmable.</summary>
+    /// <summary>Terminal without truth: ARM's answer became unreachable (ambiguous submission, unconfirmable polling); never a claim of failure.</summary>
     public const string OutcomeUnknown = "OutcomeUnknown";
 
     /// <summary>Max length of a persisted event type; every constant must fit the column contract.</summary>
