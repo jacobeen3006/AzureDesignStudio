@@ -326,35 +326,50 @@ namespace AzureDesignStudio.Server.Services
                     subModel.ClientId.ToString(), subModel.ClientSecret);
                 var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), credential,
                     ArmEndpointSet.AzureCloud);
-                var deploymentsUrl = $"{transport.Endpoints.ManagementEndpoint}/subscriptions/{subscriptionId}/resourcegroups/{request.ResourceGroupName}/providers/Microsoft.Resources/deployments";
+                var managementEndpoint = transport.Endpoints.ManagementEndpoint;
                 var apiVersion = transport.Endpoints.ApiVersion;
+                var scopeDiagnostics = new List<ArmDiagnostic>();
 
-                // The monitor follows the whole staged family (ads-deployment, ads-deployment-b1..bn):
-                // one approved plan even when ARM sees several deployments, worst state wins.
-                var listed = await transport.GetListAsync($"{deploymentsUrl}?api-version={apiVersion}", "value", context.CancellationToken);
-                var family = listed
-                    .Where(entry => entry.TryGetProperty("name", out var nameElement) && DeploymentStatusFolding.IsAdsDeployment(nameElement.GetString()))
-                    .OrderBy(entry => entry.GetProperty("name").GetString(), StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                // Staged batches are created at the scope they deploy to: a subscription batch is
+                // invisible in the resource-group listing and vice versa, so the family must be
+                // collected from both scopes. A scope ARM will not list degrades to a warning.
+                async Task<IReadOnlyList<JsonElement>> ListScopeAsync(string deploymentsUrl, string scopeName)
+                {
+                    try
+                    {
+                        return await transport.GetListAsync($"{deploymentsUrl}?api-version={apiVersion}", "value", context.CancellationToken);
+                    }
+                    catch (ResourceGraphException ex)
+                    {
+                        scopeDiagnostics.Add(new ArmDiagnostic(ArmDiagnosticSeverity.Warning, "DeploymentListingUnavailable",
+                            $"Deployments at {scopeName} scope could not be listed (HTTP {ex.StatusCode}); the monitor covers the scopes it can read."));
+                        return [];
+                    }
+                }
+
+                var family = StagedDeploymentFamily.Collect(
+                    await ListScopeAsync($"{managementEndpoint}/subscriptions/{subscriptionId}/providers/Microsoft.Resources/deployments", "subscription"),
+                    await ListScopeAsync($"{managementEndpoint}/subscriptions/{subscriptionId}/resourcegroups/{request.ResourceGroupName}/providers/Microsoft.Resources/deployments", "resource group"));
                 if (family.Count == 0)
                 {
                     response.StatusCode = StatusCodes.Status404NotFound;
-                    response.ErrorMessage = "No deployment is found for this resource group yet.";
+                    response.ErrorMessage = scopeDiagnostics.Count > 0
+                        ? "No deployment could be confirmed for this subscription and resource group. "
+                          + string.Join(Environment.NewLine, scopeDiagnostics.Select(d => $"{d.Code}: {d.Message}"))
+                        : "No deployment is found for this subscription and resource group yet.";
                     return response;
                 }
 
-                response.DeploymentStatus = DeploymentStatusFolding.Fold(family.Select(entry =>
-                    entry.TryGetProperty("properties", out var properties) && properties.TryGetProperty("provisioningState", out var state)
-                        ? state.GetString()
-                        : null));
+                response.DeploymentStatus = StagedDeploymentFamily.Fold(family);
 
                 var rowDiagnostics = new List<ArmDiagnostic>();
                 foreach (var member in family)
                 {
-                    var memberName = member.GetProperty("name").GetString();
                     try
                     {
-                        var entries = await transport.GetListAsync($"{deploymentsUrl}/{memberName}/operations?api-version={apiVersion}", "value", context.CancellationToken);
+                        var entries = await transport.GetListAsync(
+                            member.OperationsUrl(managementEndpoint, subscriptionId.ToString(), request.ResourceGroupName, apiVersion),
+                            "value", context.CancellationToken);
                         var (operations, diagnostics) = DeploymentOperationsParser.ParsePages(entries.Select(entry => entry.GetRawText()));
                         foreach (var operation in operations)
                         {
@@ -372,13 +387,13 @@ namespace AzureDesignStudio.Server.Services
                     catch (ResourceGraphException ex)
                     {
                         rowDiagnostics.Add(new ArmDiagnostic(ArmDiagnosticSeverity.Warning, "OperationsUnavailable",
-                            $"Operations for deployment '{memberName}' could not be read (HTTP {ex.StatusCode}); the folded status above stays honest."));
+                            $"Operations for deployment '{member.Name}' ({member.Scope} scope) could not be read (HTTP {ex.StatusCode}); the folded status above stays honest."));
                     }
                 }
 
-                // Honest degradation: folded rows stay usable while parser warnings are surfaced.
+                // Honest degradation: folded rows stay usable while listing and parser warnings are surfaced.
                 response.ErrorMessage = string.Join(Environment.NewLine,
-                    rowDiagnostics.Select(d => $"{d.Code}: {d.Message}"));
+                    scopeDiagnostics.Concat(rowDiagnostics).Select(d => $"{d.Code}: {d.Message}"));
                 response.StatusCode = StatusCodes.Status200OK;
                 return response;
             }
