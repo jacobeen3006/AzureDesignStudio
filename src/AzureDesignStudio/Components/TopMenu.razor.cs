@@ -10,7 +10,7 @@ using AzureDesignStudio.Components.MenuDrawer;
 using AzureDesignStudio.Models;
 using AzureDesignStudio.Core.Network;
 using AzureDesignStudio.Services;
-
+using AzureDesignStudio.Core.Common;
 namespace AzureDesignStudio.Components
 {
     public partial class TopMenu
@@ -39,6 +39,12 @@ namespace AzureDesignStudio.Components
                     break;
                 case "compare":
                     await OpenCompareDrawer();
+                    break;
+                case "import":
+                    await OpenImportDrawer();
+                    break;
+                case "names":
+                    await OpenNamingDrawer();
                     break;
                 case "user":
                     await OpenUserDrawer();
@@ -136,7 +142,54 @@ namespace AzureDesignStudio.Components
                     case "img":
                         await InvokePrintJS();
                         break;
+                    case "ads":
+                        await ExportAdsJson();
+                        break;
                 };
+            };
+        }
+        private async Task OpenImportDrawer()
+        {
+            if (!await ResetDrawerRef("import"))
+                return;
+
+            drawerRef = await OpenDrawer<ImportAdsDrawerTemplate>("Import a text design (.ads.json)", "import", width: 480);
+            drawerRef.OnClosed = async result =>
+            {
+                await CloseDrawer();
+
+                if (string.IsNullOrEmpty(result))
+                    return;
+
+                AdsDesignFile file;
+                try
+                {
+                    file = AdsDesignText.Read(result);
+                }
+                catch (AdsDesignFormatException e)
+                {
+                    messageService.Error(e.Message);
+                    return;
+                }
+
+                if (adsContext.Diagram.Groups.Count > 0 || adsContext.Diagram.Nodes.Count > 0)
+                    messageService.Info("The imported design replaced the current canvas.");
+
+                var diagramGraph = file.Graph;
+                adsContext.Diagram.History.Suspend(() => DataModelFactory.LoadDiagramFromDto(adsContext.Diagram, diagramGraph, mapper));
+                adsContext.Diagram.History.Clear();
+                adsContext.CurrentDesignName = string.IsNullOrWhiteSpace(file.Name) ? "imported design" : file.Name;
+            };
+        }
+        private async Task OpenNamingDrawer()
+        {
+            if (!await ResetDrawerRef("names"))
+                return;
+
+            drawerRef = await OpenDrawer<NamingDrawerTemplate>("Globally unique names", "names", width: 480);
+            drawerRef.OnClosed = async result =>
+            {
+                await CloseDrawer();
             };
         }
         private async Task OpenValidationDrawer()
@@ -261,6 +314,20 @@ namespace AzureDesignStudio.Components
                 ArmTemplate = armTemplate
             });
         }
+        private async Task ExportAdsJson()
+        {
+            var diagramGraph = await DataModelFactory.SaveDiagramToDto(adsContext.Diagram, mapper);
+            if (diagramGraph is null)
+            {
+                return;
+            }
+
+            await OpenCodeDrawer(new CodeDrawerContent
+            {
+                Type = CodeDrawerContentType.AdsJson,
+                Content = AdsDesignText.Write(diagramGraph, adsContext.CurrentDesignName)
+            });
+        }
         private async Task OpenCodeDrawer(CodeDrawerContent content)
         {
             var currentWindowSize = await JS.InvokeAsync<WindowSize>("getWindowSize");
@@ -268,6 +335,7 @@ namespace AzureDesignStudio.Components
             {
                 CodeDrawerContentType.Json => _armTitle,
                 CodeDrawerContentType.Bicep => _bicepTitle,
+                CodeDrawerContentType.AdsJson => _adsTextTitle,
                 _ => null
             };
 

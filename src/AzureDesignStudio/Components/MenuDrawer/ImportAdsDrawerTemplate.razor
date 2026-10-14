@@ -1,0 +1,65 @@
+@inherits FeedbackComponent<string, string>
+@using AzureDesignStudio.Core.Common
+@using Microsoft.AspNetCore.Components.Forms
+
+<Text style="font-size:16px;">Import a text design (.ads.json)</Text>
+<br />
+<Text>Paste the content of a <code>.ads.json</code> file or pick one from disk. The imported design replaces the current canvas.</Text>
+<textarea class="ant-input" style="margin-top:8px;font-family:monospace;" rows="10" @bind="text" @bind:event="oninput" placeholder='{"version": 1, ...}'></textarea>
+@if (!string.IsNullOrEmpty(error))
+{
+    <Alert Type="@AlertType.Error" Message="Not a valid .ads.json design" Description="@error" ShowIcon="true" Style="margin-top:8px;" />
+}
+<div style="margin-top:12px;">
+    <InputFile OnChange="HandleFileSelected" accept=".ads.json,application/json" />
+</div>
+<div style="margin-top:12px;">
+    <Button Type="@ButtonType.Primary" OnClick="HandleLoadClick" Disabled="@string.IsNullOrWhiteSpace(text)">Validate and load</Button>
+    <Button Style="margin-left:8px;" OnClick="HandleCancelClick">Cancel</Button>
+</div>
+
+@code {
+    private const long MaxFileBytes = 2 * 1024 * 1024;
+    private string text = string.Empty;
+    private string? error;
+
+    private Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        error = null;
+        try
+        {
+            using var reader = new StreamReader(e.File.OpenReadStream(MaxFileBytes));
+            text = reader.ReadToEnd();
+        }
+        catch (IOException)
+        {
+            error = "The selected file is larger than 2 MB - it cannot be a design.";
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task HandleLoadClick()
+    {
+        error = null;
+        try
+        {
+            // Validate here so the user sees the localized failure; the caller parses again to load.
+            AdsDesignText.Read(text);
+        }
+        catch (AdsDesignFormatException e)
+        {
+            error = e.Message;
+            return;
+        }
+
+        await CloseWithFeedback(text);
+    }
+
+    private Task HandleCancelClick() => CloseWithFeedback(null);
+
+    private async Task CloseWithFeedback(string? feedback)
+    {
+        DrawerRef<string> dr = (base.FeedbackRef as DrawerRef<string>)!;
+        await dr!.CloseAsync(feedback ?? string.Empty);
+    }
+}

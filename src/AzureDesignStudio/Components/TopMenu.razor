@@ -32,6 +32,8 @@
         <div title="Estimate monthly cost"><MenuItem Key="cost" Icon="@IconType.Outline.DollarCircle" RouterMatch="@NavLinkMatch.Prefix" /></div>
         <div title="Save/Load"><MenuItem Key="save" Icon="@IconType.Outline.Save" RouterMatch="@NavLinkMatch.Prefix" /></div>
         <div title="Compare saved designs"><MenuItem Key="compare" Icon="@IconType.Outline.Diff" RouterMatch="@NavLinkMatch.Prefix" /></div>
+        <div title="Import a text design (.ads.json)"><MenuItem Key="import" Icon="@IconType.Outline.FileText" RouterMatch="@NavLinkMatch.Prefix" /></div>
+        <div title="Suggest globally unique resource names"><MenuItem Key="names" Icon="@IconType.Outline.Tags" RouterMatch="@NavLinkMatch.Prefix" /></div>
         <AuthorizeView>
             <Authorized>
                 <div title="Do-not-touch guardrails"><MenuItem Key="guardrails" Icon="@IconType.Outline.Safety" RouterMatch="@NavLinkMatch.Prefix" /></div>
@@ -74,6 +76,10 @@
     @<span style="font-size: 24px;">
             <IconComponent IconPath="assets/icons/bicep.svg" />
             <span>Bicep</span>
+    </span>;
+    private static readonly RenderFragment _adsTextTitle =
+    @<span style="font-size: 24px;">
+            <span>Text design (.ads.json)</span>
     </span>;
 
 

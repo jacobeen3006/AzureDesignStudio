@@ -14,6 +14,7 @@
 @using AzureDesignStudio.Discovery.Cost
 @using AzureDesignStudio.Discovery.Unmanaged
 @using AzureDesignStudio.Discovery.Mcp
+@using AzureDesignStudio.Discovery.Iac
 @using SubscriptionInfo = AzureDesignStudio.Discovery.Arm.SubscriptionInfo
 @using AzureDesignStudio.Workspace
 @implements IDisposable
@@ -153,13 +154,17 @@
                 }
                 else
                 {
-                    <select @bind="browseScanId" @bind:after="LoadBrowseAsync">
+                    <select value="@(browseScanId ?? "")" @onchange="OnBrowseScanPickedAsync">
+                        <option value="">select a scan…</option>
                         @foreach (var scan in completed)
                         {
                             <option value="@scan.Id">@(scan.StartedAt.LocalDateTime.ToString("dd.MM HH:mm")) · @scan.Scope · @scan.ResourceCount rows</option>
                         }
                     </select>
                 }
+                <Tooltip Title="select a scan to export its inventory as Terraform">
+                    <Button Size="ButtonSize.Small" Disabled="@true">Save Terraform (.tf)</Button>
+                </Tooltip>
             </div>
         }
         else
@@ -200,6 +205,11 @@
                 {
                     <span style="color:#faad14;font-size:12px;">too many to open on the canvas - narrow below @AdoptLimit</span>
                 }
+                <Tooltip Title="@(browseItems.Count == 0 ? "no resources in this scan to export"
+                                : "Export the scan's inventory as a Terraform .tf - one azapi_resource per resource, written to Downloads")">
+                    <Button Size="ButtonSize.Small" Disabled="@(browseItems.Count == 0)"
+                            OnClick="SaveTerraformAsync">Save Terraform (.tf)</Button>
+                </Tooltip>
             </div>
 
             @if (facets is { } f)
@@ -851,6 +861,11 @@
     {
         activeTab = key;
         if (key == "report" && reportScan is null) await LoadReportAsync();
+        if (key == "browse" && browseScanId is null)
+        {
+            browseScanId = completed.FirstOrDefault()?.Id;
+            if (browseScanId is not null) await LoadBrowseAsync();
+        }
         if (key == "browse" && browseScanId is not null) await RecomputeReconcileAsync();
         if (key == "topology" && topoScanId is null)
         {
@@ -914,6 +929,43 @@
         expandedId = null;
         await RecomputeReconcileAsync();
         await RecomputeUnmanagedAsync();
+    }
+
+    // the picker is honest: no phantom default - empty keeps the picker open, a pick loads the inventory
+    private async Task OnBrowseScanPickedAsync(ChangeEventArgs e)
+    {
+        browseScanId = string.IsNullOrEmpty(e.Value?.ToString()) ? null : e.Value!.ToString();
+        await LoadBrowseAsync();
+    }
+
+    // 10.2 export: the scan's inventory becomes a reviewable Terraform starting point -
+    // one azapi_resource per resource with the recorded live properties; the attribute
+    // table (AzureApiVersions) pins per-type api-versions, unknown types keep the fallback.
+    private async Task SaveTerraformAsync()
+    {
+        var scanId = browseScanId;
+        if (scanId is null || browseItems.Count == 0)
+            return;
+        try
+        {
+            var tf = TerraformText.Generate(browseItems, typeApiVersions: AzureApiVersions.Map);
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+            Directory.CreateDirectory(dir);
+            // Scan ids are GUIDs but not guaranteed - keep any shape intact, only neutralise path-unsafe chars.
+            var safeId = string.Concat(scanId.Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '-'));
+            var path = Path.Combine(dir, $"ads-tf-{safeId}.tf");
+            await File.WriteAllTextAsync(path, tf);
+            try
+            {
+                await Launcher.OpenAsync(new OpenFileRequest("Terraform export", new ReadOnlyFile(path)));
+            }
+            catch (Exception)
+            {
+                // No .tf handler - the file is still on disk where the message says it is.
+            }
+            Message.Success($"Terraform export written to {path}");
+        }
+        catch (Exception e) { Message.Error($"Could not write the Terraform export: {e.Message}"); }
     }
 
     // 9.3 overlay on the browse rows: unmanaged = no orchestration marker; protection is

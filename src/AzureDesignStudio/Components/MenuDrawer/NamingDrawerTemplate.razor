@@ -1,0 +1,107 @@
+@using AzureDesignStudio.Core
+@inherits FeedbackComponent<string, string>
+@using Blazor.Diagrams.Core.Models.Base
+@using AzureDesignStudio.Core.Common
+@using AzureDesignStudio.Core.Models
+@using AzureDesignStudio.Services
+@inject AdsContext adsContext
+@inject MessageService _messageService
+
+<Text style="font-size:16px;">Globally unique names</Text>
+<br />
+<Text>Names of DNS-backed resources (storage, SQL, key vault, web apps, ...) must be globally unique. Describe the workload and pick an environment to get suggestions; the live availability check happens at deploy preflight.</Text>
+
+<div style="margin-top:12px; display:flex; gap:8px;">
+    <div style="flex:1;">
+        <Input @bind-Value="workload" Placeholder="workload (e.g. orders)" />
+    </div>
+    <div style="width:130px;">
+        <Select TItem="string" TItemValue="string" @bind-Value="environment">
+            <SelectOptions>
+                <SelectOption TItemValue="string" TItem="string" Value="@("dev")" Label="dev" />
+                <SelectOption TItemValue="string" TItem="string" Value="@("test")" Label="test" />
+                <SelectOption TItemValue="string" TItem="string" Value="@("staging")" Label="staging" />
+                <SelectOption TItemValue="string" TItem="string" Value="@("prod")" Label="prod" />
+            </SelectOptions>
+        </Select>
+    </div>
+</div>
+
+@{
+    var rows = BuildRows();
+}
+
+@if (rows.Count == 0)
+{
+    <Alert Type="@AlertType.Info" ShowIcon="true" Style="margin-top:12px;">
+        <MessageTemplate>There are no globally unique resources on the canvas.</MessageTemplate>
+    </Alert>
+}
+else
+{
+    <div style="margin-top:4px;">
+        @foreach (var row in rows)
+        {
+            <div style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+                <Tag>@row.Key</Tag>
+                <span style="font-family:monospace;">@row.Resource.Name</span>
+                @if (NamingEngine.IsValid(row.Key, row.Resource.Name))
+                {
+                    <Tag Color="@TagColor.Green">valid</Tag>
+                }
+                else
+                {
+                    <Tag Color="@TagColor.Red">invalid</Tag>
+                }
+                @if (row.Suggestion is { } suggestion)
+                {
+                    <span style="font-family:monospace;">&#8594; @suggestion</span>
+                    <Button Size="@ButtonSize.Small" Type="@ButtonType.Primary" OnClick="() => Apply(row, suggestion)">Apply</Button>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private string workload = string.Empty;
+    private string environment = "prod";
+
+    private sealed record Row(string Key, IAzureResource Resource, string? Suggestion);
+
+    private List<Row> BuildRows()
+    {
+        var candidates = adsContext.Diagram.Nodes.Concat(adsContext.Diagram.Groups)
+            .Select(node => (Key: DataModelFactory.GetStencilKey(node), Resource: node as IAzureResource))
+            .Where(x => x.Resource is not null && x.Key.Length > 0 && NamingEngine.IsGloballyUnique(x.Key))
+            .ToList();
+
+        var suggestable = !string.IsNullOrWhiteSpace(workload);
+        var rows = new List<Row>(candidates.Count);
+        foreach (var (key, resource) in candidates)
+        {
+            var taken = candidates.Where(other => !ReferenceEquals(other.Resource, resource))
+                .Select(other => other.Resource!.Name)
+                .ToList();
+            string? suggestion = null;
+            if (suggestable)
+            {
+                suggestion = NamingEngine.Suggest(key, workload.Trim(), environment, taken);
+                if (string.Equals(suggestion, resource!.Name, StringComparison.Ordinal))
+                    suggestion = null;
+            }
+            rows.Add(new Row(key, resource!, suggestion));
+        }
+        return rows;
+    }
+
+    private void Apply(Row row, string suggestion)
+    {
+        row.Resource.Name = suggestion;
+        // same per-model refresh the canvas uses after undo/delete; Diagram.Refresh alone leaves labels stale
+        if (row.Resource is Model model)
+            model.Refresh();
+        _messageService.Info($"Renamed to {suggestion}. Check the links and the validation drawer afterwards.");
+        StateHasChanged();
+    }
+}

@@ -5,7 +5,8 @@ namespace AzureDesignStudio.Models
     public enum CodeDrawerContentType
     {
         Json = 0,
-        Bicep
+        Bicep,
+        AdsJson
     }
     public class CodeDrawerContent
     {

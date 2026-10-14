@@ -110,6 +110,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
             {
                 CodeDrawerContentType.Json => "azure-design-studio.json",
                 CodeDrawerContentType.Bicep => "azure-design-studio.bicep",
+                CodeDrawerContentType.AdsJson => "azure-design-studio.ads.json",
                 _ => "azure-design-studio.json"
             };
 
