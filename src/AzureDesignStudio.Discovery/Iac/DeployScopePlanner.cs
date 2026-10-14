@@ -228,7 +228,9 @@ public static partial class DeployScopePlanner
             return DeployScopeKind.ResourceGroup;
         }
 
-        if (Regex.IsMatch(scope, @"^/subscriptions/[^/]+/?$", RegexOptions.IgnoreCase))
+        // A subscription-level scope - bare (/subscriptions/xxx) or a provider path under the
+        // subscription (/subscriptions/xxx/providers/...) - is the subscription scope.
+        if (Regex.IsMatch(scope, @"^/subscriptions/[^/]+(/|$)", RegexOptions.IgnoreCase))
         {
             return DeployScopeKind.Subscription;
         }
@@ -301,41 +303,49 @@ public static partial class DeployScopePlanner
             : "";
 
     /// <summary>
-    /// Pre-deploy gate for the single-scope pipeline until multi-scope staged apply is wired
-    /// (v2 plan 11.2): staging errors block, and so does any batch beyond the deployment's
-    /// ambient scope - this pipeline approves and deploys exactly one scope, so a plan that
-    /// stages more must never reach ARM. Without a target identity, explicit resource-group
-    /// scope paths cannot be proven to hit the approved target and block unbound. Warnings
-    /// never block.
+    /// Pre-deploy gate for a pipeline that deploys exactly one scope (no target identity):
+    /// staging errors block, and so does any batch beyond the ambient scope - without a bound
+    /// target, explicit resource-group scope paths cannot be proven to hit what was approved
+    /// and block unbound. Warnings never block.
     /// </summary>
     public static bool TryFindBlockingErrors(string templateJson, DeployScopeKind ambientScope, out string message) =>
-        TryFindBlockingErrorsCore(templateJson, ambientScope, null, null, out message);
+        TryFindBlockingErrorsCore(templateJson, ambientScope, null, null, out _, out message);
 
     /// <summary>
-    /// RG-ambient gate bound to the approved (subscription, resource group) target: an explicit
-    /// literal <c>scope</c> path must name exactly that target (ARM ids are case-insensitive),
-    /// or the plan is rejected <c>ScopeTargetMismatch</c> - the approval artifact binds one
-    /// exact scope, so an off-target path must never ride the approved token. A nested
-    /// <c>Microsoft.Resources/deployments</c> that retargets via literal <c>resourceGroup</c>/
-    /// <c>subscriptionId</c> (or whose inner template carries its own overrides) is bound the same way.
+    /// Staged-apply gate bound to the approved (subscription, resource group) target (v2 plan 11.2):
+    /// the plan must stage cleanly and every batch must be a Subscription or ResourceGroup batch -
+    /// those are exactly the two endpoints the approval identity binds, so the staged apply creates
+    /// the subscription-scope batch under the approved subscription and then deploys the
+    /// resource-group batch into the approved group. Tenant and management-group batches stay blocked:
+    /// the approval contract carries no target identity for them. Every explicit literal target
+    /// override must still name the approved target, or the plan is rejected <c>ScopeTargetMismatch</c>
+    /// and never rides the approved token.
     /// </summary>
-    public static bool TryFindBlockingErrors(string templateJson, string subscriptionId, string resourceGroup, out string message) =>
-        TryFindBlockingErrorsCore(templateJson, DeployScopeKind.ResourceGroup, subscriptionId, resourceGroup, out message);
+    public static bool TryStageForApply(string templateJson, string subscriptionId, string resourceGroup,
+        out DeployScopePlan plan, out string message) =>
+        TryFindBlockingErrorsCore(templateJson, DeployScopeKind.ResourceGroup, subscriptionId, resourceGroup, out plan, out message);
 
-    private static bool TryFindBlockingErrorsCore(string templateJson, DeployScopeKind ambientScope, string? subscriptionId, string? resourceGroup, out string message)
+
+    private static bool TryFindBlockingErrorsCore(string templateJson, DeployScopeKind ambientScope, string? subscriptionId, string? resourceGroup,
+        out DeployScopePlan plan, out string message)
     {
-        var plan = Create(templateJson, ambientScope);
+        plan = Create(templateJson, ambientScope);
+        var bound = !string.IsNullOrWhiteSpace(subscriptionId) && !string.IsNullOrWhiteSpace(resourceGroup);
+        var stagedApply = ambientScope == DeployScopeKind.ResourceGroup && bound;
         var errors = plan.Diagnostics.Where(d => d.Severity == ArmDiagnosticSeverity.Error).ToList();
-        var beyond = plan.Batches.Where(b => b.Kind != ambientScope).Select(b => b.Kind.ToString()).Distinct().ToList();
+        var beyond = (stagedApply
+                ? plan.Batches.Where(b => b.Kind is not (DeployScopeKind.Subscription or DeployScopeKind.ResourceGroup))
+                : plan.Batches.Where(b => b.Kind != ambientScope))
+            .Select(b => b.Kind.ToString()).Distinct().ToList();
         if (beyond.Count > 0)
         {
-            errors.Add(new(ArmDiagnosticSeverity.Error, "MultiScopeNotDeployable",
-                $"The staged plan requires batches beyond the {ambientScope} scope ({string.Join(", ", beyond)}); this pipeline deploys exactly one scope - multi-scope staged apply is not wired yet."));
+            errors.Add(new(ArmDiagnosticSeverity.Error, "MultiScopeNotDeployable", stagedApply
+                ? $"The staged plan requires batches beyond the approved Subscription/ResourceGroup targets ({string.Join(", ", beyond)}); the approval identity binds only those endpoints."
+                : $"The staged plan requires batches beyond the {ambientScope} scope ({string.Join(", ", beyond)}); this pipeline deploys exactly one scope."));
         }
 
         if (ambientScope == DeployScopeKind.ResourceGroup)
         {
-            var bound = !string.IsNullOrWhiteSpace(subscriptionId) && !string.IsNullOrWhiteSpace(resourceGroup);
             foreach (var (key, property, value) in ExplicitTargetOverrides(templateJson))
             {
                 if (property == "scope")
@@ -352,21 +362,36 @@ public static partial class DeployScopePlanner
                         errors.Add(new(ArmDiagnosticSeverity.Error, "ScopePathMalformed",
                             $"'{key}' carries the literal scope '{value}', which is not a valid ARM scope path; refusing to treat it as the deployment target."));
                     }
-                    else if (parsed != DeployScopeKind.ResourceGroup)
+                    else if (parsed == DeployScopeKind.ResourceGroup)
                     {
-                        errors.Add(new(ArmDiagnosticSeverity.Error, "MultiScopeNotDeployable",
-                            $"'{key}' carries an explicit {parsed}-scope path '{value}'; this pipeline deploys exactly one resource-group scope."));
+                        if (!bound)
+                        {
+                            errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeTargetUnbound",
+                                $"'{key}' carries an explicit resource-group scope '{value}'; without a bound (subscription, resource group) target the gate cannot prove it matches what was approved."));
+                        }
+                        else if (!parsedSub.Equals(subscriptionId, StringComparison.OrdinalIgnoreCase)
+                              || !parsedRg.Equals(resourceGroup, StringComparison.OrdinalIgnoreCase))
+                        {
+                            errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeTargetMismatch",
+                                $"'{key}' carries an explicit scope '{value}' outside the approved target /subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}."));
+                        }
                     }
-                    else if (!bound)
+                    else if (parsed == DeployScopeKind.Subscription && stagedApply
+                             && parsedSub.Equals(subscriptionId, StringComparison.OrdinalIgnoreCase))
                     {
-                        errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeTargetUnbound",
-                            $"'{key}' carries an explicit resource-group scope '{value}'; without a bound (subscription, resource group) target the gate cannot prove it matches what was approved."));
+                        // A subscription-scope path at the approved subscription stages with the
+                        // subscription batch - exactly what the staged apply deploys there.
                     }
-                    else if (!parsedSub.Equals(subscriptionId, StringComparison.OrdinalIgnoreCase)
-                          || !parsedRg.Equals(resourceGroup, StringComparison.OrdinalIgnoreCase))
+                    else if (parsed == DeployScopeKind.Subscription && stagedApply)
                     {
                         errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeTargetMismatch",
-                            $"'{key}' carries an explicit scope '{value}' outside the approved target /subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}."));
+                            $"'{key}' carries an explicit subscription-scope path '{value}' outside the approved subscription '{subscriptionId}'."));
+                    }
+                    else
+                    {
+                        errors.Add(new(ArmDiagnosticSeverity.Error, "MultiScopeNotDeployable", stagedApply
+                            ? $"'{key}' carries an explicit {parsed}-scope path '{value}'; the approval identity binds only the approved subscription and resource group."
+                            : $"'{key}' carries an explicit {parsed}-scope path '{value}'; this pipeline deploys exactly one resource-group scope."));
                     }
 
                     continue;
@@ -398,6 +423,48 @@ public static partial class DeployScopePlanner
 
         message = string.Join(Environment.NewLine, errors.Select(e => $"{e.Code}: {e.Message}"));
         return errors.Count > 0;
+    }
+
+    /// <summary>
+    /// Values for exactly the parameters a staged batch declares, in deployment-parameters shape:
+    /// ARM refuses a value for a parameter the batch does not declare, so the staged apply sends
+    /// the subset the batch carries. Unparseable input yields no values rather than an unapproved set.
+    /// </summary>
+    public static string ParametersForBatch(string batchTemplateJson, string parametersJson)
+    {
+        if (string.IsNullOrWhiteSpace(parametersJson))
+        {
+            return "{}";
+        }
+
+        try
+        {
+            if (JsonNode.Parse(batchTemplateJson) is not JsonObject batch || batch["parameters"] is not JsonObject declared)
+            {
+                return "{}";
+            }
+
+            if (JsonNode.Parse(parametersJson) is not JsonObject parameters)
+            {
+                return "{}";
+            }
+
+            var names = declared.Select(p => p.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var subset = new JsonObject();
+            foreach (var parameter in parameters)
+            {
+                if (names.Contains(parameter.Key))
+                {
+                    subset[parameter.Key] = JsonNode.Parse(parameter.Value?.ToJsonString() ?? "null");
+                }
+            }
+
+            return subset.ToJsonString(BatchJson);
+        }
+        catch (JsonException)
+        {
+            return "{}";
+        }
     }
 
     /// <summary>Every non-empty literal target override on a resource declaration: <c>scope</c> plus the
@@ -509,6 +576,7 @@ public static partial class DeployScopePlanner
         if (segments.Length == 2 || (segments.Length > 2 && segments[2].Equals("providers", StringComparison.OrdinalIgnoreCase)))
         {
             kind = DeployScopeKind.Subscription;
+            subscriptionId = segments[1];
             return true;
         }
 

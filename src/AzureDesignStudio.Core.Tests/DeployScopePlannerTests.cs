@@ -166,18 +166,18 @@ public class DeployScopePlannerTests
         // approved target, so a kind-only gate would let it ride the approved token.
         var offTarget = Template(
             """{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"/subscriptions/AAA/resourceGroups/other-rg"}""");
-        Assert.True(DeployScopePlanner.TryFindBlockingErrors(offTarget, "bbb", "target-rg", out var mismatch));
+        Assert.True(DeployScopePlanner.TryStageForApply(offTarget, "bbb", "target-rg", out _, out var mismatch));
         Assert.Contains("ScopeTargetMismatch", mismatch);
 
         // Same shape when the path names the target: clears, ARM ids are case-insensitive.
         var matching = Template(
             """{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"/subscriptions/BBB/resourceGroups/TARGET-RG"}""");
-        Assert.False(DeployScopePlanner.TryFindBlockingErrors(matching, "bbb", "target-rg", out _));
+        Assert.False(DeployScopePlanner.TryStageForApply(matching, "bbb", "target-rg", out _, out _));
 
         // A deeper provider path inside the target RG still matches the target.
         var nested = Template(
             """{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"/subscriptions/bbb/resourceGroups/target-rg/providers/Microsoft.Network/virtualNetworks/vn1"}""");
-        Assert.False(DeployScopePlanner.TryFindBlockingErrors(nested, "bbb", "target-rg", out _));
+        Assert.False(DeployScopePlanner.TryStageForApply(nested, "bbb", "target-rg", out _, out _));
 
         // Unparseable literals - which the classifier's fallback reads as resource-group scope -
         // are rejected, never treated as ambient. A spoofed path hiding a second resource-group
@@ -187,15 +187,22 @@ public class DeployScopePlannerTests
         {
             var junk = Template(
                 $$"""{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"{{junkScope}}"}""");
-            Assert.True(DeployScopePlanner.TryFindBlockingErrors(junk, "bbb", "target-rg", out var junkMessage));
+            Assert.True(DeployScopePlanner.TryStageForApply(junk, "bbb", "target-rg", out _, out var junkMessage));
             Assert.Contains("ScopePathMalformed", junkMessage);
         }
 
-        // Subscription-level provider paths parse as Subscription scope: beyond this pipeline.
+        // A subscription-level provider path at the approved subscription stages with the
+        // subscription batch - the staged apply deploys it under the approved subscription.
         var subLevel = Template(
             """{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"/subscriptions/bbb/providers/Microsoft.Authorization/policyDefinitions/x"}""");
-        Assert.True(DeployScopePlanner.TryFindBlockingErrors(subLevel, "bbb", "target-rg", out var subMessage));
-        Assert.Contains("MultiScopeNotDeployable", subMessage);
+        Assert.False(DeployScopePlanner.TryStageForApply(subLevel, "bbb", "target-rg", out var subPlan, out _));
+        Assert.Equal([DeployScopeKind.Subscription], subPlan.Batches.Select(b => b.Kind).ToList());
+
+        // The same path at a foreign subscription is off-target, never a silent retarget.
+        var foreign = Template(
+            """{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"/subscriptions/ccc/providers/Microsoft.Authorization/policyDefinitions/x"}""");
+        Assert.True(DeployScopePlanner.TryStageForApply(foreign, "bbb", "target-rg", out _, out var foreignMessage));
+        Assert.Contains("ScopeTargetMismatch", foreignMessage);
 
         // Without a bound target identity the gate cannot prove the path, so it blocks unbound.
         Assert.True(DeployScopePlanner.TryFindBlockingErrors(offTarget, DeployScopeKind.ResourceGroup, out var unbound));
@@ -210,32 +217,32 @@ public class DeployScopePlannerTests
         // to kind-only classification.
         var offRg = Template(
             """{"name":"n1","type":"Microsoft.Resources/deployments","apiVersion":"2022-09-01","resourceGroup":"other-rg","properties":{"mode":"Incremental","template":{"resources":[]}}}""");
-        Assert.True(DeployScopePlanner.TryFindBlockingErrors(offRg, "bbb", "target-rg", out var retarget));
+        Assert.True(DeployScopePlanner.TryStageForApply(offRg, "bbb", "target-rg", out _, out var retarget));
         Assert.Contains("ScopeTargetMismatch", retarget);
 
         // Retargeting to the approved group itself is the approved scope: clears.
         var onRg = Template(
             """{"name":"n1","type":"Microsoft.Resources/deployments","apiVersion":"2022-09-01","resourceGroup":"TARGET-RG","properties":{"mode":"Incremental","template":{"resources":[]}}}""");
-        Assert.False(DeployScopePlanner.TryFindBlockingErrors(onRg, "bbb", "target-rg", out _));
+        Assert.False(DeployScopePlanner.TryStageForApply(onRg, "bbb", "target-rg", out _, out _));
 
         // An expression target cannot be proven, so it fails closed.
         var expression = Template(
             """{"name":"n1","type":"Microsoft.Resources/deployments","apiVersion":"2022-09-01","resourceGroup":"[parameters('rg')]","properties":{"mode":"Incremental","template":{"resources":[]}}}""");
-        Assert.True(DeployScopePlanner.TryFindBlockingErrors(expression, "bbb", "target-rg", out var unprovable));
+        Assert.True(DeployScopePlanner.TryStageForApply(expression, "bbb", "target-rg", out _, out var unprovable));
         Assert.Contains("ScopeExpressionNotPlanned", unprovable);
 
         // Overrides hidden inside the nested template are seen too.
         var inner = Template(
             """{"name":"n1","type":"Microsoft.Resources/deployments","apiVersion":"2022-09-01","properties":{"mode":"Incremental","template":{"resources":[{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"/subscriptions/AAA/resourceGroups/other-rg"}]}}}""");
-        Assert.True(DeployScopePlanner.TryFindBlockingErrors(inner, "bbb", "target-rg", out var hidden));
+        Assert.True(DeployScopePlanner.TryStageForApply(inner, "bbb", "target-rg", out _, out var hidden));
         Assert.Contains("ScopeTargetMismatch", hidden);
 
-        // An explicit subscriptionId retarget is beyond the single-scope pipeline even when
-        // it names the approved subscription: conservative by design.
+        // An explicit subscriptionId naming the approved subscription stages with the
+        // subscription batch: the approval already binds that subscription, so the staged
+        // apply deploys it there.
         var crossSub = Template(
             """{"name":"n1","type":"Microsoft.Resources/deployments","apiVersion":"2022-09-01","subscriptionId":"bbb","resourceGroup":"target-rg","properties":{"mode":"Incremental","template":{"resources":[]}}}""");
-        Assert.True(DeployScopePlanner.TryFindBlockingErrors(crossSub, "bbb", "target-rg", out var subScope));
-        Assert.Contains("MultiScopeNotDeployable", subScope);
+        Assert.False(DeployScopePlanner.TryStageForApply(crossSub, "bbb", "target-rg", out _, out _));
     }
 
     [Fact]
@@ -275,5 +282,55 @@ public class DeployScopePlannerTests
         var second = DeployScopePlanner.Create(text);
         Assert.Equal(first.Batches.Select(b => b.TemplateJson), second.Batches.Select(b => b.TemplateJson));
         Assert.Equal(first.Batches.Select(b => b.Kind), second.Batches.Select(b => b.Kind));
+    }
+
+    [Fact]
+    public void StagedApply_AcceptsSubscriptionAndResourceGroupMixInApprovedOrder()
+    {
+        var text = Template(
+            """{"name":"rg1","type":"Microsoft.Resources/resourceGroups","apiVersion":"2022-09-01","location":"westeurope"},"""
+            + """{"name":"st1","type":"Microsoft.Storage/storageAccounts","apiVersion":"2023-01-01","dependsOn":["[resourceId('Microsoft.Resources/resourceGroups','rg1')]"]}""");
+        Assert.False(DeployScopePlanner.TryStageForApply(text, "bbb", "target-rg", out var staged, out var errors));
+        Assert.Equal("", errors);
+        Assert.Equal([DeployScopeKind.Subscription, DeployScopeKind.ResourceGroup], staged.Batches.Select(b => b.Kind).ToList());
+    }
+
+    [Fact]
+    public void StagedApply_BlocksTenantAndManagementGroupBatches()
+    {
+        var tenant = Template(
+            """{"name":"rp1","type":"Microsoft.Authorization/policyDefinitions","apiVersion":"2023-04-01","scope":"/"}""");
+        Assert.True(DeployScopePlanner.TryStageForApply(tenant, "bbb", "target-rg", out _, out var tenantMessage));
+        Assert.Contains("MultiScopeNotDeployable", tenantMessage);
+        Assert.Contains("Tenant", tenantMessage);
+
+        var managementGroup = Template(
+            """{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"/providers/Microsoft.Management/managementGroups/mg1"}""");
+        Assert.True(DeployScopePlanner.TryStageForApply(managementGroup, "bbb", "target-rg", out _, out var mgMessage));
+        Assert.Contains("MultiScopeNotDeployable", mgMessage);
+        Assert.Contains("ManagementGroup", mgMessage);
+    }
+
+    [Fact]
+    public void ParametersForBatch_CarriesValuesOnlyForDeclaredParameters()
+    {
+        var text = Template(
+            """{"name":"rg1","type":"Microsoft.Resources/resourceGroups","apiVersion":"2022-09-01","location":"[parameters('rgLocation')]"},"""
+            + """{"name":"st1","type":"Microsoft.Storage/storageAccounts","apiVersion":"2023-01-01","location":"[parameters('rgLocation')]","sku":{"name":"[parameters('skuName')]"},"dependsOn":["[resourceId('Microsoft.Resources/resourceGroups','rg1')]"]}""",
+            parameters: """{ "rgLocation": { "type": "string" }, "skuName": { "type": "string" }, "unused": { "type": "string" } }""");
+        Assert.False(DeployScopePlanner.TryStageForApply(text, "bbb", "target-rg", out var plan, out _));
+        var values = """{ "rgLocation": { "value": "westeurope" }, "skuName": { "value": "Standard_LRS" }, "unused": { "value": "x" } }""";
+
+        var subscriptionParameters = DeployScopePlanner.ParametersForBatch(
+            plan.Batches.Single(b => b.Kind == DeployScopeKind.Subscription).TemplateJson, values);
+        var rgParameters = DeployScopePlanner.ParametersForBatch(
+            plan.Batches.Single(b => b.Kind == DeployScopeKind.ResourceGroup).TemplateJson, values);
+
+        Assert.Contains("rgLocation", subscriptionParameters);
+        Assert.DoesNotContain("skuName", subscriptionParameters);
+        Assert.DoesNotContain("unused", subscriptionParameters);
+        Assert.Contains("rgLocation", rgParameters);
+        Assert.Contains("skuName", rgParameters);
+        Assert.DoesNotContain("unused", rgParameters);
     }
 }

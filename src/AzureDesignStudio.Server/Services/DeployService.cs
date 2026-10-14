@@ -172,7 +172,8 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            if (DeployScopePlanner.TryFindBlockingErrors(request.ArmTemplate, request.SubscriptionId, request.ResourceGroupName, out var scopeErrors))
+            if (DeployScopePlanner.TryStageForApply(request.ArmTemplate, request.SubscriptionId, request.ResourceGroupName,
+                    out var stagedPlan, out var scopeErrors))
             {
                 _logger.LogWarning("Staged plan blocked before what-if: {Errors}", scopeErrors);
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -228,8 +229,17 @@ namespace AzureDesignStudio.Server.Services
 
                 var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), credential,
                     ArmEndpointSet.AzureCloud);
+                var preview = StagedPreviewPlanner.Select(stagedPlan, request.ArmTemplate, parametersJson);
+                if (preview.Unsupported)
+                {
+                    _logger.LogWarning("Staged plan cannot be previewed: {Caveat}", preview.Caveat);
+                    response.StatusCode = StatusCodes.Status400BadRequest;
+                    response.ErrorMessage = preview.Caveat;
+                    return response;
+                }
+
                 var summary = await new WhatIfClient(transport).WhatIfAsync(subscriptionId.ToString(),
-                    request.ResourceGroupName, rg.Data.Location, request.ArmTemplate, parametersJson, context.CancellationToken);
+                    request.ResourceGroupName, rg.Data.Location, preview.TemplateJson, preview.ParametersJson, context.CancellationToken);
 
                 var plan = DeployPlanArtifact.Create(subscriptionId.ToString(), request.ResourceGroupName,
                     request.ArmTemplate, parametersJson);
@@ -242,7 +252,13 @@ namespace AzureDesignStudio.Server.Services
                 response.Modifies = summary.Modifies;
                 response.Deletes = summary.Deletes;
                 response.ChangesJson = summary.ToChangesJson();
-                response.Caveats = string.Join("\n", WhatIfSummary.Caveats);
+                var caveats = WhatIfSummary.Caveats.ToList();
+                if (preview.Caveat is not null)
+                {
+                    caveats.Add(preview.Caveat);
+                }
+
+                response.Caveats = string.Join("\n", caveats);
                 response.PlanHash = plan.PlanHash;
                 response.WhatIfToken = token;
                 return response;
@@ -310,37 +326,59 @@ namespace AzureDesignStudio.Server.Services
                     subModel.ClientId.ToString(), subModel.ClientSecret);
                 var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), credential,
                     ArmEndpointSet.AzureCloud);
-                var deploymentUrl = $"{transport.Endpoints.ManagementEndpoint}/subscriptions/{subscriptionId}/resourcegroups/{request.ResourceGroupName}/providers/Microsoft.Resources/deployments/{WhatIfClient.DeploymentName}";
+                var deploymentsUrl = $"{transport.Endpoints.ManagementEndpoint}/subscriptions/{subscriptionId}/resourcegroups/{request.ResourceGroupName}/providers/Microsoft.Resources/deployments";
                 var apiVersion = transport.Endpoints.ApiVersion;
 
-                try
-                {
-                    using var statusDoc = JsonDocument.Parse(await transport.GetAsync($"{deploymentUrl}?api-version={apiVersion}", context.CancellationToken));
-                    response.DeploymentStatus = statusDoc.RootElement.GetProperty("properties").GetProperty("provisioningState").GetString() ?? "";
-                }
-                catch (ResourceGraphException ex) when (ex.StatusCode == StatusCodes.Status404NotFound)
+                // The monitor follows the whole staged family (ads-deployment, ads-deployment-b1..bn):
+                // one approved plan even when ARM sees several deployments, worst state wins.
+                var listed = await transport.GetListAsync($"{deploymentsUrl}?api-version={apiVersion}", "value", context.CancellationToken);
+                var family = listed
+                    .Where(entry => entry.TryGetProperty("name", out var nameElement) && DeploymentStatusFolding.IsAdsDeployment(nameElement.GetString()))
+                    .OrderBy(entry => entry.GetProperty("name").GetString(), StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (family.Count == 0)
                 {
                     response.StatusCode = StatusCodes.Status404NotFound;
                     response.ErrorMessage = "No deployment is found for this resource group yet.";
                     return response;
                 }
 
-                var entries = await transport.GetListAsync($"{deploymentUrl}/operations?api-version={apiVersion}", "value", context.CancellationToken);
-                var (operations, diagnostics) = DeploymentOperationsParser.ParsePages(entries.Select(entry => entry.GetRawText()));
-                foreach (var operation in operations)
+                response.DeploymentStatus = DeploymentStatusFolding.Fold(family.Select(entry =>
+                    entry.TryGetProperty("properties", out var properties) && properties.TryGetProperty("provisioningState", out var state)
+                        ? state.GetString()
+                        : null));
+
+                var rowDiagnostics = new List<ArmDiagnostic>();
+                foreach (var member in family)
                 {
-                    response.Operations.Add(new ResourceOperationRow
+                    var memberName = member.GetProperty("name").GetString();
+                    try
                     {
-                        ResourceKey = operation.ResourceKey,
-                        State = operation.State.ToString(),
-                        StatusCode = operation.StatusCode ?? "",
-                        TimestampUtc = operation.TimestampUtc?.ToString("O") ?? "",
-                    });
+                        var entries = await transport.GetListAsync($"{deploymentsUrl}/{memberName}/operations?api-version={apiVersion}", "value", context.CancellationToken);
+                        var (operations, diagnostics) = DeploymentOperationsParser.ParsePages(entries.Select(entry => entry.GetRawText()));
+                        foreach (var operation in operations)
+                        {
+                            response.Operations.Add(new ResourceOperationRow
+                            {
+                                ResourceKey = operation.ResourceKey,
+                                State = operation.State.ToString(),
+                                StatusCode = operation.StatusCode ?? "",
+                                TimestampUtc = operation.TimestampUtc?.ToString("O") ?? "",
+                            });
+                        }
+
+                        rowDiagnostics.AddRange(diagnostics);
+                    }
+                    catch (ResourceGraphException ex)
+                    {
+                        rowDiagnostics.Add(new ArmDiagnostic(ArmDiagnosticSeverity.Warning, "OperationsUnavailable",
+                            $"Operations for deployment '{memberName}' could not be read (HTTP {ex.StatusCode}); the folded status above stays honest."));
+                    }
                 }
 
                 // Honest degradation: folded rows stay usable while parser warnings are surfaced.
                 response.ErrorMessage = string.Join(Environment.NewLine,
-                    diagnostics.Select(d => $"{d.Code}: {d.Message}"));
+                    rowDiagnostics.Select(d => $"{d.Code}: {d.Message}"));
                 response.StatusCode = StatusCodes.Status200OK;
                 return response;
             }
@@ -443,7 +481,8 @@ namespace AzureDesignStudio.Server.Services
                 return;
             }
 
-            if (DeployScopePlanner.TryFindBlockingErrors(request.ArmTemplate, request.SubscriptionId, request.ResourceGroupName, out var scopeErrors))
+            if (DeployScopePlanner.TryStageForApply(request.ArmTemplate, request.SubscriptionId, request.ResourceGroupName,
+                    out var stagedPlan, out var scopeErrors))
             {
                 _logger.LogWarning("Staged plan blocked before deploy: {Errors}", scopeErrors);
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -568,32 +607,66 @@ namespace AzureDesignStudio.Server.Services
             // Consume the approval: one apply per approval, re-deploy needs a fresh review.
             // The apply trail (v2 plan [62]/11.3) is the append-only AdsPlanApplyEvents stream:
             // Started - canonical plan body + hash of the consumed preview token, written before
-            // any ARM mutation - then exactly one true terminal event from ARM's own state.
-            // Transport failure is never a provisioning outcome: see the polling loop below.
-            var applyId = Guid.NewGuid();
+            // any ARM mutation - then exactly one true terminal event per applyId from ARM's own
+            // state. A staged apply runs one applyId per batch, so every deployment's trail stands
+            // alone. Transport failure is never a provisioning outcome: see the polling loop.
             var previewEvidence = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
                 System.Text.Encoding.UTF8.GetBytes(request.WhatIfToken)));
-            _designContext.AdsPlanApplyEvents.Add(NewApplyEvent(applyId, approval, subscriptionId.ToString(),
-                request.ResourceGroupName, PlanApplyEventModel.Started, previewEvidence, null));
-            _designContext.AdsPlanApprovals.Remove(approval);
-            await _designContext.SaveChangesAsync(context.CancellationToken);
-            _logger.LogInformation("Plan apply started hash={PlanHash} approver={ApprovedBy} user={UserId} target={Subscription}/{ResourceGroup} applyId={ApplyId}",
-                planHash, approval.ApprovedBy, userIdClaim, subscriptionId, request.ResourceGroupName, applyId);
 
             // Deploy the template. Transport and provisioning are separate concerns: the client
             // stream is best-effort, the ARM LRO is the only source of terminal truth.
-            ArmDeploymentCollection armDeployments = rg.GetArmDeployments();
-            string deploymentName = WhatIfClient.DeploymentName;
+            var batches = stagedPlan.Batches;
+            if (batches.Count > 1)
+            {
+                await RunStagedApplyAsync(batches, subResource.GetArmDeployments(), rg.GetArmDeployments(),
+                    approval, subscriptionId.ToString(), request.ResourceGroupName, parametersJson,
+                    previewEvidence, context.CancellationToken, response, responseStream);
+                return;
+            }
+
+            await ExecuteBatchAsync(rg.GetArmDeployments(), WhatIfClient.DeploymentName, request.ArmTemplate,
+                parametersJson, approval, subscriptionId.ToString(), request.ResourceGroupName,
+                previewEvidence, batchLabel: null, successStatus: "completed", consumesApproval: true,
+                cancellationToken: context.CancellationToken, response, responseStream);
+        }
+
+        /// <summary>Prefix for client-facing messages when one batch of a staged run ended the plan.</summary>
+        private static string Context(string? batchLabel) => batchLabel is null ? "" : $"{batchLabel}: ";
+
+        /// <summary>
+        /// Submits one ARM deployment - the single-scope apply or one staged batch - polls its LRO to
+        /// a true terminal state, and carries the audit trail: one Started before any ARM mutation,
+        /// one terminal event per applyId, durable before any client write. Returns ARM's own outcome
+        /// so the staged runner can decide whether the plan may continue.
+        /// </summary>
+        private async Task<StagedBatchOutcome> ExecuteBatchAsync(
+            ArmDeploymentCollection deployments, string deploymentName, string templateJson, string parametersJson,
+            PlanApprovalModel approval, string subscriptionId, string resourceGroupName, string previewEvidence,
+            string? batchLabel, string successStatus, bool consumesApproval, CancellationToken cancellationToken,
+            DeploymentResponse response, IServerStreamWriter<DeploymentResponse> responseStream)
+        {
+            var applyId = Guid.NewGuid();
+            _designContext.AdsPlanApplyEvents.Add(NewApplyEvent(applyId, approval, subscriptionId,
+                resourceGroupName, PlanApplyEventModel.Started, previewEvidence, batchLabel, deploymentName));
+            if (consumesApproval)
+            {
+                _designContext.AdsPlanApprovals.Remove(approval);
+            }
+
+            await _designContext.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Plan apply started hash={PlanHash} approver={ApprovedBy} target={Subscription}/{ResourceGroup} deployment={DeploymentName} applyId={ApplyId}",
+                approval.PlanHash, approval.ApprovedBy, subscriptionId, resourceGroupName, deploymentName, applyId);
+
             var input = new ArmDeploymentContent(new ArmDeploymentProperties(ArmDeploymentMode.Incremental)
             {
-                Template = BinaryData.FromString(request.ArmTemplate),
+                Template = BinaryData.FromString(templateJson),
                 Parameters = BinaryData.FromString(parametersJson),
             });
 
             ArmOperation<ArmDeploymentResource> lro;
             try
             {
-                lro = await armDeployments.CreateOrUpdateAsync(WaitUntil.Started, deploymentName, input);
+                lro = await deployments.CreateOrUpdateAsync(WaitUntil.Started, deploymentName, input);
             }
             catch (RequestFailedException ex)
             {
@@ -601,35 +674,40 @@ namespace AzureDesignStudio.Server.Services
                 // transport failures, 408 and 5xx may still have landed at ARM.
                 var rejected = PlanApplyEventModel.ProvesSubmissionRejected(ex.Status);
                 // The terminal event lands first - the client may already be gone.
-                await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
+                await RecordApplyEventAsync(applyId, approval, subscriptionId, resourceGroupName,
                     rejected ? PlanApplyEventModel.Failed : PlanApplyEventModel.OutcomeUnknown,
                     rejected ? $"submission refused: HTTP {ex.Status}: {ex.ErrorCode}"
-                             : $"submission outcome unconfirmable: HTTP {ex.Status}: {ex.ErrorCode}");
+                             : $"submission outcome unconfirmable: HTTP {ex.Status}: {ex.ErrorCode}",
+                    deploymentName);
                 if (rejected)
                 {
                     response.StatusCode = StatusCodes.Status400BadRequest;
                     response.DeploymentStatus = "failed";
-                    response.ErrorMessage = $"HTTP {ex.Status}: {ex.ErrorCode}";
+                    response.ErrorMessage = $"{Context(batchLabel)}HTTP {ex.Status}: {ex.ErrorCode}";
                 }
                 else
                 {
                     // "failed" here would be a second lie: ARM's answer was ambiguous.
                     response.StatusCode = StatusCodes.Status202Accepted;
                     response.DeploymentStatus = "unknown";
-                    response.ErrorMessage = $"Outcome unconfirmable (HTTP {ex.Status}: {ex.ErrorCode}). The deployment may still be running - verify its state in Azure (audit apply {applyId}).";
+                    response.ErrorMessage = $"{Context(batchLabel)}Outcome unconfirmable (HTTP {ex.Status}: {ex.ErrorCode}). The deployment may still be running - verify its state in Azure (audit apply {applyId}).";
                 }
+
                 try { await responseStream.WriteAsync(response); }
                 catch (Exception wex)
                 {
                     _logger.LogWarning(wex, "Deploy submission-failure write failed for apply {ApplyId}; the outcome is already recorded durably", applyId);
                 }
-                return;
+
+                return rejected
+                    ? new StagedBatchOutcome(StagedBatchResult.Failed, response.ErrorMessage)
+                    : new StagedBatchOutcome(StagedBatchResult.OutcomeUnknown, response.ErrorMessage);
             }
             catch (Exception ex)
             {
                 // The submission may still have reached ARM; the outcome is unknown, not failed.
-                await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
-                    PlanApplyEventModel.OutcomeUnknown, $"submission outcome unconfirmable: {ex.GetType().Name}: {ex.Message}");
+                await RecordApplyEventAsync(applyId, approval, subscriptionId, resourceGroupName,
+                    PlanApplyEventModel.OutcomeUnknown, $"submission outcome unconfirmable: {ex.GetType().Name}: {ex.Message}", deploymentName);
                 // Rethrowing would only reach a gRPC status the client maps to a generic error;
                 // the drawer awaits this stream and must hear the honest state instead.
                 _logger.LogError(ex, "Deployment submission failed unconfirmably for apply {ApplyId}", applyId);
@@ -637,14 +715,15 @@ namespace AzureDesignStudio.Server.Services
                 {
                     response.StatusCode = StatusCodes.Status202Accepted;
                     response.DeploymentStatus = "unknown";
-                    response.ErrorMessage = $"Submission outcome unconfirmable ({ex.GetType().Name}). The deployment may still have been accepted - verify its state in Azure (audit apply {applyId}).";
+                    response.ErrorMessage = $"{Context(batchLabel)}Submission outcome unconfirmable ({ex.GetType().Name}). The deployment may still have been accepted - verify its state in Azure (audit apply {applyId}).";
                     await responseStream.WriteAsync(response);
                 }
                 catch (Exception wex)
                 {
                     _logger.LogWarning(wex, "Deploy unknown-outcome write failed for apply {ApplyId}; the outcome is already recorded durably", applyId);
                 }
-                return;
+
+                return new StagedBatchOutcome(StagedBatchResult.OutcomeUnknown, response.ErrorMessage);
             }
 
             var clientGone = false;
@@ -665,8 +744,8 @@ namespace AzureDesignStudio.Server.Services
                         // ARM keeps being polled for the true outcome. This is not a Failed event.
                         clientGone = true;
                         _logger.LogWarning(ex, "Deploy stream write failed for apply {ApplyId}; continuing ARM polling without a client", applyId);
-                        await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
-                            PlanApplyEventModel.TransportLost, $"client stream lost mid-deployment ({ex.GetType().Name}); ARM polling continues for the true outcome");
+                        await RecordApplyEventAsync(applyId, approval, subscriptionId, resourceGroupName,
+                            PlanApplyEventModel.TransportLost, $"client stream lost mid-deployment ({ex.GetType().Name}); ARM polling continues for the true outcome", deploymentName);
                     }
                 }
 
@@ -683,20 +762,21 @@ namespace AzureDesignStudio.Server.Services
                     _logger.LogWarning(ex, "Provisioning status query failed for apply {ApplyId}", applyId);
                     if (++consecutivePollFailures >= MaxConsecutivePollFailures)
                     {
-                        await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
-                            PlanApplyEventModel.OutcomeUnknown, $"provisioning state unconfirmable after {consecutivePollFailures} consecutive status-query failures: HTTP {ex.Status}: {ex.ErrorCode}");
+                        await RecordApplyEventAsync(applyId, approval, subscriptionId, resourceGroupName,
+                            PlanApplyEventModel.OutcomeUnknown, $"provisioning state unconfirmable after {consecutivePollFailures} consecutive status-query failures: HTTP {ex.Status}: {ex.ErrorCode}", deploymentName);
                         try
                         {
                             response.StatusCode = StatusCodes.Status202Accepted;
                             response.DeploymentStatus = "unknown";
-                            response.ErrorMessage = $"Provisioning state unconfirmable after {consecutivePollFailures} consecutive status-query failures (HTTP {ex.Status}). The deployment may still be running - verify its state in Azure (audit apply {applyId}).";
+                            response.ErrorMessage = $"{Context(batchLabel)}Provisioning state unconfirmable after {consecutivePollFailures} consecutive status-query failures (HTTP {ex.Status}). The deployment may still be running - verify its state in Azure (audit apply {applyId}).";
                             await responseStream.WriteAsync(response);
                         }
                         catch (Exception wex)
                         {
                             _logger.LogWarning(wex, "Deploy unknown-outcome write failed for apply {ApplyId}; the outcome is already recorded durably", applyId);
                         }
-                        return;
+
+                        return new StagedBatchOutcome(StagedBatchResult.OutcomeUnknown, response.ErrorMessage);
                     }
                 }
             }
@@ -705,9 +785,10 @@ namespace AzureDesignStudio.Server.Services
             var succeeded = string.Equals(provisioningState, "Succeeded", StringComparison.OrdinalIgnoreCase);
             // Truth lands first, even when nobody is listening anymore: the durable terminal
             // event is recorded from ARM's state alone, never gated on a client write.
-            await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
+            await RecordApplyEventAsync(applyId, approval, subscriptionId, resourceGroupName,
                 succeeded ? PlanApplyEventModel.Completed : PlanApplyEventModel.Failed,
-                succeeded ? $"provisioningState={provisioningState}" : $"Deployment finished with provisioningState={provisioningState ?? "Unknown"}.");
+                succeeded ? $"provisioningState={provisioningState}" : $"Deployment finished with provisioningState={provisioningState ?? "Unknown"}.",
+                deploymentName);
 
             if (!clientGone)
             {
@@ -716,14 +797,15 @@ namespace AzureDesignStudio.Server.Services
                     if (succeeded)
                     {
                         response.StatusCode = StatusCodes.Status200OK;
-                        response.DeploymentStatus = "completed";
+                        response.DeploymentStatus = successStatus;
                     }
                     else
                     {
                         response.StatusCode = StatusCodes.Status400BadRequest;
                         response.DeploymentStatus = "failed";
-                        response.ErrorMessage = $"Deployment finished with provisioningState={provisioningState ?? "Unknown"}.";
+                        response.ErrorMessage = $"{Context(batchLabel)}Deployment finished with provisioningState={provisioningState ?? "Unknown"}.";
                     }
+
                     await responseStream.WriteAsync(response);
                 }
                 catch (Exception ex)
@@ -731,20 +813,84 @@ namespace AzureDesignStudio.Server.Services
                     _logger.LogWarning(ex, "Deploy final write failed for apply {ApplyId}; the true outcome is already recorded durably", applyId);
                 }
             }
+
+            return succeeded
+                ? new StagedBatchOutcome(StagedBatchResult.Completed)
+                : new StagedBatchOutcome(StagedBatchResult.Failed, $"provisioningState={provisioningState ?? "Unknown"}");
         }
 
+        /// <summary>
+        /// Staged apply (v2 plan 11.2): deploys the approved plan's scope batches in planner order -
+        /// the subscription-scope batch under the approved subscription, the resource-group batch into
+        /// the approved group - stopping at the first batch that fails or whose outcome ARM cannot
+        /// confirm. Each batch is its own ARM deployment with its own audit trail; the client stream
+        /// sees batch markers between submissions and one plan-level terminal after the last batch.
+        /// </summary>
+        private async Task RunStagedApplyAsync(
+            IReadOnlyList<DeployScopeBatch> batches, ArmDeploymentCollection subscriptionDeployments,
+            ArmDeploymentCollection resourceGroupDeployments, PlanApprovalModel approval, string subscriptionId,
+            string resourceGroupName, string parametersJson, string previewEvidence, CancellationToken cancellationToken,
+            DeploymentResponse response, IServerStreamWriter<DeploymentResponse> responseStream)
+        {
+            var total = batches.Count;
+            var result = await StagedBatchRunner.RunAsync(batches,
+                async (batch, index) => await ExecuteBatchAsync(
+                    batch.Kind == DeployScopeKind.Subscription ? subscriptionDeployments : resourceGroupDeployments,
+                    $"{WhatIfClient.DeploymentName}-b{index + 1}",
+                    batch.TemplateJson,
+                    DeployScopePlanner.ParametersForBatch(batch.TemplateJson, parametersJson),
+                    approval, subscriptionId, resourceGroupName, previewEvidence,
+                    batchLabel: $"Batch {index + 1}/{total} ({batch.Kind})",
+                    successStatus: "batch-completed",
+                    consumesApproval: index == 0,
+                    cancellationToken, response, responseStream),
+                onBatchStarted: async (batch, index) =>
+                {
+                    try
+                    {
+                        response.StatusCode = StatusCodes.Status200OK;
+                        response.DeploymentStatus = "batch-started";
+                        response.ErrorMessage = $"Batch {index + 1}/{total} ({batch.Kind})";
+                        await responseStream.WriteAsync(response);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Batch marker write failed; the client stream is best-effort");
+                    }
+                });
+
+            if (result.Result != StagedBatchResult.Completed)
+            {
+                // ExecuteBatchAsync already wrote the honest terminal for the batch that ended the plan.
+                _logger.LogWarning("Staged apply stopped at batch {FailedBatchIndex}/{Total}: {Result} {Detail}",
+                    result.FailedBatchIndex + 1, total, result.Result, result.Detail);
+                return;
+            }
+
+            try
+            {
+                response.StatusCode = StatusCodes.Status200OK;
+                response.DeploymentStatus = "completed";
+                response.ErrorMessage = $"Staged apply completed: {total} scope batches.";
+                await responseStream.WriteAsync(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Staged apply final write failed; every batch outcome is already recorded durably");
+            }
+        }
         /// <summary>Consecutive ARM status-query failures tolerated before the outcome is declared unconfirmable.</summary>
         private const int MaxConsecutivePollFailures = 5;
 
         private static PlanApplyEventModel NewApplyEvent(Guid applyId, PlanApprovalModel approval, string subscriptionId,
-            string resourceGroupName, string eventType, string? previewEvidence, string? detail) => new()
+            string resourceGroupName, string eventType, string? previewEvidence, string? detail, string? deploymentName = null) => new()
         {
             ApplyId = applyId,
             PlanHash = approval.PlanHash,
             PlanJson = approval.PlanJson,
             SubscriptionId = subscriptionId,
             ResourceGroupName = resourceGroupName,
-            DeploymentName = WhatIfClient.DeploymentName,
+            DeploymentName = deploymentName ?? WhatIfClient.DeploymentName,
             ApprovedBy = approval.ApprovedBy,
             ApprovedByUserId = approval.ApprovedByUserId,
             ApprovedAtUtc = approval.ApprovedAtUtc,
@@ -755,12 +901,12 @@ namespace AzureDesignStudio.Server.Services
         };
 
         private async Task RecordApplyEventAsync(Guid applyId, PlanApprovalModel approval, string subscriptionId,
-            string resourceGroupName, string eventType, string? detail)
+            string resourceGroupName, string eventType, string? detail, string? deploymentName = null)
         {
             try
             {
                 _designContext.AdsPlanApplyEvents.Add(NewApplyEvent(applyId, approval, subscriptionId,
-                    resourceGroupName, eventType, null, detail));
+                    resourceGroupName, eventType, null, detail, deploymentName));
                 // The terminal event must land even when the caller's token is already cancelled
                 // (client disconnect); audit failures are logged loudly but never mask the outcome.
                 await _designContext.SaveChangesAsync(CancellationToken.None);

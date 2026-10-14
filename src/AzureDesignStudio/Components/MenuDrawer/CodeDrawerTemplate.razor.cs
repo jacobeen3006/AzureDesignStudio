@@ -251,6 +251,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
                     {
                         "started" => 0,
                         "processing" => 1,
+                        "batch-started" or "batch-completed" => 1,
                         "completed" => 2,
                         _ => _stepsStatus.CurrentStep
                     };
@@ -265,7 +266,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
                         _stepsStatus.ErrorMessage = errorMessage;
                         stateHasChanged = true;
                     }
-                    else if (deploymentStatus == "processing" && _stepsStatus.Status != "process")
+                    else if ((deploymentStatus == "processing" || deploymentStatus == "batch-started" || deploymentStatus == "batch-completed") && _stepsStatus.Status != "process")
                     {
                         _stepsStatus.Status = "process";
                         stateHasChanged = true;
