@@ -44,6 +44,8 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private WhatIfResponse? _whatIfResult = null;
         private string? _whatIfError = null;
         private IReadOnlyList<WhatIfChangeRow> _whatIfChanges = [];
+        private bool _deployAsStack = false;
+        private string _stackName = "ads-stack";
         private string? _approverName = null;
         private IReadOnlyList<ResourceOperationRow> _monitorRows = [];
         private string _monitorStatus = "";
@@ -214,6 +216,11 @@ namespace AzureDesignStudio.Components.MenuDrawer
         {
             if (_whatIfResult is null || !WhatIfDeployAllowed)
                 return;
+            if (_deployAsStack && string.IsNullOrWhiteSpace(_stackName))
+            {
+                _whatIfError = "A deployment stack needs a name.";
+                return;
+            }
 
             var result = _whatIfResult;
             var approval = await _deployService.ApprovePlanAsync(result.PlanHash);
@@ -226,7 +233,31 @@ namespace AzureDesignStudio.Components.MenuDrawer
 
             _showWhatIfReview = false;
             _whatIfResult = null;
-            await RunDeployment(result.WhatIfToken, result.PlanHash);
+            if (_deployAsStack)
+                await RunStackDeployment(result);
+            else
+                await RunDeployment(result.WhatIfToken, result.PlanHash);
+        }
+
+        /// <summary>Applies the approved plan as a deployment stack. The wrapper swallows transport
+        /// breaks into a null response, so the outcomes here are exhaustive: confirmed success, an
+        /// ARM-confirmed refusal, or OutcomeUnknown - a break is never rendered as a failure.</summary>
+        private async Task RunStackDeployment(SharedModels.Protos.WhatIfResponse result)
+        {
+            _stepsStatus = new() { Status = "started" };
+            _showDeployStatus = true;
+
+            var response = await _deployService.CreateStackAsync(_linkedSubscription!.SubscriptionId,
+                _deployParams.ResourceGroup, _stackName.Trim(), EffectiveTemplate,
+                _deployParams.ParametersJson, result.WhatIfToken, result.PlanHash);
+
+            _stepsStatus = response switch
+            {
+                null => new() { CurrentStep = 1, Status = "unknown", ErrorMessage = "The stack apply could not be confirmed; verify the stack in Azure before retrying." },
+                { StatusCode: 200 } => new() { CurrentStep = 2, Status = "finish" },
+                { StatusCode: 502 } => new() { CurrentStep = 1, Status = "unknown", ErrorMessage = response.ErrorMessage },
+                _ => new() { CurrentStep = 1, Status = "error", ErrorMessage = response.ErrorMessage },
+            };
         }
 
         private void CancelWhatIf(MouseEventArgs e)

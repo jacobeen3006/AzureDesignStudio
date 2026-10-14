@@ -63,6 +63,33 @@ namespace AzureDesignStudio.Services
             return await _deployClient.ApprovePlanAsync(new PlanApprovalRequest { PlanHash = planHash });
         }
 
+        /// <summary>Deploys the reviewed payload as a deployment-stack (v2 12.3): same what-if token
+        /// and plan hash the review produced; the unmanage policy stays Detach-flavored - Delete is
+        /// refused server-side until the Phase 13 gates ship.</summary>
+        public async Task<CreateStackResponse?> CreateStackAsync(string subscriptionId, string rgName, string stackName,
+            string armTemplate, string parameters, string whatIfToken, string planHash, string missingAction = "Detach")
+        {
+            try
+            {
+                return await _deployClient.CreateStackAsync(new CreateStackRequest
+                {
+                    SubscriptionId = subscriptionId,
+                    ResourceGroupName = rgName,
+                    StackName = stackName,
+                    ArmTemplate = armTemplate,
+                    Parameters = parameters,
+                    WhatIfToken = whatIfToken,
+                    PlanHash = planHash,
+                    MissingAction = missingAction,
+                });
+            }
+            catch (Exception ex) when (ex is Grpc.Core.RpcException or InvalidOperationException or HttpRequestException)
+            {
+                // A transport break never proves what ARM did: the server audit carries the truth.
+                return null;
+            }
+        }
+
         public async Task<DeploymentOperationsResponse?> GetDeploymentOperationsAsync(string subscriptionId, string rgName)
         {
             var request = new DeploymentOperationsRequest

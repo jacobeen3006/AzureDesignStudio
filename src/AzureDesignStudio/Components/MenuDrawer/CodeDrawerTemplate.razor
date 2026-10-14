@@ -36,7 +36,7 @@
 </Modal>
 
 <Modal Title="Review what will change (What-If)" Visible="@_showWhatIfReview" MaskClosable="@false"
-       OkText="@("Approve & deploy")" OnOk="@ApproveAndDeployAsync" OnCancel="@CancelWhatIf">
+       OkText="@(_deployAsStack ? "Approve & deploy as stack" : "Approve & deploy")" OnOk="@ApproveAndDeployAsync" OnCancel="@CancelWhatIf">
     @if (_retryTemplate is not null)
     {
         <Alert Type="@AlertType.Info" Message="Targeted retry: only the failed resources will be previewed and deployed - not the full template." ShowIcon="true" Style="margin-bottom:8px" />
@@ -97,6 +97,22 @@
             }
         </ul>
         <p>Plan <code>@_whatIfResult.PlanHash</code> - approving records @(_approverName ?? "your signed-in identity") as the named approver; the review expires after 15 minutes and applies exactly once.</p>
+        @if (WhatIfDeployAllowed)
+        {
+            <Divider />
+            <div style="display:flex;gap:8px;align-items:center">
+                <Switch @bind-Value="@_deployAsStack" Size="@InputSize.Small" />
+                <span>Deploy as a <strong>deployment stack</strong></span>
+            </div>
+            @if (_deployAsStack)
+            {
+                <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+                    <span>Stack name</span>
+                    <Input @bind-Value="@_stackName" Style="width:240px" />
+                </div>
+                <p style="margin-top:6px"><em>Resources the stack later stops managing are detached, never deleted. The plan hash, approval and audit trail are identical to a plain deploy.</em></p>
+            }
+        }
     }
 </Modal>
 
