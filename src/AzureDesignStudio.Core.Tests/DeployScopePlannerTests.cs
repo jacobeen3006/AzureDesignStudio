@@ -146,6 +146,20 @@ public class DeployScopePlannerTests
     }
 
     [Fact]
+    public void NullOrNonObjectResourceMembers_FailClosedInsteadOfSilentlyDropping()
+    {
+        // A dropped member would produce a "successful" plan that deploys less than the template says.
+        foreach (var text in new[] { """{"contentVersion":"1.0.0.0","resources":[null,{"name":"st1","type":"Microsoft.Storage/storageAccounts","apiVersion":"2023-01-01"}]}""",
+                                     """{"contentVersion":"1.0.0.0","resources":["oops"]}""" })
+        {
+            var plan = DeployScopePlanner.Create(text);
+            Assert.False(plan.Success);
+            Assert.True(Has(plan.Diagnostics, "InvalidTemplate", ArmDiagnosticSeverity.Error));
+            Assert.Empty(plan.Batches);
+        }
+    }
+
+    [Fact]
     public void Staging_IsDeterministic()
     {
         var text = Template(

@@ -79,8 +79,17 @@ public static partial class DeployScopePlanner
         {
             return new DeployScopePlan([], [new(ArmDiagnosticSeverity.Error, "InvalidTemplate", "Template has no resources array.")]);
         }
+        var members = new List<JsonObject>(resources.Count);
+        foreach (var item in resources)
+        {
+            if (item is not JsonObject member)
+            {
+                return new DeployScopePlan([], [new(ArmDiagnosticSeverity.Error, "InvalidTemplate", "resources contains a null or non-object member.")]);
+            }
 
-        var members = resources.OfType<JsonNode>().ToList();
+            members.Add(member);
+        }
+
         if (members.Count == 0)
         {
             return new DeployScopePlan([], []);
