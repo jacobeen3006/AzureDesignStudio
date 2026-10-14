@@ -58,6 +58,14 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
     /// </summary>
     public string Issue(string subscriptionId, string resourceGroupName, string armTemplate, string parameters,
         WhatIfSummary summary, string canonicalPlanJson, string planHash, string? revertPlanJson = null,
+        IReadOnlyList<Unmanaged.GuardrailTarget>? guardrailTargets = null) =>
+        Issue(DeployTargetScope.ResourceGroupScope(subscriptionId, resourceGroupName), armTemplate, parameters,
+            summary, canonicalPlanJson, planHash, revertPlanJson, guardrailTargets);
+
+    /// <summary>Token bound to a full target identity (v2 11.2): the key names the canonical scope
+    /// path, so a token issued for one scope can never authorize the same bytes at another.</summary>
+    public string Issue(DeployTargetScope scope, string armTemplate, string parameters,
+        WhatIfSummary summary, string canonicalPlanJson, string planHash, string? revertPlanJson = null,
         IReadOnlyList<Unmanaged.GuardrailTarget>? guardrailTargets = null)
     {
         // Fail closed: an indeterminate prediction never earns a deploy token, no matter
@@ -66,7 +74,7 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
             throw new WhatIfException("Indeterminate", $"cannot issue a review token: {reason}");
 
         var token = Guid.NewGuid().ToString("N");
-        var entry = new Entry(Hash(subscriptionId, resourceGroupName, armTemplate, parameters),
+        var entry = new Entry(Hash(scope, armTemplate, parameters),
             Now.Add(ttl), summary.HasDelete, summary.DeleteResourceIds, canonicalPlanJson, planHash, revertPlanJson,
             guardrailTargets);
 
@@ -106,6 +114,11 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
     /// refused without spending the token, exactly like the read-only approval checks upstream.
     /// </summary>
     public WhatIfTokenCheck ValidateAndConsume(string? token, string subscriptionId, string resourceGroupName,
+        string armTemplate, string parameters, Func<IReadOnlyList<Unmanaged.GuardrailTarget>, string?>? guardrailVeto = null) =>
+        ValidateAndConsume(token, DeployTargetScope.ResourceGroupScope(subscriptionId, resourceGroupName),
+            armTemplate, parameters, guardrailVeto);
+
+    public WhatIfTokenCheck ValidateAndConsume(string? token, DeployTargetScope scope,
         string armTemplate, string parameters, Func<IReadOnlyList<Unmanaged.GuardrailTarget>, string?>? guardrailVeto = null)
     {
         if (string.IsNullOrWhiteSpace(token))
@@ -122,7 +135,7 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
                 return new WhatIfTokenCheck(WhatIfTokenStatus.Stale, $"What-If review expired after {(int)ttl.TotalMinutes} minutes; run What-If again.");
             }
 
-            if (!string.Equals(entry.PayloadHash, Hash(subscriptionId, resourceGroupName, armTemplate, parameters), StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(entry.PayloadHash, Hash(scope, armTemplate, parameters), StringComparison.OrdinalIgnoreCase))
                 return new WhatIfTokenCheck(WhatIfTokenStatus.PayloadChanged, "The template, parameters, or target changed after the What-If review; run What-If again.");
             if (entry.HasDelete)
                 return new WhatIfTokenCheck(WhatIfTokenStatus.HasDelete,
@@ -138,9 +151,9 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
         }
     }
 
-    private static string Hash(string subscriptionId, string resourceGroupName, string armTemplate, string parameters)
+    private static string Hash(DeployTargetScope scope, string armTemplate, string parameters)
     {
-        var payload = $"{subscriptionId}\n{resourceGroupName}\n{armTemplate}\n{parameters}";
+        var payload = $"{scope.ScopePath}\n{armTemplate}\n{parameters}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
     }
 }

@@ -99,6 +99,7 @@ var app = builder.Build();
                     PlanJson nvarchar(max) NOT NULL,
                     SubscriptionId nvarchar(64) NOT NULL,
                     ResourceGroupName nvarchar(90) NOT NULL,
+                    TargetScope nvarchar(300) NULL,
                     DeploymentName nvarchar(64) NOT NULL,
                     ApprovedBy nvarchar(320) NOT NULL,
                     ApprovedByUserId nvarchar(64) NOT NULL,
@@ -117,6 +118,8 @@ var app = builder.Build();
                 ALTER TABLE AdsPlanApplyEvents ADD RevertPlanHash nvarchar(71) NULL;
                 IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApplyEvents', N'RevertPlanJson') IS NULL
                 ALTER TABLE AdsPlanApplyEvents ADD RevertPlanJson nvarchar(max) NULL;
+                IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApplyEvents', N'TargetScope') IS NULL
+                ALTER TABLE AdsPlanApplyEvents ADD TargetScope nvarchar(300) NULL;
                 IF OBJECT_ID(N'AdsGuardrailPolicies', N'U') IS NULL
                 CREATE TABLE AdsGuardrailPolicies (
                     Id int NOT NULL PRIMARY KEY,

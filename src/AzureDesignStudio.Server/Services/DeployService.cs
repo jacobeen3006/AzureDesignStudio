@@ -140,17 +140,67 @@ namespace AzureDesignStudio.Server.Services
         }
         private async Task<SubscriptionResource?> GetSubscriptionResource(Guid userId, Guid subscriptionId)
         {
+            var armClient = await GetArmClient(userId, subscriptionId);
+            return armClient is null ? null : await armClient.GetDefaultSubscriptionAsync();
+        }
+
+        /// <summary>An authenticated ARM client for the linked subscription - the credential handle
+        /// for every target kind (v2 11.2): management-group and tenant deployments still
+        /// authenticate through one linked subscription.</summary>
+        private async Task<ArmClient?> GetArmClient(Guid userId, Guid subscriptionId)
+        {
             var subModel = await GetSubscriptionInfo(userId, subscriptionId);
             if (subModel == null)
                 return null;
 
-            var azCred = new ClientSecretCredential(subModel.TenantId.ToString(), 
+            var azCred = new ClientSecretCredential(subModel.TenantId.ToString(),
                 subModel.ClientId.ToString(), subModel.ClientSecret);
-            var armClient = new ArmClient(azCred, subModel.SubscriptionId.ToString());
-            var subResource = await armClient.GetDefaultSubscriptionAsync();
-
-            return subResource;
+            return new ArmClient(azCred, subModel.SubscriptionId.ToString());
         }
+
+        /// <summary>
+        /// Wire fields to the approved target identity (v2 plan 11.2). Every mutating and monitoring
+        /// call binds one full scope before anything runs; a non-resource-group target must name a
+        /// deployment location, because ARM has no implicit home region outside a group and guessing
+        /// one would place the deployment somewhere the approved plan never named.
+        /// </summary>
+        private static bool TryBuildTargetScope(DeploymentRequest request, out DeployTargetScope target, out string error)
+        {
+            var kind = request.Target switch
+            {
+                DeployTarget.Subscription => DeployScopeKind.Subscription,
+                DeployTarget.ManagementGroup => DeployScopeKind.ManagementGroup,
+                DeployTarget.Tenant => DeployScopeKind.Tenant,
+                _ => DeployScopeKind.ResourceGroup,
+            };
+            if (!DeployTargetScope.TryCreate(kind, request.SubscriptionId, request.ResourceGroupName,
+                    request.ManagementGroupId, out target, out error))
+                return false;
+
+            if (kind != DeployScopeKind.ResourceGroup && string.IsNullOrWhiteSpace(request.Location))
+            {
+                error = $"A {kind} target needs an explicit deployment location; ARM cannot place the deployment without one.";
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>The plan artifact for the approved target: the canonical scope member names the
+        /// exact scope the hash covers, so an approval can never be replayed at another target.</summary>
+        private static DeployPlanArtifact CreatePlanArtifact(DeployTargetScope target, string templateJson, string parametersJson) =>
+            DeployPlanArtifact.Create(
+                target.Kind switch
+                {
+                    DeployScopeKind.Subscription => DeployPlanScopeKind.Subscription,
+                    DeployScopeKind.ManagementGroup => DeployPlanScopeKind.ManagementGroup,
+                    DeployScopeKind.Tenant => DeployPlanScopeKind.Tenant,
+                    _ => DeployPlanScopeKind.ResourceGroup,
+                },
+                Blank(target.SubscriptionId), Blank(target.ResourceGroup), Blank(target.ManagementGroupId),
+                templateJson, parametersJson);
+
+        private static string? Blank(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
         /// <summary>
         /// What-if preflight [50]: run the ARM prediction against the caller's linked subscription and
@@ -175,8 +225,15 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            if (DeployScopePlanner.TryStageForApply(request.ArmTemplate, request.SubscriptionId, request.ResourceGroupName,
-                    out var stagedPlan, out var scopeErrors))
+            if (!TryBuildTargetScope(request, out var target, out var targetError))
+            {
+                _logger.LogWarning("Deployment target rejected before what-if: {Error}", targetError);
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = targetError;
+                return response;
+            }
+
+            if (DeployScopePlanner.TryStageForApply(request.ArmTemplate, target, out var stagedPlan, out var scopeErrors))
             {
                 _logger.LogWarning("Staged plan blocked before what-if: {Errors}", scopeErrors);
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -222,17 +279,29 @@ namespace AzureDesignStudio.Server.Services
                     subModel.ClientId.ToString(), subModel.ClientSecret);
                 var armClient = new ArmClient(credential, subscriptionId.ToString());
                 var subResource = await armClient.GetDefaultSubscriptionAsync();
-                var rg = (await subResource.GetResourceGroupAsync(request.ResourceGroupName))?.Value;
-                if (rg == null)
+                string location;
+                if (target.Kind == DeployScopeKind.ResourceGroup)
                 {
-                    response.StatusCode = StatusCodes.Status404NotFound;
-                    response.ErrorMessage = "Cannot find the resource group.";
-                    return response;
+                    var rg = (await subResource.GetResourceGroupAsync(request.ResourceGroupName))?.Value;
+                    if (rg == null)
+                    {
+                        response.StatusCode = StatusCodes.Status404NotFound;
+                        response.ErrorMessage = "Cannot find the resource group.";
+                        return response;
+                    }
+
+                    location = rg.Data.Location;
+                }
+                else
+                {
+                    // Outside a group the caller names the deployment location - TryBuildTargetScope
+                    // made it mandatory, so nothing here is ever guessed.
+                    location = request.Location;
                 }
 
                 var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), credential,
                     ArmEndpointSet.AzureCloud);
-                var preview = StagedPreviewPlanner.Select(stagedPlan, request.ArmTemplate, parametersJson);
+                var preview = StagedPreviewPlanner.Select(stagedPlan, target, request.ArmTemplate, parametersJson);
                 if (preview.Unsupported)
                 {
                     _logger.LogWarning("Staged plan cannot be previewed: {Caveat}", preview.Caveat);
@@ -241,11 +310,10 @@ namespace AzureDesignStudio.Server.Services
                     return response;
                 }
 
-                var summary = await new WhatIfClient(transport).WhatIfAsync(subscriptionId.ToString(),
-                    request.ResourceGroupName, rg.Data.Location, preview.TemplateJson, preview.ParametersJson, context.CancellationToken);
+                var summary = await new WhatIfClient(transport).WhatIfAsync(target, location,
+                    preview.TemplateJson, preview.ParametersJson, context.CancellationToken);
 
-                var plan = DeployPlanArtifact.Create(subscriptionId.ToString(), request.ResourceGroupName,
-                    request.ArmTemplate, parametersJson);
+                var plan = CreatePlanArtifact(target, request.ArmTemplate, parametersJson);
                 // Pre-deploy snapshot + inverse plan from the FULL before payloads (v2 11.4):
                 // it rides the live preview so approval persists the undo trail; the plan hash
                 // keeps its scope + template + parameters identity untouched.
@@ -275,8 +343,8 @@ namespace AzureDesignStudio.Server.Services
                 }
                 else
                 {
-                    token = _whatIfGate.Issue(subscriptionId.ToString(), request.ResourceGroupName,
-                        request.ArmTemplate, parametersJson, summary, plan.CanonicalJson, plan.PlanHash, revert.DocumentJson,
+                    token = _whatIfGate.Issue(target, request.ArmTemplate, parametersJson, summary,
+                        plan.CanonicalJson, plan.PlanHash, revert.DocumentJson,
                         GuardrailEnforcement.Targets(summary.Changes));
                 }
 
@@ -342,13 +410,29 @@ namespace AzureDesignStudio.Server.Services
             }
             var userId = new Guid(userIdClaim);
 
-            if (!Guid.TryParse(request.SubscriptionId, out var subscriptionId) || string.IsNullOrWhiteSpace(request.ResourceGroupName))
+            // The subscription id names the credential (the linked subscription) for every target -
+            // management-group and tenant deployments still authenticate through one. The scope
+            // itself comes from the target fields; the legacy default keeps old clients exact.
+            var monitorKind = request.Target switch
+            {
+                DeployTarget.Subscription => DeployScopeKind.Subscription,
+                DeployTarget.ManagementGroup => DeployScopeKind.ManagementGroup,
+                DeployTarget.Tenant => DeployScopeKind.Tenant,
+                _ => DeployScopeKind.ResourceGroup,
+            };
+            if (!Guid.TryParse(request.SubscriptionId, out var subscriptionId))
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "Subscription and resource group are required.";
+                response.ErrorMessage = "Subscription is required.";
                 return response;
             }
-
+            if (!DeployTargetScope.TryCreate(monitorKind, request.SubscriptionId, request.ResourceGroupName,
+                    request.ManagementGroupId, out var monitorTarget, out var monitorScopeError))
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = monitorScopeError;
+                return response;
+            }
             var subModel = await GetSubscriptionInfo(userId, subscriptionId);
             if (subModel == null)
             {
@@ -384,16 +468,39 @@ namespace AzureDesignStudio.Server.Services
                     }
                 }
 
-                var family = StagedDeploymentFamily.Collect(
-                    await ListScopeAsync($"{managementEndpoint}/subscriptions/{subscriptionId}/providers/Microsoft.Resources/deployments", "subscription"),
-                    await ListScopeAsync($"{managementEndpoint}/subscriptions/{subscriptionId}/resourcegroups/{request.ResourceGroupName}/providers/Microsoft.Resources/deployments", "resource group"));
+                // Listings for the approved target (v2 11.2): a resource-group target keeps the
+                // historic subscription + group pair (staged batches live at both endpoints);
+                // every other target lists exactly the scope it deploys at - including the
+                // management-group and tenant scopes that no subscription listing can show.
+                string DeploymentsAt(string scopePath) =>
+                    $"{managementEndpoint}{scopePath.Trim('/')}/providers/Microsoft.Resources/deployments";
+                var listings = monitorTarget.Kind switch
+                {
+                    DeployScopeKind.Subscription => new List<(StagedDeploymentScope Scope, string Url)>
+                        { (StagedDeploymentScope.Subscription, DeploymentsAt(monitorTarget.ScopePath)) },
+                    DeployScopeKind.ManagementGroup => new List<(StagedDeploymentScope Scope, string Url)>
+                        { (StagedDeploymentScope.ManagementGroup, DeploymentsAt(monitorTarget.ScopePath)) },
+                    DeployScopeKind.Tenant => new List<(StagedDeploymentScope Scope, string Url)>
+                        { (StagedDeploymentScope.Tenant, DeploymentsAt(monitorTarget.ScopePath)) },
+                    _ => new List<(StagedDeploymentScope Scope, string Url)>
+                    {
+                        (StagedDeploymentScope.Subscription, DeploymentsAt($"/subscriptions/{subscriptionId}")),
+                        (StagedDeploymentScope.ResourceGroup, DeploymentsAt($"/subscriptions/{subscriptionId}/resourceGroups/{request.ResourceGroupName}")),
+                    },
+                };
+
+                var scopeListings = new List<(StagedDeploymentScope Scope, IEnumerable<JsonElement> Items)>();
+                foreach (var (scope, url) in listings)
+                    scopeListings.Add((scope, await ListScopeAsync(url, scope.ToString())));
+
+                var family = StagedDeploymentFamily.Collect(scopeListings);
                 if (family.Count == 0)
                 {
                     response.StatusCode = StatusCodes.Status404NotFound;
                     response.ErrorMessage = scopeDiagnostics.Count > 0
-                        ? "No deployment could be confirmed for this subscription and resource group. "
+                        ? $"No deployment could be confirmed at {monitorTarget.ScopePath}. "
                           + string.Join(Environment.NewLine, scopeDiagnostics.Select(d => $"{d.Code}: {d.Message}"))
-                        : "No deployment is found for this subscription and resource group yet.";
+                        : $"No deployment is found at {monitorTarget.ScopePath} yet.";
                     return response;
                 }
 
@@ -405,7 +512,13 @@ namespace AzureDesignStudio.Server.Services
                     try
                     {
                         var entries = await transport.GetListAsync(
-                            member.OperationsUrl(managementEndpoint, subscriptionId.ToString(), request.ResourceGroupName, apiVersion),
+                            member.OperationsUrl(managementEndpoint, apiVersion, monitorTarget.BatchScopePath(member.Scope switch
+                            {
+                                StagedDeploymentScope.Subscription => DeployScopeKind.Subscription,
+                                StagedDeploymentScope.ManagementGroup => DeployScopeKind.ManagementGroup,
+                                StagedDeploymentScope.Tenant => DeployScopeKind.Tenant,
+                                _ => DeployScopeKind.ResourceGroup,
+                            })),
                             "value", context.CancellationToken);
                         var (operations, diagnostics) = DeploymentOperationsParser.ParsePages(entries.Select(entry => entry.GetRawText()));
                         foreach (var operation in operations)
@@ -567,8 +680,16 @@ namespace AzureDesignStudio.Server.Services
                 return;
             }
 
-            if (DeployScopePlanner.TryStageForApply(request.ArmTemplate, request.SubscriptionId, request.ResourceGroupName,
-                    out var stagedPlan, out var scopeErrors))
+            if (!TryBuildTargetScope(request, out var target, out var targetError))
+            {
+                _logger.LogWarning("Deployment target rejected before deploy: {Error}", targetError);
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = targetError;
+                await responseStream.WriteAsync(response);
+                return;
+            }
+
+            if (DeployScopePlanner.TryStageForApply(request.ArmTemplate, target, out var stagedPlan, out var scopeErrors))
             {
                 _logger.LogWarning("Staged plan blocked before deploy: {Errors}", scopeErrors);
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -602,8 +723,8 @@ namespace AzureDesignStudio.Server.Services
                 return;
             }
 
-            var subResource = await GetSubscriptionResource(userId, subscriptionId);
-            if (subResource == null)
+            var armClient = await GetArmClient(userId, subscriptionId);
+            if (armClient == null)
             {
                 _logger.LogWarning("No subscription is found.");
                 response.StatusCode = StatusCodes.Status404NotFound;
@@ -612,14 +733,26 @@ namespace AzureDesignStudio.Server.Services
                 return;
             }
 
-            var rg = (await subResource.GetResourceGroupAsync(request.ResourceGroupName))?.Value;
-            if (rg == null)
+            string location;
+            if (target.Kind == DeployScopeKind.ResourceGroup)
             {
-                _logger.LogWarning("{ResourceGroup} cannot be found.", request.ResourceGroupName);
-                response.StatusCode = StatusCodes.Status404NotFound;
-                response.ErrorMessage = "Cannot find the resource group.";
-                await responseStream.WriteAsync(response);
-                return;
+                var rg = (await (await armClient.GetDefaultSubscriptionAsync()).GetResourceGroupAsync(request.ResourceGroupName))?.Value;
+                if (rg == null)
+                {
+                    _logger.LogWarning("{ResourceGroup} cannot be found.", request.ResourceGroupName);
+                    response.StatusCode = StatusCodes.Status404NotFound;
+                    response.ErrorMessage = "Cannot find the resource group.";
+                    await responseStream.WriteAsync(response);
+                    return;
+                }
+
+                location = rg.Data.Location;
+            }
+            else
+            {
+                // Outside a group the caller names the deployment location - TryBuildTargetScope
+                // made it mandatory, so nothing here is ever guessed.
+                location = request.Location;
             }
 
             // Mutation gate [62]: a deploy runs only the exact plan a named principal approved from a
@@ -630,8 +763,7 @@ namespace AzureDesignStudio.Server.Services
             string planHash;
             try
             {
-                planHash = DeployPlanArtifact.Create(subscriptionId.ToString(), request.ResourceGroupName,
-                    request.ArmTemplate, parametersJson).PlanHash;
+                planHash = CreatePlanArtifact(target, request.ArmTemplate, parametersJson).PlanHash;
             }
             catch (Exception ex) when (ex is System.Text.Json.JsonException or ArgumentException)
             {
@@ -690,8 +822,8 @@ namespace AzureDesignStudio.Server.Services
                 await responseStream.WriteAsync(response);
                 return;
             }
-            var whatIfCheck = _whatIfGate.ValidateAndConsume(request.WhatIfToken, subscriptionId.ToString(),
-                request.ResourceGroupName, request.ArmTemplate, parametersJson,
+            var whatIfCheck = _whatIfGate.ValidateAndConsume(request.WhatIfToken, target,
+                request.ArmTemplate, parametersJson,
                 targets => GuardrailVeto(guardrailPolicy, targets));
             if (!whatIfCheck.IsOk)
             {
@@ -715,18 +847,25 @@ namespace AzureDesignStudio.Server.Services
             // Deploy the template. Transport and provisioning are separate concerns: the client
             // stream is best-effort, the ARM LRO is the only source of terminal truth.
             var batches = stagedPlan.Batches;
+            // Every batch rides the endpoint its approved target names: a resource-group target
+            // keeps the historic subscription/group pair, anything else submits at the target's own
+            // scope collection with the caller-named location (ARM needs one outside a group).
+            ArmDeploymentCollection DeploymentsFor(DeployScopeKind batchKind) =>
+                armClient.GetArmDeployments(new Azure.Core.ResourceIdentifier(target.BatchScopePath(batchKind)));
             if (batches.Count > 1)
             {
-                await RunStagedApplyAsync(batches, subResource.GetArmDeployments(), rg.GetArmDeployments(),
+                await RunStagedApplyAsync(batches, DeploymentsFor, target, location,
                     approval, subscriptionId.ToString(), request.ResourceGroupName, parametersJson,
                     previewEvidence, context.CancellationToken, response, responseStream);
                 return;
             }
 
-            await ExecuteBatchAsync(rg.GetArmDeployments(), WhatIfClient.DeploymentName, request.ArmTemplate,
+            await ExecuteBatchAsync(DeploymentsFor(batches[0].Kind), WhatIfClient.DeploymentName, request.ArmTemplate,
                 parametersJson, approval, subscriptionId.ToString(), request.ResourceGroupName,
                 previewEvidence, batchLabel: null, successStatus: "completed", consumesApproval: true,
-                cancellationToken: context.CancellationToken, response, responseStream);
+                cancellationToken: context.CancellationToken, response, responseStream,
+                location: batches[0].Kind == DeployScopeKind.ResourceGroup && target.Kind == DeployScopeKind.ResourceGroup ? null : location,
+                targetScope: target.ScopePath);
         }
         /// <summary>
         /// v2 plan 12.3: deploy the design as a deployment-stack under the same double gate as
@@ -1154,11 +1293,12 @@ namespace AzureDesignStudio.Server.Services
             ArmDeploymentCollection deployments, string deploymentName, string templateJson, string parametersJson,
             PlanApprovalModel approval, string subscriptionId, string resourceGroupName, string previewEvidence,
             string? batchLabel, string successStatus, bool consumesApproval, CancellationToken cancellationToken,
-            DeploymentResponse response, IServerStreamWriter<DeploymentResponse> responseStream)
+            DeploymentResponse response, IServerStreamWriter<DeploymentResponse> responseStream,
+            string? location = null, string? targetScope = null)
         {
             var applyId = Guid.NewGuid();
             _designContext.AdsPlanApplyEvents.Add(NewApplyEvent(applyId, approval, subscriptionId,
-                resourceGroupName, PlanApplyEventModel.Started, previewEvidence, batchLabel, deploymentName));
+                resourceGroupName, PlanApplyEventModel.Started, previewEvidence, batchLabel, deploymentName, targetScope));
             if (consumesApproval)
             {
                 _designContext.AdsPlanApprovals.Remove(approval);
@@ -1168,11 +1308,16 @@ namespace AzureDesignStudio.Server.Services
             _logger.LogInformation("Plan apply started hash={PlanHash} approver={ApprovedBy} target={Subscription}/{ResourceGroup} deployment={DeploymentName} applyId={ApplyId}",
                 approval.PlanHash, approval.ApprovedBy, subscriptionId, resourceGroupName, deploymentName, applyId);
 
-            var input = new ArmDeploymentContent(new ArmDeploymentProperties(ArmDeploymentMode.Incremental)
+            var properties = new ArmDeploymentProperties(ArmDeploymentMode.Incremental)
             {
                 Template = BinaryData.FromString(templateJson),
                 Parameters = BinaryData.FromString(parametersJson),
-            });
+            };
+            // Non-resource-group deployments have no implicit home region: ARM requires the
+            // deployment's own location, carried at the content level, not in the properties.
+            var input = new ArmDeploymentContent(properties);
+            if (location is not null)
+                input.Location = location;
 
             ArmOperation<ArmDeploymentResource> lro;
             try
@@ -1189,7 +1334,7 @@ namespace AzureDesignStudio.Server.Services
                     rejected ? PlanApplyEventModel.Failed : PlanApplyEventModel.OutcomeUnknown,
                     rejected ? $"submission refused: HTTP {ex.Status}: {ex.ErrorCode}"
                              : $"submission outcome unconfirmable: HTTP {ex.Status}: {ex.ErrorCode}",
-                    deploymentName);
+                    deploymentName, targetScope);
                 if (rejected)
                 {
                     response.StatusCode = StatusCodes.Status400BadRequest;
@@ -1218,7 +1363,7 @@ namespace AzureDesignStudio.Server.Services
             {
                 // The submission may still have reached ARM; the outcome is unknown, not failed.
                 await RecordApplyEventAsync(applyId, approval, subscriptionId, resourceGroupName,
-                    PlanApplyEventModel.OutcomeUnknown, $"submission outcome unconfirmable: {ex.GetType().Name}: {ex.Message}", deploymentName);
+                    PlanApplyEventModel.OutcomeUnknown, $"submission outcome unconfirmable: {ex.GetType().Name}: {ex.Message}", deploymentName, targetScope);
                 // Rethrowing would only reach a gRPC status the client maps to a generic error;
                 // the drawer awaits this stream and must hear the honest state instead.
                 _logger.LogError(ex, "Deployment submission failed unconfirmably for apply {ApplyId}", applyId);
@@ -1256,7 +1401,7 @@ namespace AzureDesignStudio.Server.Services
                         clientGone = true;
                         _logger.LogWarning(ex, "Deploy stream write failed for apply {ApplyId}; continuing ARM polling without a client", applyId);
                         await RecordApplyEventAsync(applyId, approval, subscriptionId, resourceGroupName,
-                            PlanApplyEventModel.TransportLost, $"client stream lost mid-deployment ({ex.GetType().Name}); ARM polling continues for the true outcome", deploymentName);
+                            PlanApplyEventModel.TransportLost, $"client stream lost mid-deployment ({ex.GetType().Name}); ARM polling continues for the true outcome", deploymentName, targetScope);
                     }
                 }
 
@@ -1274,7 +1419,7 @@ namespace AzureDesignStudio.Server.Services
                     if (++consecutivePollFailures >= MaxConsecutivePollFailures)
                     {
                         await RecordApplyEventAsync(applyId, approval, subscriptionId, resourceGroupName,
-                            PlanApplyEventModel.OutcomeUnknown, $"provisioning state unconfirmable after {consecutivePollFailures} consecutive status-query failures: HTTP {ex.Status}: {ex.ErrorCode}", deploymentName);
+                            PlanApplyEventModel.OutcomeUnknown, $"provisioning state unconfirmable after {consecutivePollFailures} consecutive status-query failures: HTTP {ex.Status}: {ex.ErrorCode}", deploymentName, targetScope);
                         try
                         {
                             response.StatusCode = StatusCodes.Status202Accepted;
@@ -1299,7 +1444,7 @@ namespace AzureDesignStudio.Server.Services
             await RecordApplyEventAsync(applyId, approval, subscriptionId, resourceGroupName,
                 succeeded ? PlanApplyEventModel.Completed : PlanApplyEventModel.Failed,
                 succeeded ? $"provisioningState={provisioningState}" : $"Deployment finished with provisioningState={provisioningState ?? "Unknown"}.",
-                deploymentName);
+                deploymentName, targetScope);
 
             if (!clientGone)
             {
@@ -1338,15 +1483,15 @@ namespace AzureDesignStudio.Server.Services
         /// sees batch markers between submissions and one plan-level terminal after the last batch.
         /// </summary>
         private async Task RunStagedApplyAsync(
-            IReadOnlyList<DeployScopeBatch> batches, ArmDeploymentCollection subscriptionDeployments,
-            ArmDeploymentCollection resourceGroupDeployments, PlanApprovalModel approval, string subscriptionId,
+            IReadOnlyList<DeployScopeBatch> batches, Func<DeployScopeKind, ArmDeploymentCollection> deploymentsFor,
+            DeployTargetScope target, string location, PlanApprovalModel approval, string subscriptionId,
             string resourceGroupName, string parametersJson, string previewEvidence, CancellationToken cancellationToken,
             DeploymentResponse response, IServerStreamWriter<DeploymentResponse> responseStream)
         {
             var total = batches.Count;
             var result = await StagedBatchRunner.RunAsync(batches,
                 async (batch, index) => await ExecuteBatchAsync(
-                    batch.Kind == DeployScopeKind.Subscription ? subscriptionDeployments : resourceGroupDeployments,
+                    deploymentsFor(batch.Kind),
                     $"{WhatIfClient.DeploymentName}-b{index + 1}",
                     batch.TemplateJson,
                     DeployScopePlanner.ParametersForBatch(batch.TemplateJson, parametersJson),
@@ -1354,7 +1499,11 @@ namespace AzureDesignStudio.Server.Services
                     batchLabel: $"Batch {index + 1}/{total} ({batch.Kind})",
                     successStatus: "batch-completed",
                     consumesApproval: index == 0,
-                    cancellationToken, response, responseStream),
+                    cancellationToken, response, responseStream,
+                    // Outside a resource group ARM needs the deployment object's location; inside one
+                    // the group's own location is implied and must not be overridden.
+                    location: batch.Kind == DeployScopeKind.ResourceGroup && target.Kind == DeployScopeKind.ResourceGroup ? null : location,
+                    targetScope: target.ScopePath),
                 onBatchStarted: async (batch, index) =>
                 {
                     try
@@ -1394,13 +1543,15 @@ namespace AzureDesignStudio.Server.Services
         private const int MaxConsecutivePollFailures = 5;
 
         private static PlanApplyEventModel NewApplyEvent(Guid applyId, PlanApprovalModel approval, string subscriptionId,
-            string resourceGroupName, string eventType, string? previewEvidence, string? detail, string? deploymentName = null) => new()
+            string resourceGroupName, string eventType, string? previewEvidence, string? detail, string? deploymentName = null,
+            string? targetScope = null) => new()
         {
             ApplyId = applyId,
             PlanHash = approval.PlanHash,
             PlanJson = approval.PlanJson,
             SubscriptionId = subscriptionId,
             ResourceGroupName = resourceGroupName,
+            TargetScope = targetScope,
             DeploymentName = deploymentName ?? WhatIfClient.DeploymentName,
             ApprovedBy = approval.ApprovedBy,
             ApprovedByUserId = approval.ApprovedByUserId,
@@ -1414,12 +1565,12 @@ namespace AzureDesignStudio.Server.Services
         };
 
         private async Task RecordApplyEventAsync(Guid applyId, PlanApprovalModel approval, string subscriptionId,
-            string resourceGroupName, string eventType, string? detail, string? deploymentName = null)
+            string resourceGroupName, string eventType, string? detail, string? deploymentName = null, string? targetScope = null)
         {
             try
             {
                 _designContext.AdsPlanApplyEvents.Add(NewApplyEvent(applyId, approval, subscriptionId,
-                    resourceGroupName, eventType, null, detail, deploymentName));
+                    resourceGroupName, eventType, null, detail, deploymentName, targetScope));
                 // The terminal event must land even when the caller's token is already cancelled
                 // (client disconnect); audit failures are logged loudly but never mask the outcome.
                 await _designContext.SaveChangesAsync(CancellationToken.None);

@@ -69,6 +69,12 @@ public record PlanApplyEventModel
     [StringLength(90, MinimumLength = 1)]
     public string ResourceGroupName { get; set; } = null!;
 
+    /// <summary>Canonical scope path the apply deployed to (v2 11.2): the exact ARM scope named by
+    /// the approved plan hash. Null on legacy rows - there the identity was SubscriptionId +
+    /// ResourceGroupName, which is still what those columns carry.</summary>
+    [StringLength(300)]
+    public string? TargetScope { get; set; }
+
     [StringLength(64, MinimumLength = 1)]
     public string DeploymentName { get; set; } = null!;
 

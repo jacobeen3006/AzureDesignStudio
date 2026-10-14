@@ -6,6 +6,8 @@ public enum StagedDeploymentScope
 {
     Subscription,
     ResourceGroup,
+    ManagementGroup,
+    Tenant,
 }
 
 /// <summary>
@@ -22,6 +24,19 @@ public sealed record StagedDeploymentMember(string Name, StagedDeploymentScope S
         $"{managementEndpoint}/subscriptions/{subscriptionId}" +
         (Scope == StagedDeploymentScope.ResourceGroup ? $"/resourcegroups/{resourceGroup}" : "") +
         $"/providers/Microsoft.Resources/deployments/{Name}/operations?api-version={apiVersion}";
+
+    /// <summary>
+    /// Operations endpoint at an arbitrary canonical scope path (v2 11.2): management-group and
+    /// tenant deployments live outside any subscription listing, so the monitor must read them
+    /// where they were created. <paramref name="scopePath"/> is the target's canonical path;
+    /// the tenant root ("/" or "") addresses the management endpoint directly.
+    /// </summary>
+    public string OperationsUrl(string managementEndpoint, string apiVersion, string scopePath)
+    {
+        var prefix = scopePath.Trim('/');
+        return $"{managementEndpoint}{(prefix.Length > 0 ? "/" + prefix : "")}" +
+            $"/providers/Microsoft.Resources/deployments/{Name}/operations?api-version={apiVersion}";
+    }
 }
 
 public static class StagedDeploymentFamily
@@ -32,10 +47,21 @@ public static class StagedDeploymentFamily
     /// scopes stays two members - they are distinct ARM deployments.
     /// </summary>
     public static IReadOnlyList<StagedDeploymentMember> Collect(
-        IEnumerable<JsonElement> subscriptionScopeEntries, IEnumerable<JsonElement> resourceGroupScopeEntries)
+        IEnumerable<JsonElement> subscriptionScopeEntries, IEnumerable<JsonElement> resourceGroupScopeEntries) =>
+        Collect(
+        [
+            (StagedDeploymentScope.Subscription, subscriptionScopeEntries),
+            (StagedDeploymentScope.ResourceGroup, resourceGroupScopeEntries),
+        ]);
+
+    /// <summary>
+    /// Merges one listing per scope the target deploys under (v2 11.2). Anchoring, ordering and
+    /// member identity work exactly as for the legacy two-scope overload.
+    /// </summary>
+    public static IReadOnlyList<StagedDeploymentMember> Collect(
+        IEnumerable<(StagedDeploymentScope Scope, IEnumerable<JsonElement> Entries)> listings)
     {
-        var members = Read(subscriptionScopeEntries, StagedDeploymentScope.Subscription)
-            .Concat(Read(resourceGroupScopeEntries, StagedDeploymentScope.ResourceGroup))
+        var members = listings.SelectMany(l => Read(l.Entries, l.Scope))
             .Distinct()
             .OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(m => m.Scope)

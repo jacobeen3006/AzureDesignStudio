@@ -57,6 +57,16 @@ message GetRgsResponse {
 	repeated string resource_group_name = 2;
 }
 
+// Approved deployment target (v2 11.2). RESOURCE_GROUP is the legacy default: old clients
+// sending no target keep deploying exactly as before. The target names the identity the plan
+// hash and what-if token bind to, so an approval never rides across scopes.
+enum DeployTarget {
+	DEPLOY_TARGET_RESOURCE_GROUP = 0;
+	DEPLOY_TARGET_SUBSCRIPTION = 1;
+	DEPLOY_TARGET_MANAGEMENT_GROUP = 2;
+	DEPLOY_TARGET_TENANT = 3;
+}
+
 message DeploymentRequest {
 	string subscription_id = 1;
 	string resource_group_name = 2;
@@ -64,6 +74,12 @@ message DeploymentRequest {
 	string parameters = 4;
 	string what_if_token = 5;
 	string plan_hash = 6;
+	// Target scope fields (v2 11.2): target defaults to RESOURCE_GROUP; management_group_id is
+	// required for MANAGEMENT_GROUP; location is required for every non-resource-group target
+	// (ARM needs a deployment location there).
+	DeployTarget target = 7;
+	string management_group_id = 8;
+	string location = 9;
 }
 
 message WhatIfResponse {
@@ -121,6 +137,11 @@ message DeploymentResponse {
 message DeploymentOperationsRequest {
 	string subscription_id = 1;
 	string resource_group_name = 2;
+	// Target the monitor must read (v2 11.2): the same scope the deployment was created under,
+	// or the operations listing comes back empty. Defaults to RESOURCE_GROUP for legacy clients.
+	DeployTarget target = 3;
+	string management_group_id = 4;
+	string location = 5;
 }
 
 message ResourceOperationRow {
