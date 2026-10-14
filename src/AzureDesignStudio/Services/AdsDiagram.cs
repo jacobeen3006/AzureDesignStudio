@@ -211,7 +211,7 @@ namespace AzureDesignStudio.Services
             UnselectAll();
         }
 
-        public Task<Rectangle?> BeforePrint(double margin = 50)
+        public Rectangle? BeforePrint(double margin = 50)
         {
             _savedContainer = Container;
             _savedPan = Pan;
@@ -239,7 +239,7 @@ namespace AzureDesignStudio.Services
                 UpdatePan(cx, cy);
             });
 
-            return Task.FromResult<Rectangle?>(page);
+            return page;
         }
 
         public void AfterPrint()

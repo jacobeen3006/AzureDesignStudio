@@ -78,7 +78,7 @@ public static class AdoptEngine
             {
                 var type = r.Type.Trim();
                 var mapped = KeyByTypeLazy.Value.TryGetValue(type, out var key);
-                return new Item(r with { Id = r.Id.TrimStart('/') }, mapped ? key : type, mapped);
+                return new Item(r with { Id = r.Id.TrimStart('/') }, mapped ? key! : type, mapped);
             })
             .Where(r => r.Id.Length > 0)
             // Determinism before anything positional: id-ordinal order fixes every grid slot.

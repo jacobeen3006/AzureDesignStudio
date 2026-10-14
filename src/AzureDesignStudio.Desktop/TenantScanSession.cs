@@ -20,6 +20,7 @@ public sealed class TenantScanSession(
     private CancellationTokenSource? cts;
 
     public WorkspaceScans Scans { get; } = new(db);
+    public TopologyPositions Positions { get; } = new(db);
 
     public bool Running { get; private set; }
     public bool Paused => control?.Paused == true;

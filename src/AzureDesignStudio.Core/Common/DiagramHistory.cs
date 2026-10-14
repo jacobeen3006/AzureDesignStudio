@@ -143,6 +143,7 @@ namespace AzureDesignStudio.Core.Common
         /// </summary>
         public void RecordChildMembership(GroupModel group, NodeModel child, bool added, Point? previousPosition = null)
         {
+            ArgumentNullException.ThrowIfNull(group);
             if (!CanRecord)
                 return;
 
@@ -198,7 +199,13 @@ namespace AzureDesignStudio.Core.Common
 
         private void Push(Command command)
         {
-            _gesture?.Add(command);
+            // Library behaviors (e.g. DragNewLinkBehavior) can fire Adds after the
+            // pointer-up that closed our gesture window; such events are their own
+            // atomic commands and must reach the undo stack directly.
+            if (_gesture is { } gesture)
+                gesture.Add(command);
+            else
+                AddToUndo(command);
         }
 
         private void AddToUndo(Command command)

@@ -10,12 +10,14 @@ using Blazor.Diagrams.Core.Models;
 using Blazor.Diagrams.Core.Models.Base;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.JSInterop;
 using System.Net.Http.Json;
 
 namespace AzureDesignStudio.Components
 {
     public partial class DiagramPanel : IDisposable
     {
+        private DotNetObjectReference<DiagramPanel>? dropRef;
         private AdsDiagram diagram = null!;
         protected override void OnInitialized()
         {
@@ -36,6 +38,16 @@ namespace AzureDesignStudio.Components
             diagram.Snapping.GuideChanged += HandleGuideChanged;
         }
 
+        protected override async Task OnAfterRenderAsync(bool firstRender)
+        {
+            await base.OnAfterRenderAsync(firstRender);
+            if (firstRender)
+            {
+                dropRef = DotNetObjectReference.Create(this);
+                await JS.InvokeVoidAsync("AdsDropZone.init", dropRef, ".ads-diagram-wrapper");
+            }
+        }
+
         public void Dispose()
         {
             diagram.History.Detach();
@@ -44,6 +56,7 @@ namespace AzureDesignStudio.Components
             diagram.PointerDown -= HandlePointerDown;
             diagram.PointerUp -= HandlePointerUp;
             diagram.SelectionChanged -= HandleSelectionChanged;
+            dropRef?.Dispose();
         }
 
         #region Drag & Drop
@@ -64,12 +77,11 @@ namespace AzureDesignStudio.Components
                && node is NodeModel n && n.Group == null)
             {
                 var group = GetOverlappedGroup(n);
-                var (result, _) = an.IsDrappable(group!);
-                if (result)
+                if (group is not null && an.IsDrappable(group).Item1)
                 {
                     var previousPosition = n.Position;
-                    AddNodeToGroup(n, group!);
-                    diagram.History.RecordChildMembership(group!, n, added: true, previousPosition);
+                    if (AddNodeToGroup(n, group))
+                        diagram.History.RecordChildMembership(group, n, added: true, previousPosition);
                 }
             }
 
@@ -102,15 +114,26 @@ namespace AzureDesignStudio.Components
                 .FirstOrDefault(n => n != node);
         }
 
-        private async Task HandleDrop(DragEventArgs e)
+        [JSInvokable]
+        public Task HandleDropAtAsync(double clientX, double clientY, string key) => InvokeAsync(async () =>
+        {
+            await DropStencilAtAsync(key, clientX, clientY);
+            StateHasChanged();
+        });
+
+        private async Task DropStencilAtAsync(string key, double clientX, double clientY)
         {
             try
             {
-                var position = diagram.GetRelativeMousePoint(e.ClientX, e.ClientY);
-                var stencil = adsContext.AllStencils.Single(s => s.Key == adsContext.DraggedStencilKey);
+                var stencil = adsContext.AllStencils.SingleOrDefault(s => s.Key == key);
+                if (stencil is null)
+                {
+                    return;
+                }
+                var position = diagram.GetRelativeMousePoint(clientX, clientY);
                 if (stencil.Category != Models.StencilCategory.Gallery)
                 {
-                    var node = DataModelFactory.CreateNodeModelFromKey(adsContext.DraggedStencilKey, stencil.Name, stencil.IconPath);
+                    var node = DataModelFactory.CreateNodeModelFromKey(key, stencil.Name, stencil.IconPath);
                     if (node is UnknownNodeModel)
                     {
                         messageService.Info($"'{stencil.Name}' has no editor implementation in this version.");

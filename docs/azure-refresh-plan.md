@@ -143,14 +143,9 @@
 
 **gRPC packages 2.52.0 → 2.66.x** — minimal breaking changes. The gRPC-Web middleware + protobuf wire format is stable. Update all Grpc.* packages in lockstep.
 
-### 3.8 Blazor Diagrams Submodule
+### 3.8 Blazor.Diagrams: submodule → NuGet (done)
 
-**Commit:** `a36f375be58268f39ecf326ab0c960a78f75c322`
-
-- Custom fork of Blazor.Diagrams
-- Targets .NET 7 (`net7.0`)
-- Must be updated to target .NET 8
-- Check if upstream Blazor.Diagrams has updated; fork may need manual TFM change + any API fixes
+The `src/Blazor.Diagrams` fork submodule, `.gitmodules` and the net10 patch are removed. Diagrams come from the `Z.Blazor.Diagrams` 3.0.4.1 NuGet package. Fork-only behavior lives in `AdsDiagram` (delete/print/shortcuts/undo-redo) and `AzurePort`/`VirtualNetworkPort` (`CanAttachTo` link rules); stencil→canvas drops use the `AdsDropZone` seam in `wwwroot/js/ads.js`.
 
 ---
 
@@ -174,7 +169,7 @@ The project uses `<PublishTrimmed>true</PublishTrimmed>` with trimeroot assembli
 
 ### Phase 1: Foundation (parallel)
 - [ ] Update all `.csproj` TFM → `net8.0`
-- [ ] Update Blazor.Diagrams submodule → `net8.0`
+- [x] ~~Update Blazor.Diagrams submodule → `net8.0`~~ (moot: submodule removed in the .NET 10 era; diagram engine is the `Z.Blazor.Diagrams` 3.0.4.1 NuGet package)
 - [ ] Bump all ASP.NET Core packages → `8.0.x`
 - [ ] Bump all EF Core packages → `8.0.x`
 - [ ] Bump all gRPC packages → `2.66.x`

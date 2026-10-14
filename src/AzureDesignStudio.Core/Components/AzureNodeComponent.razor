@@ -7,7 +7,8 @@
 @inject ILogger<AzureNodeComponent> logger
 
 <div class="ads-azure-node @(Node.Group != null ? "grouped" : "") @(Node.Selected ? "selected" : "")">
-    <img src="@(configuration["ResourceRoot"] + Node.ImagePath)" alt=@Node.Name />
+    @* draggable=false: images default to native drag, which would hijack pointer gestures (node move/link) into an HTML5 image drag. *@
+    <img src="@(configuration["ResourceRoot"] + Node.ImagePath)" alt=@Node.Name draggable="false" />
     <div class="ads-azure-node-label">@Node.Name</div>
     @if (!Node.IsValid)
     {

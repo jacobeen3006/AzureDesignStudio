@@ -47,7 +47,6 @@ namespace AzureDesignStudio.Services
             options.Zoom.Inverse = false; // Whether to inverse the direction of the zoom when using the wheel
             return options;
         }
-        public string DraggedStencilKey { get; set; } = string.Empty;
         public string CurrentDesignName { get; set; } = null!;
 
         public IReadOnlyList<StencilModel> AllStencils = null!;

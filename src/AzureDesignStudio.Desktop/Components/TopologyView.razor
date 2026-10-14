@@ -1,0 +1,376 @@
+@using System.Net
+@using System.Text.Json
+@using AzureDesignStudio.Discovery.Analysis
+@using AzureDesignStudio.Discovery.Inventory
+@using AzureDesignStudio.Workspace
+@using AntDesign
+
+@* Read-only topology (plan 8.3): derives the graph from scan snapshots, draws canonical
+   nested frames, persists drag positions by ARM id, inspects the selected resource.
+   Drag works in svg units: css size = layout size x scale, so 1 unit = scale px. *@
+
+@if (layout is null)
+{
+    <span style="color:#999">No resources to draw.</span>
+}
+else
+{
+    <div style="display:flex;gap:10px;">
+        <div style="flex:1;min-width:0;">
+            <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;flex-wrap:wrap;">
+                <select @bind="filterSub" @bind:after="RebuildAsync">
+                    <option value="">all subscriptions</option>
+                    @foreach (var s in subs)
+                    {
+                        <option value="@s">@s</option>
+                    }
+                </select>
+                <select @bind="filterRg" @bind:after="RebuildAsync">
+                    <option value="">all resource groups</option>
+                    @foreach (var r in rgs)
+                    {
+                        <option value="@r">@r</option>
+                    }
+                </select>
+                <select @bind="filterProvider" @bind:after="RebuildAsync">
+                    <option value="">all providers</option>
+                    @foreach (var p in providers)
+                    {
+                        <option value="@p">@p</option>
+                    }
+                </select>
+                <input style="width:130px;padding:2px 4px;" placeholder="search" @bind="filterSearch" @bind:after="RebuildAsync" />
+                <Button Size="ButtonSize.Small" OnClick="@(async () => { useSaved = false; await InvokeAsync(RebuildAsync); })">Auto layout</Button>
+                <Button Size="ButtonSize.Small" OnClick="@(() => { scale = Math.Clamp(scale * 1.25, 0.2, 3); })">+</Button>
+                <Button Size="ButtonSize.Small" OnClick="@(() => { scale = Math.Clamp(scale / 1.25, 0.2, 3); })">−</Button>
+                <span style="color:#999;font-size:12px;">@(layout.Nodes.Count) resources · @visibleEdgeCount links · drag to move, wheel to zoom</span>
+            </div>
+
+            <div style="overflow:auto;border:1px solid #f0f0f0;height:min(560px,60vh);">
+                <svg width="@($"{layout.Width * scale:0.##}")" height="@($"{layout.Height * scale:0.##}")"
+                     viewBox="0 0 @($"{layout.Width:0.#}") @($"{layout.Height:0.#}")"
+                     style="display:block;touch-action:none;background:#fbfbfd;"
+                     @onwheel="ZoomAsync" @onpointermove="PointerMoveAsync" @onpointerup="PointerUpAsync">
+                    @foreach (var c in layout.Containers)
+                    {
+                        <rect x="@c.X" y="@c.Y" width="@c.W" height="@c.H" rx="10"
+                              fill="@FrameFill(c.Id)" stroke="@FrameStroke(c.Id)" stroke-width="1.5"
+                              stroke-dasharray="@(IsLane(c.Id) ? "6 4" : null)" opacity="0.9" />
+                        @((MarkupString)$"<text x=\"{c.X + 10:0.#}\" y=\"{c.Y + 20:0.#}\" font-size=\"13\" font-weight=\"600\" fill=\"#555\">{Enc(Short(c.Label, 46))}</text>")
+                    }
+                    @foreach (var e in graph!.Edges)
+                    {
+                        if (!Pos(e.From, out var a) || !Pos(e.To, out var b))
+                        {
+                            continue;
+                        }
+                        <line x1="@(a.X + NodeW / 2)" y1="@(a.Y + NodeH / 2)" x2="@(b.X + NodeW / 2)" y2="@(b.Y + NodeH / 2)"
+                              stroke="@EdgeColor(e.Kind)" stroke-width="1.4" opacity="0.75" />
+                    }
+                    @foreach (var n in layout.Nodes)
+                    {
+                        var (x, y) = PosOr(n);
+                        var stroke = Outline(n.Node.Id);
+                        <g style="cursor:grab" @onpointerdown="@(ev => PointerDownAsync(n, ev))">
+                            @if (drag?.NodeId == n.Node.Id)
+                            {
+                                <rect x="@(x - 2)" y="@(y - 2)" width="@(NodeW + 4)" height="@(NodeH + 4)" rx="9"
+                                      fill="none" stroke="#1677ff" stroke-width="2" />
+                            }
+                            <rect x="@x" y="@y" width="@NodeW" height="@NodeH" rx="7"
+                                  fill="@(n.Node.External ? "#f5f5f5" : "#ffffff")"
+                                  stroke="@stroke" stroke-width="1.4"
+                                  stroke-dasharray="@(n.Node.External ? "5 3" : null)" />
+                            @((MarkupString)$"<text x=\"{x + 38:0.#}\" y=\"{y + 21:0.#}\" font-size=\"12.5\" font-weight=\"600\" fill=\"#222\">{Enc(Short(n.Node.Name, 21))}</text>")
+                            @((MarkupString)$"<text x=\"{x + 38:0.#}\" y=\"{y + 38:0.#}\" font-size=\"10.5\" fill=\"#888\">{Enc(Short(n.Node.Type, 28))}</text>")
+                        </g>
+                    }
+                </svg>
+            </div>
+            <div style="font-size:11px;color:#aaa;margin-top:4px;">
+                links: @foreach (var k in Enum.GetValues<TopologyEdgeKind>())
+                {
+                    <span style="margin-right:10px;"><span style="color:@EdgeColor(k)">■</span> @k</span>
+                }
+            </div>
+        </div>
+
+        @if (selected is { } node)
+        {
+            <div style="width:300px;flex:none;border:1px solid #f0f0f0;padding:10px;overflow:auto;max-height:min(640px,68vh);">
+                <div style="display:flex;justify-content:space-between;align-items:start;">
+                    <b>@node.Name</b>
+                    <a style="cursor:pointer;color:#999;" @onclick="@(() => selected = null)">✕</a>
+                </div>
+                <div style="color:#888;font-size:12px;">@node.Type</div>
+                @if (node.External)
+                {
+                    <Tag Color="@("orange")">outside scanned scope</Tag>
+                }
+                <div style="font-size:12px;margin:6px 0;word-break:break-all;color:#666;">@node.Id</div>
+
+                @if (itemsById.TryGetValue(node.Id, out var item))
+                {
+                    <div style="font-size:12px;color:#666;">@item.Location · @item.ResourceGroup</div>
+                    @if (item.Tags.Count > 0)
+                    {
+                        <h5 style="margin:8px 0 2px;">Tags</h5>
+                        <table style="width:100%;font-size:12px;">
+                            @foreach (var (k, v) in item.Tags)
+                            {
+                                <tr><td style="color:#888;">@k</td><td>@v</td></tr>
+                            }
+                        </table>
+                    }
+                    <h5 style="margin:8px 0 2px;">Properties</h5>
+                    <pre style="max-height:220px;overflow:auto;background:#fafafa;padding:6px;font-size:11px;">@Pretty(item)</pre>
+                    <a href="@($"https://portal.azure.com#@/resource{item.Id}")" target="_blank" rel="noopener">Open in portal</a>
+                }
+                else
+                {
+                    <div style="color:#999;font-size:12px;">Referenced by scanned resources but not included in this scan - widen the scope to inspect it.</div>
+                }
+
+                <h5 style="margin:8px 0 2px;">Connections</h5>
+                @foreach (var e in graph!.Edges.Where(e => e.From == node.Id || e.To == node.Id))
+                {
+                    var other = e.From == node.Id ? e.To : e.From;
+                    <div style="font-size:12px;border-bottom:1px solid #fafafa;padding:2px 0;">
+                        <span style="color:@EdgeColor(e.Kind)">■</span>
+                        <b>@KindWord(e.Kind)</b> @NameOf(other)
+                        @if (e.Detail is { Length: > 0 } d)
+                        {
+                            <span style="color:#999;"> · @d</span>
+                        }
+                    </div>
+                }
+                @if (!graph.Edges.Any(e => e.From == node.Id || e.To == node.Id))
+                {
+                    <div style="color:#999;font-size:12px;">No derived connections.</div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<InventoryItem> Items { get; set; } = [];
+    [Parameter, EditorRequired] public TopologyPositions Positions { get; set; } = null!;
+    /// <summary>Ids that changed or appeared since the previous scan (8.4 rescan diff).</summary>
+    [Parameter] public IReadOnlySet<string>? ChangedIds { get; set; }
+
+    private const double NodeW = TopologyLayout.NodeW, NodeH = TopologyLayout.NodeH;
+
+    private TopologyGraph? graph;
+    private TopologyLayoutResult? layout;
+    private Dictionary<string, InventoryItem> itemsById = new(StringComparer.OrdinalIgnoreCase);
+
+    private string filterSub = "", filterRg = "", filterProvider = "", filterSearch = "";
+    private bool useSaved = true;
+    private double scale = 1;
+    private TopologyNode? selected;
+    private Dictionary<string, (double X, double Y)> live = new(StringComparer.OrdinalIgnoreCase);
+    private (string NodeId, double LastX, double LastY)? drag;
+
+    private IReadOnlyList<string> subs = [];
+    private IReadOnlyList<string> rgs = [];
+    private IReadOnlyList<string> providers = [];
+    private int visibleEdgeCount;
+
+    protected override Task OnParametersSetAsync() => RebuildAsync();
+
+    private async Task RebuildAsync()
+    {
+        itemsById = Items.GroupBy(i => i.Id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        subs = Items.Select(i => i.SubscriptionId).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList();
+        providers = Items.Select(i => i.ProviderNamespace).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList();
+        rgs = Items.Where(i => filterSub.Length == 0 || i.SubscriptionId == filterSub)
+            .Select(i => i.ResourceGroup).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList();
+
+        var visible = Items.Where(MatchesFilter).ToList();
+        graph = visible.Count == 0 ? null : TopologyDeriver.Derive(visible);
+        if (graph is null)
+        {
+            layout = null;
+            selected = null;
+            return;
+        }
+
+        var saved = useSaved ? (await Positions.GetAllAsync())
+            .ToDictionary(kv => kv.Key, kv => new TopologyLayout.SavedPos(kv.Value.ContainerId, kv.Value.X, kv.Value.Y))
+            : null;
+        layout = TopologyLayout.Layout(graph, saved);
+        live = [];
+        var nodeIds = new HashSet<string>(layout.Nodes.Select(n => n.Node.Id), StringComparer.OrdinalIgnoreCase);
+        visibleEdgeCount = graph.Edges.Count(e => nodeIds.Contains(e.From) && nodeIds.Contains(e.To));
+        if (selected is { } sel && !nodeIds.Contains(sel.Id))
+        {
+            selected = null;
+        }
+    }
+
+    private bool MatchesFilter(InventoryItem i) =>
+        (filterSub.Length == 0 || i.SubscriptionId == filterSub) &&
+        (filterRg.Length == 0 || i.ResourceGroup == filterRg) &&
+        (filterProvider.Length == 0 || i.ProviderNamespace == filterProvider) &&
+        (filterSearch.Length == 0 ||
+         i.Name.Contains(filterSearch, StringComparison.OrdinalIgnoreCase) ||
+         i.Id.Contains(filterSearch, StringComparison.OrdinalIgnoreCase));
+
+    // ---- interaction: css px per svg unit == scale (svg css size = layout size x scale)
+
+    private Task ZoomAsync(WheelEventArgs e)
+    {
+        scale = Math.Clamp(scale * Math.Pow(1.0015, -e.DeltaY), 0.2, 3);
+        return Task.CompletedTask;
+    }
+
+    private Task PointerDownAsync(PlacedNode n, PointerEventArgs e)
+    {
+        drag = (n.Node.Id, e.ClientX, e.ClientY);
+        return Task.CompletedTask;
+    }
+
+    private async Task PointerUpAsync()
+    {
+        if (drag is not { } d)
+        {
+            return;
+        }
+
+        drag = null;
+        var moved = live.TryGetValue(d.NodeId, out var pos);
+        if (layout?.Nodes.FirstOrDefault(n => n.Node.Id == d.NodeId) is not { } n)
+        {
+            return;
+        }
+
+        if (!moved)
+        {
+            selected = n.Node; // a click without movement inspects
+            return;
+        }
+
+        // persist local to the frame the node sits in (a container-node persists against its PARENT box)
+            var frameId = n.Containers.Count == 0 ? null
+                : n.Containers[0] == n.Node.Id && n.Containers.Count > 1 ? n.Containers[1] : n.Containers[0];
+            var frame = frameId is not null && layout.ContainersById.TryGetValue(frameId, out var f)
+                ? f
+                : layout.Containers.First(c => c.Parent is null);
+        await Positions.SaveAsync(n.Node.Id, frame.Id, pos.X - frame.X, pos.Y - frame.Y);
+    }
+
+    // svg-level pointer move updates live coordinates while a drag is active
+    private Task PointerMoveAsync(PointerEventArgs e)
+    {
+        if (drag is not { } d || layout?.Nodes.FirstOrDefault(n => n.Node.Id == d.NodeId) is not { } n)
+        {
+            return Task.CompletedTask;
+        }
+
+        var dx = (e.ClientX - d.LastX) / scale;
+        var dy = (e.ClientY - d.LastY) / scale;
+        if (Math.Abs(dx) < 0.5 && Math.Abs(dy) < 0.5)
+        {
+            return Task.CompletedTask;
+        }
+
+        var (x, y) = PosOr(n);
+        live[d.NodeId] = (x + dx, y + dy);
+        drag = (d.NodeId, e.ClientX, e.ClientY);
+        return Task.CompletedTask;
+    }
+
+    // ---- drawing helpers
+
+    private (double X, double Y) PosOr(PlacedNode n) => live.TryGetValue(n.Node.Id, out var p) ? p : (n.X, n.Y);
+
+    private bool Pos(string id, out (double X, double Y) p)
+    {
+        var n = layout?.Nodes.FirstOrDefault(x => x.Node.Id == id);
+        if (n is null)
+        {
+            p = default;
+            return false;
+        }
+
+        p = PosOr(n);
+        return true;
+    }
+
+    private string Outline(string id) =>
+        ChangedIds?.Contains(id) == true ? "#fa8c16" : "#d9d9d9";
+
+    private static bool IsLane(string containerId) => containerId == TopologyLayout.ExternalLane;
+
+    private static string FrameFill(string id) => id switch
+    {
+        TopologyLayout.ExternalLane => "#fafafa",
+        _ when id.StartsWith("sub:", StringComparison.Ordinal) => "#f0f5ff",
+        _ when id.StartsWith("rg:", StringComparison.Ordinal) => "#fff7e6",
+        _ => "#f6ffed",
+    };
+
+    private static string FrameStroke(string id) => id switch
+    {
+        TopologyLayout.ExternalLane => "#bfbfbf",
+        _ when id.StartsWith("sub:", StringComparison.Ordinal) => "#adc6ff",
+        _ when id.StartsWith("rg:", StringComparison.Ordinal) => "#ffd591",
+        _ => "#b7eb8f",
+    };
+
+    private static string EdgeColor(TopologyEdgeKind kind) => kind switch
+    {
+        TopologyEdgeKind.PeersWith => "#1677ff",
+        TopologyEdgeKind.InSubnet => "#52c41a",
+        TopologyEdgeKind.ProtectedBy => "#eb2f96",
+        TopologyEdgeKind.LoadBalances => "#fa8c16",
+        TopologyEdgeKind.ConnectsTo => "#722ed1",
+        TopologyEdgeKind.HostedIn => "#13c2c2",
+        TopologyEdgeKind.RoutesVia => "#a0d911",
+        TopologyEdgeKind.DiagnosticsTo => "#8c8c8c",
+        TopologyEdgeKind.AttachedTo => "#faad14",
+        _ => "#595959",
+    };
+
+    private static string KindWord(TopologyEdgeKind kind) => kind switch
+    {
+        TopologyEdgeKind.Uses => "uses",
+        TopologyEdgeKind.AttachedTo => "attached to",
+        TopologyEdgeKind.InSubnet => "in subnet",
+        TopologyEdgeKind.ProtectedBy => "guarded by",
+        TopologyEdgeKind.PeersWith => "peers with",
+        TopologyEdgeKind.LoadBalances => "balanced by",
+        TopologyEdgeKind.ConnectsTo => "private endpoint",
+        TopologyEdgeKind.HostedIn => "hosted in",
+        TopologyEdgeKind.RoutesVia => "routes via",
+        TopologyEdgeKind.DiagnosticsTo => "diagnostics to",
+        _ => kind.ToString(),
+    };
+
+    private static string IconOf(string type)
+    {
+        var ns = type.Contains('/') ? type[..type.IndexOf('/')] : type;
+        return ns switch
+        {
+            "Microsoft.Network" or "Microsoft.NetworkFunction" or "Microsoft.Cdn" => "assets/icons/networking.svg",
+            "Microsoft.Storage" => "assets/icons/storage.svg",
+            "Microsoft.Sql" or "Microsoft.DBforMySQL" or "Microsoft.DBforPostgreSQL" or "Microsoft.DocumentDB"
+                or "Microsoft.Cache" or "Microsoft.AppConfiguration" => "assets/icons/database.svg",
+            "Microsoft.Compute" or "Microsoft.Web" or "Microsoft.App" or "Microsoft.ContainerInstance"
+                or "Microsoft.ContainerService" or "Microsoft.DesktopVirtualization" => "assets/icons/compute.svg",
+            _ => "assets/icons/others.svg",
+        };
+    }
+
+    private static string Short(string s, int max) => s.Length <= max ? s : s[..(max - 1)] + "…";
+
+    private static string Enc(string s) => WebUtility.HtmlEncode(s);
+
+    private static string NameOf(string id) => id.Contains('/') ? id[(id.LastIndexOf('/') + 1)..] : id;
+
+    private static string Pretty(InventoryItem item) => item.Raw is { } raw
+        ? JsonSerializer.Serialize(raw, new JsonSerializerOptions { WriteIndented = true })
+        : "{}";
+}

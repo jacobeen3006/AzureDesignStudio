@@ -14,7 +14,7 @@ namespace AzureDesignStudio.Core.Tests
         public NetworkTests() : base() { }
 
         [Fact]
-        public async void VnetTest()
+        public async Task VnetTest()
         {
             var armTemplate = new ArmTemplate();
 

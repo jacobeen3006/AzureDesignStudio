@@ -22,7 +22,7 @@ public class TopologyLayoutTests
     private static InventoryItem Item(string id, string type, string? props = null) =>
         new(id, id.Split('/')[^1], type, "westeurope",
             id.Contains("/resourceGroups/", StringComparison.OrdinalIgnoreCase)
-                ? id.Split('/')[3] : null,
+                ? id.Split('/')[3] : string.Empty,
             id.Split('/')[2],
             new Dictionary<string, string>(),
             props is null ? null : System.Text.Json.JsonDocument.Parse(props).RootElement.Clone());

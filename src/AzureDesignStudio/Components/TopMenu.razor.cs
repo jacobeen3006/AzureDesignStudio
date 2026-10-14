@@ -39,7 +39,9 @@ namespace AzureDesignStudio.Components
                     break;
                 case "scan":
                     if (features.OpenTenantScan is { } openScan)
-                        await openScan(Services);
+                    {
+                        await openScan(Services!);
+                    }
                     break;
                 default:
                     {
@@ -275,7 +277,7 @@ namespace AzureDesignStudio.Components
 
         private async Task InvokePrintJS()
         {
-            var bound = await adsContext.Diagram.BeforePrint();
+            var bound = adsContext.Diagram.BeforePrint();
             
             try
             {

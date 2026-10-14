@@ -7,8 +7,9 @@
 @inject ModalService modalService
 @inject IHttpClientFactory _clientFactory
 @inject IMapper _mapper
+@inject IJSRuntime JS
 
-<div class="ads-diagram-wrapper" ondragover="event.preventDefault();" @ondragover:preventDefault @ondrop="HandleDrop">
+<div class="ads-diagram-wrapper" ondragover="event.preventDefault();" ondrop="event.preventDefault();">
     <CascadingValue Value="@diagram">
         <div class="ads-diagram-container">
             <DiagramCanvas Class="ads-diagram-canvas"></DiagramCanvas>

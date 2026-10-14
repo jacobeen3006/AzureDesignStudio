@@ -9,7 +9,7 @@
 <div class="@Group.CssClassName" style="@Group.CssStyle">
     @if (!string.IsNullOrEmpty(Group.ImagePath))
     {
-        <img src="@(configuration["ResourceRoot"] + Group.ImagePath)" alt=@Group.Name />
+        <img src="@(configuration["ResourceRoot"] + Group.ImagePath)" alt=@Group.Name draggable="false" />
     }
     <span class="title">@Group.Name</span>
     @if (!Group.IsValid)

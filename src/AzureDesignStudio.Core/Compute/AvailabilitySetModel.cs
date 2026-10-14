@@ -73,7 +73,8 @@ namespace AzureDesignStudio.Core.Compute
             if (overlappedGroup is not null)
                 return (false, $"{ServiceName} is a top-level resource and cannot be placed inside another group.");
 
-            return base.IsDrappable(overlappedGroup);
+            // Canvas drop (no container) — same outcome as the base's null path.
+            return (true, string.Empty);
         }
 
         public override IList<ResourceBase> GetArmResources()

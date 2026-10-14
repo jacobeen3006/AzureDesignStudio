@@ -14,7 +14,7 @@
 
 <div style="padding:0 4px;">
     <div style="display:flex;gap:8px;margin-bottom:12px;">
-        @foreach (var (key, label) in new[] { ("scan", "Scan"), ("browse", "Inventory"), ("report", "Report") })
+        @foreach (var (key, label) in new[] { ("scan", "Scan"), ("browse", "Inventory"), ("topology", "Topology"), ("report", "Report") })
         {
             <Button Type="@(activeTab == key ? ButtonType.Primary : ButtonType.Default)"
                     Size="ButtonSize.Small" OnClick="@(() => SwitchTabAsync(key))">@label</Button>
@@ -192,6 +192,25 @@
             }
         }
     }
+    else if (activeTab == "topology")
+    {
+        <div style="margin-bottom:8px;">
+            <select @bind="topoScanId" @bind:after="LoadTopologyAsync">
+                @foreach (var scan in completed)
+                {
+                    <option value="@scan.Id">@(scan.StartedAt.LocalDateTime.ToString("dd.MM HH:mm")) · @scan.Scope · @scan.ResourceCount rows</option>
+                }
+            </select>
+        </div>
+        @if (topoScanId is null || topoItems.Count == 0)
+        {
+            <span>@(completed.Count == 0 ? "No completed scans yet." : "This scan has no snapshot rows.")</span>
+        }
+        else
+        {
+            <TopologyView Items="topoItems" Positions="Session.Positions" ChangedIds="topoChanged" />
+        }
+    }
     else if (reportScan is null)
     {
         <span>No completed scan to analyze yet - run one first.</span>
@@ -251,6 +270,10 @@
     private List<InventoryItem> browseItems = [];
     private InventoryFacets? facets;
 
+    private string? topoScanId;
+    private List<InventoryItem> topoItems = [];
+    private IReadOnlySet<string>? topoChanged;
+
     private ScanRecord? reportScan;
     private List<InventoryItem> reportItems = [];
     private IReadOnlyList<AnalysisFinding> reportFindings = [];
@@ -263,6 +286,16 @@
     {
         Session.StateChanged += OnSessionChanged;
         await RefreshAsync();
+        loading = false;
+    }
+
+    // Live subscription listing can block on interactive sign-in; run it after the
+    // first render so the drawer opens immediately (history/report tabs usable) and
+    // the list fills in once the token broker resolves.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
         try
         {
             subscriptions = await Session.GetSubscriptionsAsync();
@@ -270,7 +303,7 @@
                 selected.Add(sub.SubscriptionId);
         }
         catch (Exception e) { loadError = e.Message; }
-        loading = false;
+        StateHasChanged();
     }
 
     private void OnSessionChanged() => InvokeAsync(async () =>
@@ -290,6 +323,11 @@
     {
         activeTab = key;
         if (key == "report" && reportScan is null) await LoadReportAsync();
+        if (key == "topology" && topoScanId is null)
+        {
+            topoScanId = completed.FirstOrDefault()?.Id;
+            await LoadTopologyAsync();
+        }
     }
 
     private async Task LoadReportAsync()
@@ -334,6 +372,45 @@
         facets = InventoryFacets.From(browseItems);
         browseOwner = null;
         expandedId = null;
+    }
+
+    private async Task LoadTopologyAsync()
+    {
+        topoChanged = null;
+        if (topoScanId is null)
+        {
+            topoItems = [];
+            return;
+        }
+
+        var rows = await Session.GetSnapshotsAsync(topoScanId);
+        topoItems = rows.Select(ToItem).ToList();
+
+        // rescan diff (8.4): changed or new ids versus the previous completed scan
+        var prev = completed.FirstOrDefault(s => s.Id != topoScanId);
+        if (prev is not null)
+        {
+            var prevRows = (await Session.GetSnapshotsAsync(prev.Id))
+                .GroupBy(r => r.ResourceId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            var changed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var r in rows)
+            {
+                if (!prevRows.TryGetValue(r.ResourceId, out var p) ||
+                    p.PropertiesJson != r.PropertiesJson || p.TagsJson != r.TagsJson || p.Name != r.Name)
+                {
+                    changed.Add(r.ResourceId);
+                }
+            }
+
+            topoChanged = changed;
+        }
+
+        // placements of resources missing from the newest scan are stale - forget them
+        if (completed.FirstOrDefault()?.Id == topoScanId)
+        {
+            await Session.Positions.PruneAsync(rows.Select(r => r.ResourceId).ToList());
+        }
     }
 
     private IEnumerable<InventoryItem> Filtered()

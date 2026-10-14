@@ -309,7 +309,8 @@ public static partial class DataModelFactory
             var sourcePort = sourceNode.Ports.Single(p => p.Alignment == linkDto.SourcePortAlignment);
             var targetPort = targetNode.Ports.Single(p => p.Alignment == linkDto.TargetPortAlignment);
             var link = diagram.Options.Links.Factory!(diagram, sourcePort, new SinglePortAnchor(targetPort));
-            diagram.Links.Add(link);
+            if (link is not null)
+                diagram.Links.Add(link);
         }
 
         diagram.SuspendRefresh = false;
