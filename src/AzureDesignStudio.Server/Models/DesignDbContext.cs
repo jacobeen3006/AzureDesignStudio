@@ -13,12 +13,13 @@ namespace AzureDesignStudio.Server.Models
         {
             modelBuilder.Entity<DesignModel>()
                 .ToTable(t => t.HasCheckConstraint("ADS_CHECK_JSON", "ISJSON(DesignData)=1"));
+            modelBuilder.Entity<PlanApplyEventModel>().HasIndex(e => e.ApplyId);
         }
 
         public DbSet<DesignModel> AdsDesigns { get; set; } = null!;
         public DbSet<AzureSubscriptionModel> AzureSubscriptions { get; set; } = null!;
         public DbSet<PlanApprovalModel> AdsPlanApprovals { get; set; } = null!;
-        public DbSet<PlanApplyAuditModel> AdsPlanApplies { get; set; } = null!;
+        public DbSet<PlanApplyEventModel> AdsPlanApplyEvents { get; set; } = null!;
     }
 
     public record DesignModel
@@ -68,16 +69,29 @@ namespace AzureDesignStudio.Server.Models
     }
 
     /// <summary>
-    /// Immutable per-apply audit row (v2 plan [62]/11.3): consumed approvals are removed from
-    /// AdsPlanApprovals, but every apply is appended here before the ARM mutation starts, so
-    /// "who applied which plan, when, where" survives consumption forever.
+    /// Append-only apply audit events (v2 plan [62]/11.3). One apply correlates by ApplyId:
+    /// a Started event (canonical plan body + consumed what-if preview evidence, written before
+    /// any ARM mutation) followed by exactly one terminal Completed or Failed event. A rejected
+    /// or interrupted start is recorded as Failed - it never claims "applied". Approval rows are
+    /// consumed at apply; these events are never updated or deleted.
     /// </summary>
-    public record PlanApplyAuditModel
+    public record PlanApplyEventModel
     {
+        public const string Started = "Started";
+        public const string Completed = "Completed";
+        public const string Failed = "Failed";
+
         public int Id { get; set; }
+
+        /// <summary>Correlates all events belonging to one apply.</summary>
+        public Guid ApplyId { get; set; }
 
         [StringLength(71, MinimumLength = 71)]
         public string PlanHash { get; set; } = null!;
+
+        /// <summary>Canonical approved plan body; every event row can reconstruct the applied plan.</summary>
+        [Required]
+        public string PlanJson { get; set; } = null!;
 
         [StringLength(64, MinimumLength = 1)]
         public string SubscriptionId { get; set; } = null!;
@@ -95,6 +109,18 @@ namespace AzureDesignStudio.Server.Models
         public string ApprovedByUserId { get; set; } = null!;
 
         public DateTime ApprovedAtUtc { get; set; }
-        public DateTime AppliedAtUtc { get; set; }
+
+        /// <summary>SHA-256 hex of the consumed what-if token: proof the apply rode on a live preview (Started rows).</summary>
+        [StringLength(64)]
+        public string? PreviewEvidence { get; set; }
+
+        [StringLength(16, MinimumLength = 7)]
+        public string EventType { get; set; } = null!;
+
+        /// <summary>Terminal context (provisioningState / error excerpt), truncated to 1024.</summary>
+        [StringLength(1024)]
+        public string? Detail { get; set; }
+
+        public DateTime TimestampUtc { get; set; }
     }
 }

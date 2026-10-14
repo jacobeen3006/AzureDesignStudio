@@ -84,17 +84,24 @@ var app = builder.Build();
                     ApprovedBy nvarchar(320) NOT NULL,
                     ApprovedByUserId nvarchar(64) NOT NULL,
                     ApprovedAtUtc datetime2 NOT NULL DEFAULT GETUTCDATE());
-                IF OBJECT_ID(N'AdsPlanApplies', N'U') IS NULL
-                CREATE TABLE AdsPlanApplies (
+                IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NULL
+                CREATE TABLE AdsPlanApplyEvents (
                     Id int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                    ApplyId uniqueidentifier NOT NULL,
                     PlanHash nvarchar(71) NOT NULL,
+                    PlanJson nvarchar(max) NOT NULL,
                     SubscriptionId nvarchar(64) NOT NULL,
                     ResourceGroupName nvarchar(90) NOT NULL,
                     DeploymentName nvarchar(64) NOT NULL,
                     ApprovedBy nvarchar(320) NOT NULL,
                     ApprovedByUserId nvarchar(64) NOT NULL,
                     ApprovedAtUtc datetime2 NOT NULL,
-                    AppliedAtUtc datetime2 NOT NULL);
+                    PreviewEvidence nvarchar(64) NULL,
+                    EventType nvarchar(16) NOT NULL,
+                    Detail nvarchar(1024) NULL,
+                    TimestampUtc datetime2 NOT NULL);
+                IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND INDEXPROPERTY(OBJECT_ID(N'AdsPlanApplyEvents'), N'IX_AdsPlanApplyEvents_ApplyId', 'IndexID') IS NULL
+                CREATE INDEX IX_AdsPlanApplyEvents_ApplyId ON AdsPlanApplyEvents (ApplyId);
                 """);
         }
     }

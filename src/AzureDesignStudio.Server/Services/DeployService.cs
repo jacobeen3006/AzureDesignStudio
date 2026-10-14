@@ -458,35 +458,32 @@ namespace AzureDesignStudio.Server.Services
             }
 
             // Consume the approval: one apply per approval, re-deploy needs a fresh review.
-            // The apply itself is written durably to AdsPlanApplies *before* any ARM mutation
-            // starts (v2 plan [62]/11.3), so consumption of the approval row never erases the
-            // "who applied what, when, where" trail.
-            _designContext.AdsPlanApplies.Add(new PlanApplyAuditModel
-            {
-                PlanHash = approval.PlanHash,
-                SubscriptionId = subscriptionId.ToString(),
-                ResourceGroupName = request.ResourceGroupName,
-                DeploymentName = WhatIfClient.DeploymentName,
-                ApprovedBy = approval.ApprovedBy,
-                ApprovedByUserId = approval.ApprovedByUserId,
-                ApprovedAtUtc = approval.ApprovedAtUtc,
-                AppliedAtUtc = DateTime.UtcNow,
-            });
+            // The apply trail (v2 plan [62]/11.3) is the append-only AdsPlanApplyEvents stream:
+            // Started - canonical plan body + hash of the consumed preview token, written before
+            // any ARM mutation - followed by exactly one terminal Completed/Failed event. The
+            // approval row is consumed, but the applied artifact stays recoverable from the
+            // trail and a failed start is never labeled applied.
+            var applyId = Guid.NewGuid();
+            var previewEvidence = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(request.WhatIfToken)));
+            _designContext.AdsPlanApplyEvents.Add(NewApplyEvent(applyId, approval, subscriptionId.ToString(),
+                request.ResourceGroupName, PlanApplyEventModel.Started, previewEvidence, null));
             _designContext.AdsPlanApprovals.Remove(approval);
             await _designContext.SaveChangesAsync(context.CancellationToken);
-            _logger.LogInformation("Plan applied hash={PlanHash} approver={ApprovedBy} user={UserId} target={Subscription}/{ResourceGroup}",
-                planHash, approval.ApprovedBy, userIdClaim, subscriptionId, request.ResourceGroupName);
+            _logger.LogInformation("Plan apply started hash={PlanHash} approver={ApprovedBy} user={UserId} target={Subscription}/{ResourceGroup} applyId={ApplyId}",
+                planHash, approval.ApprovedBy, userIdClaim, subscriptionId, request.ResourceGroupName, applyId);
 
             // Deploy the template
-            ArmDeploymentCollection armDeployments = rg.GetArmDeployments();
-            string deploymentName = WhatIfClient.DeploymentName;
-            var input = new ArmDeploymentContent(new ArmDeploymentProperties(ArmDeploymentMode.Incremental)
-            {
-                Template = BinaryData.FromString(request.ArmTemplate),
-                Parameters = BinaryData.FromString(parametersJson),
-            });
             try
             {
+                ArmDeploymentCollection armDeployments = rg.GetArmDeployments();
+                string deploymentName = WhatIfClient.DeploymentName;
+                var input = new ArmDeploymentContent(new ArmDeploymentProperties(ArmDeploymentMode.Incremental)
+                {
+                    Template = BinaryData.FromString(request.ArmTemplate),
+                    Parameters = BinaryData.FromString(parametersJson),
+                });
+
                 ArmOperation<ArmDeploymentResource> lro = await armDeployments.CreateOrUpdateAsync(WaitUntil.Started, deploymentName, input);
 
                 while(!lro.HasCompleted)
@@ -498,9 +495,26 @@ namespace AzureDesignStudio.Server.Services
                     await lro.UpdateStatusAsync();
                 }
 
-                response.StatusCode = StatusCodes.Status200OK;
-                response.DeploymentStatus = "completed";
-                await responseStream.WriteAsync(response);
+                var provisioningState = lro.Value?.Data?.Properties?.ProvisioningState?.ToString();
+                if (string.Equals(provisioningState, "Succeeded", StringComparison.OrdinalIgnoreCase))
+                {
+                    response.StatusCode = StatusCodes.Status200OK;
+                    response.DeploymentStatus = "completed";
+                    await responseStream.WriteAsync(response);
+                    await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
+                        PlanApplyEventModel.Completed, $"provisioningState={provisioningState}");
+                }
+                else
+                {
+                    // The LRO finished but the deployment itself failed or partially failed:
+                    // terminal Failed, never a silent "completed".
+                    response.StatusCode = StatusCodes.Status400BadRequest;
+                    response.DeploymentStatus = "failed";
+                    response.ErrorMessage = $"Deployment finished with provisioningState={provisioningState ?? "Unknown"}.";
+                    await responseStream.WriteAsync(response);
+                    await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
+                        PlanApplyEventModel.Failed, response.ErrorMessage);
+                }
             }
             catch (RequestFailedException ex)
             {
@@ -509,6 +523,52 @@ namespace AzureDesignStudio.Server.Services
                 response.DeploymentStatus = "failed";
                 response.ErrorMessage = $"HTTP {ex.Status}: {ex.ErrorCode}";
                 await responseStream.WriteAsync(response);
+                await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
+                    PlanApplyEventModel.Failed, response.ErrorMessage);
+            }
+            catch (Exception ex)
+            {
+                // Client disconnect, cancellation, or unexpected fault mid-apply: the terminal
+                // audit event still lands, then the exception propagates to the gRPC layer.
+                await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
+                    PlanApplyEventModel.Failed, $"{ex.GetType().Name}: {ex.Message}");
+                throw;
+            }
+        }
+
+        private static PlanApplyEventModel NewApplyEvent(Guid applyId, PlanApprovalModel approval, string subscriptionId,
+            string resourceGroupName, string eventType, string? previewEvidence, string? detail) => new()
+        {
+            ApplyId = applyId,
+            PlanHash = approval.PlanHash,
+            PlanJson = approval.PlanJson,
+            SubscriptionId = subscriptionId,
+            ResourceGroupName = resourceGroupName,
+            DeploymentName = WhatIfClient.DeploymentName,
+            ApprovedBy = approval.ApprovedBy,
+            ApprovedByUserId = approval.ApprovedByUserId,
+            ApprovedAtUtc = approval.ApprovedAtUtc,
+            PreviewEvidence = previewEvidence,
+            EventType = eventType,
+            Detail = detail is { Length: <= 1024 } ? detail : detail is not null ? detail[..1016] + "…[trunc]" : null,
+            TimestampUtc = DateTime.UtcNow,
+        };
+
+        private async Task RecordApplyEventAsync(Guid applyId, PlanApprovalModel approval, string subscriptionId,
+            string resourceGroupName, string eventType, string? detail)
+        {
+            try
+            {
+                _designContext.AdsPlanApplyEvents.Add(NewApplyEvent(applyId, approval, subscriptionId,
+                    resourceGroupName, eventType, null, detail));
+                // The terminal event must land even when the caller's token is already cancelled
+                // (client disconnect); audit failures are logged loudly but never mask the outcome.
+                await _designContext.SaveChangesAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogCritical(ex, "AUDIT WRITE FAILED: apply {ApplyId} event {EventType} plan {PlanHash} outcome not recorded durably",
+                    applyId, eventType, approval.PlanHash);
             }
         }
 
