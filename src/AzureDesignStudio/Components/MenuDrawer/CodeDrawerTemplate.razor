@@ -5,6 +5,7 @@
 @inject IJSRuntime JS
 @inject DeployGrpcService _deployService
 @inject MessageService _messageService
+@implements IDisposable
 
 <Affix TargetSelector=".ant-drawer-body" OnChange="HandleAffixChange">
     <div style="@_buttonStyle">
@@ -35,7 +36,7 @@
 </Modal>
 
 <Modal Title="Review what will change (What-If)" Visible="@_showWhatIfReview" MaskClosable="@false"
-       OkText="@("Approve & deploy")" OkDisabled="@(!WhatIfDeployAllowed)" OnOk="@ApproveAndDeployAsync" OnCancel="@CancelWhatIf">
+       OkText="@("Approve & deploy")" OnOk="@ApproveAndDeployAsync" OnCancel="@CancelWhatIf">
     @if (_whatIfLoading)
     {
         <p><Icon Type="loading" Theme="@IconThemeType.Outline" /> Running what-if against @_deployParams.ResourceGroup. This can take a minute...</p>
@@ -107,6 +108,45 @@
         <Step Title="@((_stepsStatus.CurrentStep == 2 && _stepsStatus.Status == "finish") ? "Completed" : ((_stepsStatus.CurrentStep == 2 && _stepsStatus.Status == "error") ? "Failed" : "Waiting"))"
               Description="@((_stepsStatus.CurrentStep == 2 && _stepsStatus.Status == "finish") ? "The deployment has completed successfully." : ((_stepsStatus.CurrentStep == 2 && _stepsStatus.Status == "error") ? _stepsStatus.ErrorMessage : "Waiting for the result."))" />
     </Steps>
+    <Divider />
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span>
+            <strong>Per-resource apply state</strong>
+            @if (!string.IsNullOrEmpty(_monitorStatus))
+            {
+                <Tag Color="@StateColor(_monitorStatus)">@_monitorStatus</Tag>
+            }
+        </span>
+        <Button Size="@ButtonSize.Small" Icon="@(_monitorLoading ? "loading" : "sync")" OnClick="RefreshMonitorAsync">Refresh</Button>
+    </div>
+    @if (_monitorRows.Count == 0)
+    {
+        <p>@(_monitorNotice.Length == 0 ? "No per-resource operations reported yet." : _monitorNotice)</p>
+    }
+    else
+    {
+        @if (_monitorNotice.Length > 0)
+        {
+            <Alert Type="@AlertType.Warning" Message="@_monitorNotice" ShowIcon="true" Style="margin-bottom:8px" />
+        }
+        <ul>
+            @foreach (var row in _monitorRows)
+            {
+                <li>
+                    <code>@row.ResourceKey</code>
+                    <Tag Color="@StateColor(row.State)">@row.State</Tag>
+                    @if (row.StatusCode.Length > 0)
+                    {
+                        <span> · @row.StatusCode</span>
+                    }
+                    @if (DateTimeOffset.TryParse(row.TimestampUtc, out var stamp))
+                    {
+                        <span> · @stamp.ToLocalTime().ToString("HH:mm:ss")</span>
+                    }
+                </li>
+            }
+        </ul>
+    }
 </Modal>
 
 @code {

@@ -45,6 +45,11 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private string? _whatIfError = null;
         private IReadOnlyList<WhatIfChangeRow> _whatIfChanges = [];
         private string? _approverName = null;
+        private IReadOnlyList<ResourceOperationRow> _monitorRows = [];
+        private string _monitorStatus = "";
+        private string _monitorNotice = "";
+        private bool _monitorLoading;
+        private CancellationTokenSource? _monitorCts;
 
         #region Button style and download
         protected override async Task OnInitializedAsync()
@@ -233,6 +238,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
         {
             _stepsStatus = new() { Status = "started" };
             _showDeployStatus = true;
+            StartMonitor();
 
             await _deployService.CreateDeployment(_linkedSubscription!.SubscriptionId,
                 _deployParams.ResourceGroup, _drawerContent.Content, _deployParams.ParametersJson,
@@ -284,10 +290,107 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private void CloseDeployStatus(MouseEventArgs e)
         {
             _showDeployStatus = false;
+            StopMonitor();
             if (_stepsStatus.Status is "error" or "finish" or "unknown")
             {
                 _stepsStatus = new();
             }
+        }
+
+        // Monitor [56]: read-only per-resource rows polled while the deploy modal is open.
+        // Stops on modal close and on dispose; never issues a mutating call.
+        private static string StateColor(string state) => state switch
+        {
+            "Succeeded" => "green",
+            "Failed" or "Canceled" => "red",
+            "Running" or "Accepted" or "Accepting" or "Created" or "Started" => "blue",
+            _ => "default",
+        };
+
+        private void StartMonitor()
+        {
+            StopMonitor();
+            _monitorCts = new CancellationTokenSource();
+            _ = MonitorLoopAsync(_monitorCts.Token);
+        }
+
+        private void StopMonitor()
+        {
+            _monitorCts?.Cancel();
+            _monitorCts?.Dispose();
+            _monitorCts = null;
+            _monitorRows = [];
+            _monitorStatus = "";
+            _monitorNotice = "";
+            _monitorLoading = false;
+        }
+
+        private async Task MonitorLoopAsync(CancellationToken ct)
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await RefreshMonitorCoreAsync();
+                if (ct.IsCancellationRequested)
+                    return;
+                var terminal = _stepsStatus.Status is "error" or "finish" or "unknown"
+                    || _monitorStatus is "Succeeded" or "Failed" or "Canceled";
+                try
+                {
+                    await Task.Delay(terminal ? TimeSpan.FromSeconds(15) : TimeSpan.FromSeconds(5), ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
+        }
+
+        public Task RefreshMonitorAsync() => RefreshMonitorCoreAsync();
+
+        private async Task RefreshMonitorCoreAsync()
+        {
+            if (_linkedSubscription is null || _deployParams is null)
+                return;
+
+            _monitorLoading = true;
+            try
+            {
+                var response = await _deployService.GetDeploymentOperationsAsync(_linkedSubscription.SubscriptionId,
+                    _deployParams.ResourceGroup);
+                if (response is null || response.StatusCode == 404)
+                {
+                    _monitorStatus = "";
+                    _monitorRows = [];
+                    _monitorNotice = response?.ErrorMessage ?? "The deployment has not started yet.";
+                }
+                else if (response.StatusCode != 200)
+                {
+                    _monitorNotice = response.ErrorMessage;
+                }
+                else
+                {
+                    _monitorStatus = response.DeploymentStatus;
+                    _monitorRows = response.Operations;
+                    // Parser warnings ride in error_message; the folded rows stay usable.
+                    _monitorNotice = response.ErrorMessage;
+                }
+            }
+            catch (Exception ex) when (ex is Grpc.Core.RpcException or InvalidOperationException or HttpRequestException or TaskCanceledException)
+            {
+                _monitorNotice = "The monitor call failed; the deployment itself is unaffected.";
+            }
+            finally
+            {
+                _monitorLoading = false;
+            }
+
+            await InvokeAsync(StateHasChanged);
+        }
+
+        public new void Dispose()
+        {
+            StopMonitor();
+            base.Dispose();
         }
     }
 }

@@ -63,6 +63,17 @@ namespace AzureDesignStudio.Services
             return await _deployClient.ApprovePlanAsync(new PlanApprovalRequest { PlanHash = planHash });
         }
 
+        public async Task<DeploymentOperationsResponse?> GetDeploymentOperationsAsync(string subscriptionId, string rgName)
+        {
+            var request = new DeploymentOperationsRequest
+            {
+                SubscriptionId = subscriptionId,
+                ResourceGroupName = rgName,
+            };
+
+            return await _deployClient.GetDeploymentOperationsAsync(request);
+        }
+
         public async Task CreateDeployment(string subscriptionId, string rgName, string armTemplate, string parameters,
             string whatIfToken, string planHash,
             Action<string, string> updateStatus)
