@@ -71,7 +71,7 @@ AzureDesignStudio.sln
 │  Pages/Index.razor                                   │
 │  ├── TopMenu.razor         (save/load/export/code)  │
 │  ├── StencilPanel.razor    (resource palette)        │
-│  └── DiagramPanel.razor    (Blazor.Diagrams canvas)  │
+│  └── DiagramPanel.razor    (Z.Blazor.Diagrams canvas) │
 │                                                      │
 │  Components/                                         │
 │  ├── Stencil.razor         (individual drag icons)   │
@@ -133,7 +133,7 @@ IAzureNode                  IAzureResource              IArmTemplate
 
 ### Key Design Decisions
 
-- **`AzureNodeBase`** extends Blazor.Diagrams `NodeModel` and implements both `IAzureNode` and `IAzureResource` — a single class handles diagram appearance AND ARM template generation
+- **`AzureNodeBase`** extends Z.Blazor.Diagrams `NodeModel` and implements both `IAzureNode` and `IAzureResource` — a single class handles diagram appearance AND ARM template generation
 - **`AzureGroupBase`** extends `GroupModel` for container resources (VNet, SQL Server, App Service Plan). Children are visually nested and logically scoped
 - **`GetArmResources()`** on each model produces the ARM resource JSON. The model hierarchy mirrors the ARM resource nesting (e.g., SQL Database is a child resource of SQL Server)
 - **`IsDrappable()`** enforces placement rules — prevents nesting resources where Azure doesn't allow it
@@ -167,7 +167,7 @@ Stencils are configured in `src/Configurations/ads-stencils.json` — each entry
 ## Design Flow (End-to-End)
 
 1. **Palette** → `StencilPanel.razor` reads `ads-stencils.json`, renders `Stencil.razor` for each
-2. **Drag** → User drags a stencil onto `DiagramPanel.razor` canvas (Blazor.Diagrams)
+2. **Drag** → User drags a stencil onto `DiagramPanel.razor` canvas (Z.Blazor.Diagrams)
 3. **Instantiation** → `DataModelFactory.CreateNodeModelFromKey()` creates the correct `AzureNodeBase`/`AzureGroupBase` subclass
 4. **Configuration** → Clicking a node opens `NodeDrawerTemplate.razor` with the resource's property form (e.g., `SqlServerForm.razor`)
 5. **Persistence** → Design serialized via `SaveDiagramToDto()` → `AzureNodeDto` graph → JSON → gRPC → Server → EF Core → SQL
@@ -251,7 +251,7 @@ Pages/
 Components/
   TopMenu.razor            — Save/Load/Export/Code gen/User menu
   StencilPanel.razor       — Azure resource palette (draggable)
-  DiagramPanel.razor       — Blazor.Diagrams canvas host
+  DiagramPanel.razor       — Z.Blazor.Diagrams canvas host
   Stencil.razor            — Individual stencil icon + drag source
   IconComponent.razor      — SVG icon wrapper (renders Azure resource SVG)
   NodeDrawerTemplate.razor — Property editor sliding drawer
