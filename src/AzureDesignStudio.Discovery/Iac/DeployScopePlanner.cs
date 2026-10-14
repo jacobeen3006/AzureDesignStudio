@@ -51,6 +51,14 @@ public static partial class DeployScopePlanner
     [GeneratedRegex(@"resourceId\(\s*'([^']+)'\s*,\s*'([^']+)'")]
     private static partial Regex ResourceIdRef();
 
+    /// <summary>Parses a literal <c>resourceId('type','name',...)</c> expression, shared with
+    /// targeted retry; null when the string is not a literal resourceId reference.</summary>
+    public static (string Type, string Name)? ParseLiteralResourceId(string raw)
+    {
+        var match = ResourceIdRef().Match(raw);
+        return match.Success ? (match.Groups[1].Value, match.Groups[2].Value) : null;
+    }
+
     /// <summary>
     /// Stages a template; never throws - malformed input becomes an InvalidTemplate error.
     /// <paramref name="ambientScope"/> is the scope the caller will deploy at: resources that
@@ -295,7 +303,7 @@ public static partial class DeployScopePlanner
         }
     }
 
-    private static string Key(string type, string name) => $"{type}/{name}".ToLowerInvariant();
+    public static string Key(string type, string name) => $"{type}/{name}".ToLowerInvariant();
 
     private static string Str(JsonNode? node, string property) =>
         node is JsonObject o && o.TryGetPropertyValue(property, out var value) && value?.GetValueKind() == JsonValueKind.String

@@ -50,6 +50,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private string _monitorNotice = "";
         private bool _monitorLoading;
         private CancellationTokenSource? _monitorCts;
+        private string? _retryTemplate;
 
         #region Button style and download
         protected override async Task OnInitializedAsync()
@@ -144,6 +145,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private void ParamsFormCancel(MouseEventArgs e)
         {
             _showDeployParams = false;
+            _retryTemplate = null;
         }
         private void ParamsFormOk(MouseEventArgs e)
         {
@@ -172,7 +174,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
             try
             {
                 var response = await _deployService.WhatIfAsync(_linkedSubscription!.SubscriptionId,
-                    _deployParams.ResourceGroup, _drawerContent.Content, _deployParams.ParametersJson);
+                    _deployParams.ResourceGroup, EffectiveTemplate, _deployParams.ParametersJson);
                 if (response is null || response.StatusCode != 200)
                     _whatIfError = response?.ErrorMessage ?? "What-If is not available right now.";
                 else
@@ -230,6 +232,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private void CancelWhatIf(MouseEventArgs e)
         {
             _showWhatIfReview = false;
+            _retryTemplate = null;
             _whatIfResult = null;
             _whatIfError = null;
         }
@@ -241,7 +244,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
             StartMonitor();
 
             await _deployService.CreateDeployment(_linkedSubscription!.SubscriptionId,
-                _deployParams.ResourceGroup, _drawerContent.Content, _deployParams.ParametersJson,
+                _deployParams.ResourceGroup, EffectiveTemplate, _deployParams.ParametersJson,
                 whatIfToken, planHash,
                 async (deploymentStatus, errorMessage) =>
                 {
@@ -286,16 +289,65 @@ namespace AzureDesignStudio.Components.MenuDrawer
                     }
                     if (stateHasChanged)
                         await InvokeAsync(StateHasChanged);
-                });
+            });
+            _retryTemplate = null;
         }
         private void CloseDeployStatus(MouseEventArgs e)
         {
             _showDeployStatus = false;
+            _retryTemplate = null;
             StopMonitor();
             if (_stepsStatus.Status is "error" or "finish" or "unknown")
             {
                 _stepsStatus = new();
             }
+        }
+
+        // Targeted retry [56]: the monitor's failed rows narrow the template server-side; the
+        // subset then runs the ordinary what-if -> approval -> apply gate under its own plan hash.
+        private string EffectiveTemplate => _retryTemplate ?? _drawerContent.Content;
+
+        private bool HasRetryableFailures => _monitorRows.Any(r => r.State is "Failed" or "Canceled");
+
+        // A staged apply can show a failed row from batch 1 while batch 2 still runs: retry only
+        // unlocks once the deployment itself is terminal, so it can never race a concurrent apply.
+        private bool CanRetryNow => HasRetryableFailures
+            && _monitorStatus is "Succeeded" or "Failed" or "Canceled";
+
+        private async Task RetryFailedAsync()
+        {
+            var keys = _monitorRows.Where(r => r.State is "Failed" or "Canceled")
+                .Select(r => r.ResourceKey).ToList();
+            if (!CanRetryNow || _linkedSubscription is null)
+                return;
+
+            SharedModels.Protos.PrepareRetryResponse? response = null;
+            try
+            {
+                response = await _deployService.PrepareRetryAsync(_drawerContent.Content, keys);
+            }
+            catch (Exception ex) when (ex is Grpc.Core.RpcException or InvalidOperationException or HttpRequestException)
+            {
+                response = null;
+            }
+
+            if (response is null || response.StatusCode != 200 || string.IsNullOrEmpty(response.FilteredTemplateJson))
+            {
+                _messageService.Error(response?.ErrorMessage ?? "The retry subset could not be prepared; nothing was deployed.");
+                return;
+            }
+
+            _retryTemplate = response.FilteredTemplateJson;
+            var notes = response.Warnings.Count > 0 ? " " + string.Join(" ", response.Warnings) : "";
+            _monitorNotice = $"Retry subset prepared for {response.MatchedKeys.Count} failed resource(s): "
+                + $"{string.Join(", ", response.MatchedKeys)}.{notes} "
+                + "Confirm the resource group and parameters to preview and deploy only this subset.";
+            _stepsStatus = new();
+
+            // The monitored deployment's resource group and parameters are kept verbatim: the
+            // subset retried against a different target or parameterization would not be a retry.
+            // Any change is an explicit edit in the form.
+            _showDeployParams = true;
         }
 
         // Monitor [56]: read-only per-resource rows polled while the deploy modal is open.

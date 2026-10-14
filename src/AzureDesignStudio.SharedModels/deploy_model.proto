@@ -12,6 +12,7 @@ service Deploy {
 	rpc ApprovePlan(PlanApprovalRequest) returns(PlanApprovalResponse);
 	rpc CreateDeployment(DeploymentRequest) returns(stream DeploymentResponse);
 	rpc GetDeploymentOperations(DeploymentOperationsRequest) returns(DeploymentOperationsResponse);
+	rpc PrepareRetry(PrepareRetryRequest) returns(PrepareRetryResponse);
 }
 
 message SubscriptionInfo {
@@ -102,4 +103,17 @@ message DeploymentOperationsResponse {
 	string error_message = 2;
 	string deployment_status = 3;
 	repeated ResourceOperationRow operations = 4;
+}
+
+message PrepareRetryRequest {
+	string template_json = 1;
+	repeated string resource_keys = 2;
+}
+
+message PrepareRetryResponse {
+	int32 status_code = 1;
+	string error_message = 2;
+	string filtered_template_json = 3;
+	repeated string warnings = 4;
+	repeated string matched_keys = 5;
 }

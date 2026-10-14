@@ -37,6 +37,10 @@
 
 <Modal Title="Review what will change (What-If)" Visible="@_showWhatIfReview" MaskClosable="@false"
        OkText="@("Approve & deploy")" OnOk="@ApproveAndDeployAsync" OnCancel="@CancelWhatIf">
+    @if (_retryTemplate is not null)
+    {
+        <Alert Type="@AlertType.Info" Message="Targeted retry: only the failed resources will be previewed and deployed - not the full template." ShowIcon="true" Style="margin-bottom:8px" />
+    }
     @if (_whatIfLoading)
     {
         <p><Icon Type="loading" Theme="@IconThemeType.Outline" /> Running what-if against @_deployParams.ResourceGroup. This can take a minute...</p>
@@ -117,7 +121,10 @@
                 <Tag Color="@StateColor(_monitorStatus)">@_monitorStatus</Tag>
             }
         </span>
-        <Button Size="@ButtonSize.Small" Icon="@(_monitorLoading ? "loading" : "sync")" OnClick="RefreshMonitorAsync">Refresh</Button>
+        <span>
+            <Button Size="@ButtonSize.Small" Icon="redo" Disabled="@(!CanRetryNow)" OnClick="RetryFailedAsync" Style="margin-right:8px">Retry failed</Button>
+            <Button Size="@ButtonSize.Small" Icon="@(_monitorLoading ? "loading" : "sync")" OnClick="RefreshMonitorAsync">Refresh</Button>
+        </span>
     </div>
     @if (_monitorRows.Count == 0)
     {

@@ -74,6 +74,14 @@ namespace AzureDesignStudio.Services
             return await _deployClient.GetDeploymentOperationsAsync(request);
         }
 
+        public async Task<PrepareRetryResponse?> PrepareRetryAsync(string armTemplate, IEnumerable<string> failedResourceKeys)
+        {
+            var request = new PrepareRetryRequest { TemplateJson = armTemplate };
+            request.ResourceKeys.AddRange(failedResourceKeys);
+
+            return await _deployClient.PrepareRetryAsync(request);
+        }
+
         public async Task CreateDeployment(string subscriptionId, string rgName, string armTemplate, string parameters,
             string whatIfToken, string planHash,
             Action<string, string> updateStatus)

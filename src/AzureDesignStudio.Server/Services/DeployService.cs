@@ -419,6 +419,39 @@ namespace AzureDesignStudio.Server.Services
         }
 
         /// <summary>
+        /// Targeted retry [56]: narrows the exported template to the monitor's failed/canceled rows so the
+        /// retry re-applies exactly that subset. Pure filtering - no ARM call, no token consumed; the
+        /// filtered body then travels the ordinary what-if → approval → apply gate under its own plan hash.
+        /// </summary>
+        public override Task<PrepareRetryResponse> PrepareRetry(PrepareRetryRequest request, ServerCallContext context)
+        {
+            var response = new PrepareRetryResponse();
+
+            var userIdClaim = ServiceTools.GetUserId(context);
+            if (string.IsNullOrWhiteSpace(userIdClaim))
+            {
+                response.StatusCode = StatusCodes.Status401Unauthorized;
+                response.ErrorMessage = "Access denied.";
+                return Task.FromResult(response);
+            }
+
+            var result = RetryTemplateFilter.Filter(request.TemplateJson, request.ResourceKeys);
+            if (result.Error is not null)
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = result.Error;
+                return Task.FromResult(response);
+            }
+
+            response.StatusCode = StatusCodes.Status200OK;
+            response.FilteredTemplateJson = result.TemplateJson;
+            response.Warnings.AddRange(result.Warnings);
+            response.MatchedKeys.AddRange(result.MatchedKeys);
+            return Task.FromResult(response);
+        }
+
+
+        /// <summary>
         /// Records a named approval for a plan hash. The approver principal is taken from the
         /// authenticated claims - the wire carries no approver field, so a caller can never
         /// approve in someone else's name. Only hashes backed by a live what-if preview are approvable.
