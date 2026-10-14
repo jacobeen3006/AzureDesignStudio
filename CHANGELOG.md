@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 - **Change feed spine (v2 plan 9.1):** `ChangeFeedCollector` queries the Azure Resource Graph `resourcechanges` table for a time window — newest-first, with Change Actor attribution (who changed it, which client, which RBAC operation); the existing Reader role covers it, no new permission. Rows persist idempotently into the workspace SQLite (`ChangeFeed` table, deduped by resource + change key) and the desktop `ChangeFeedService` exposes collect / feed / "what moved since the scan" reads, offline-capable.
+- **Drift engine (v2 plan 9.2):** `ScanDiffer` compares two typeless inventories leaf-by-leaf (`properties.…` paths, array indices), classifying Added/Removed/Changed with old/new values — the same engine answers scan↔scan, design↔design and design↔live (`DesignTemplateReader` makes an ARM template comparable to a scan); platform churn like `provisioningState` is reported but never counted as drift. `LiveDrift` overlays the change feed on a scan to flag what moved since (New/Deleted/Modified + who). Desktop seam: `ChangeFeedService.DiffScansAsync` / `DriftSinceScanAsync`.
 
 ### Fixed
 - Desktop sign-in hang: the WAM broker requires `AcquireTokenInteractive` on the UI thread (MSAL `WamUiThread` contract); interactive acquisition now runs directly on the Blazor renderer thread instead of a timer-deferred sync block.

@@ -42,6 +42,8 @@
 **Gate:** scan → topology renders truthfully (edges only from config, never decorative); rescan highlights *change*, not shuffle.
 **Effort:** 2–3 weeks.
 
+**Status (2026-10-13):** 8.1-8.2 done - all edge kinds derived from ARM config id references (external refs become ghost nodes, never dropped), canonical sub/RG/resource nested framing with deterministic id-sorted packing, positions persisted by ARM id per frame container (18 tests: unchanged rescan byte-identical, new resources never move saved nodes). Topology tab wired into the scan drawer: scope filters, category-icon fallback, drag-to-move with persistence, inspector (props/tags/raw/portal link), rescan change highlight. Remaining: 8.4 real-tenant gate.
+
 ## Phase 9 — Change intelligence (read-only value peak)
 
 - 9.1 **[26][29]** Change feed (ARG change history + Activity Log) with caller attribution.
@@ -56,6 +58,8 @@
 **Effort:** 3–4 weeks. **This closes the read-only product.**
 
 **Status (2026-10-14):** 9.1 spine done - `ChangeFeedCollector` over the ARG `resourcechanges` table: time-windowed, newest-first, projected flat with Change Actor attribution (`changedBy`/`clientType`/RBAC `operation` - the existing Reader role covers the table; the Activity Log probe in preflight stays as the enrichment path for richer operation names). Rows normalize `Unspecified`/`Unknown` to null and drop partially-written records; persisted to `workspace.db` `ChangeFeed` via `WorkspaceChanges` (idempotent by resource+change key, overlapping collection windows add nothing) and exposed to the desktop host through `ChangeFeedService` (`CollectAsync` / `FeedAsync` / `MovedAsync` - the "what moved since the scan" shape 9.2 diffs against). Changes-tab UI lands when the scan drawer integration point is free; 10 offline tests (row normalization, partial-row drops, idempotent persistence, newest-per-resource fold).
+
+**Status (2026-10-14):** 9.2 engine done - `ScanDiffer` flattens two typeless inventories (the same `InventoryItem` shape ARG scans produce) into stable leaf paths (`properties.sku.name`, arrays `[i]`) and classifies Added/Removed/Changed with per-leaf old/new JSON; volatile platform churn (`provisioningState`) is reported but never counted as drift, and a mis-versioned dump caps at 200 property diffs per resource. Same engine serves design↔design and design↔live: `DesignTemplateReader` turns an ARM deployment template into comparable items (ids/types lowercased so ARM id casing matches live). `LiveDrift.Overlay` flags scan↔now from the change feed (New/Deleted/Modified + caller, newest change per resource, pre-scan changes ignored). Desktop seam: `ChangeFeedService.DiffScansAsync` / `DriftSinceScanAsync`; 10 offline tests. Drift-diff rendering joins the drawer UI when the parallel editor work lands.
 
 ## Phase 10 — IaC breadth
 
