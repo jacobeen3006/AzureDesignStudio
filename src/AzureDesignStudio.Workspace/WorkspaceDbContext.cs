@@ -16,6 +16,7 @@ public class WorkspaceDbContext(DbContextOptions<WorkspaceDbContext> options) : 
     public DbSet<ExecutionPlanRecord> ExecutionPlans => Set<ExecutionPlanRecord>();
     public DbSet<AuditRecord> AuditRecords => Set<AuditRecord>();
     public DbSet<NodePositionRecord> NodePositions => Set<NodePositionRecord>();
+    public DbSet<ChangeFeedRecord> ChangeFeed => Set<ChangeFeedRecord>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -55,6 +56,12 @@ public class WorkspaceDbContext(DbContextOptions<WorkspaceDbContext> options) : 
 
         model.Entity<AuditRecord>(e => e.HasIndex(a => a.Timestamp));
         model.Entity<NodePositionRecord>(e => e.HasKey(p => p.NodeId));
+        model.Entity<ChangeFeedRecord>(e =>
+        {
+            e.HasIndex(c => new { c.TargetResourceId, c.ChangeKey }).IsUnique();
+            e.HasIndex(c => c.ChangeTime);
+            e.HasIndex(c => c.ScanId);
+        });
     }
 }
 
@@ -114,6 +121,25 @@ public sealed class WorkspaceDb
                 "Y" REAL NOT NULL,
                 "SavedAt" TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS "ChangeFeed" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_ChangeFeed" PRIMARY KEY AUTOINCREMENT,
+                "ScanId" TEXT NULL,
+                "ChangeKey" TEXT NOT NULL,
+                "ChangeTime" TEXT NOT NULL,
+                "TargetResourceId" TEXT NOT NULL,
+                "TargetResourceType" TEXT NULL,
+                "ChangeType" TEXT NOT NULL,
+                "CorrelationId" TEXT NULL,
+                "ChangedBy" TEXT NULL,
+                "ChangedByType" TEXT NULL,
+                "ClientType" TEXT NULL,
+                "Operation" TEXT NULL,
+                "ChangesCount" INTEGER NOT NULL,
+                "ChangedPropertiesJson" TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ChangeFeed_TargetResourceId_ChangeKey" ON "ChangeFeed" ("TargetResourceId", "ChangeKey");
+            CREATE INDEX IF NOT EXISTS "IX_ChangeFeed_ChangeTime" ON "ChangeFeed" ("ChangeTime");
+            CREATE INDEX IF NOT EXISTS "IX_ChangeFeed_ScanId" ON "ChangeFeed" ("ScanId");
             """;
         cmd.ExecuteNonQuery();
         conn.Close();

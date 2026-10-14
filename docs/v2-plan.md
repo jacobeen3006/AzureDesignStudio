@@ -16,6 +16,8 @@
 
 **Effort:** 5–7 days.
 
+**Status (2026-10-14):** 6.1-6.3 done - peering export implemented (no `NotImplementedException` reachable from export paths; golden suite `StencilExportGoldenTests` round-trips every stencil key to ARM/Bicep, inside the 180-test offline run); `AdsTokenBroker` chain AzureCli → ManagedIdentity → service principal → MSAL interactive (WAM broker + device-code fallback), consumed by the gRPC bearer handler and Discovery SDK clients, secrets only via Credential Manager/DPAPI; SQLite `workspace.db` (designs/scans/snapshots/cost cache/plans/audit) with `SqliteDesignOfflineStore` as the `IDesignOfflineStore` and `LegacyDesignImporter` migrating the old JSON files - designs readable with network down.
+
 ## Phase 7 — Tenant discovery & inventory
 
 - 7.1 **[2]** Azure Resource Graph query spine: one engine, 1k-row pagination, `Retry-After`-honoring bounded backoff, throttle control.

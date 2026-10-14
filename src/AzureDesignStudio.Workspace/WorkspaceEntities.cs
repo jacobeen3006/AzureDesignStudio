@@ -98,3 +98,27 @@ public class AuditRecord
     public string? PlanHash { get; set; }
     public string? DetailJson { get; set; }
 }
+
+/// <summary>
+/// One control-plane change from the ARG change feed (plan 9.1), persisted so drift
+/// (9.2) can diff scan↔now offline. Attribution fields keep ARG placeholders as null;
+/// "unknown actor" is a UI rendering of null.
+/// </summary>
+public class ChangeFeedRecord
+{
+    public long Id { get; set; }
+    /// <summary>Scan run that collected the entry; null for ad-hoc collection.</summary>
+    public string? ScanId { get; set; }
+    public required string ChangeKey { get; set; }
+    public DateTimeOffset ChangeTime { get; set; }
+    public required string TargetResourceId { get; set; }
+    public string? TargetResourceType { get; set; }
+    public required string ChangeType { get; set; }
+    public string? CorrelationId { get; set; }
+    public string? ChangedBy { get; set; }
+    public string? ChangedByType { get; set; }
+    public string? ClientType { get; set; }
+    public string? Operation { get; set; }
+    public int ChangesCount { get; set; }
+    public string? ChangedPropertiesJson { get; set; }
+}
