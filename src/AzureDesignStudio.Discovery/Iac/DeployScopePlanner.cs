@@ -315,8 +315,9 @@ public static partial class DeployScopePlanner
     /// RG-ambient gate bound to the approved (subscription, resource group) target: an explicit
     /// literal <c>scope</c> path must name exactly that target (ARM ids are case-insensitive),
     /// or the plan is rejected <c>ScopeTargetMismatch</c> - the approval artifact binds one
-    /// exact scope, so an off-target policy/authorization path must never ride the approved
-    /// token into a deployment at a different scope.
+    /// exact scope, so an off-target path must never ride the approved token. A nested
+    /// <c>Microsoft.Resources/deployments</c> that retargets via literal <c>resourceGroup</c>/
+    /// <c>subscriptionId</c> (or whose inner template carries its own overrides) is bound the same way.
     /// </summary>
     public static bool TryFindBlockingErrors(string templateJson, string subscriptionId, string resourceGroup, out string message) =>
         TryFindBlockingErrorsCore(templateJson, DeployScopeKind.ResourceGroup, subscriptionId, resourceGroup, out message);
@@ -335,17 +336,62 @@ public static partial class DeployScopePlanner
         if (ambientScope == DeployScopeKind.ResourceGroup)
         {
             var bound = !string.IsNullOrWhiteSpace(subscriptionId) && !string.IsNullOrWhiteSpace(resourceGroup);
-            foreach (var (key, scope) in ExplicitResourceGroupScopes(templateJson))
+            foreach (var (key, property, value) in ExplicitTargetOverrides(templateJson))
             {
-                if (!bound)
+                if (property == "scope")
+                {
+                    if (value.Contains('['))
+                    {
+                        continue; // expression scope: Create already failed the plan closed
+                    }
+
+                    if (!TryParseScopePath(value, out var parsed, out var parsedSub, out var parsedRg))
+                    {
+                        // The classifier's fallback reads unrecognized strings as resource-group scope;
+                        // the gate refuses to deploy a literal it cannot parse instead of treating it as ambient.
+                        errors.Add(new(ArmDiagnosticSeverity.Error, "ScopePathMalformed",
+                            $"'{key}' carries the literal scope '{value}', which is not a valid ARM scope path; refusing to treat it as the deployment target."));
+                    }
+                    else if (parsed != DeployScopeKind.ResourceGroup)
+                    {
+                        errors.Add(new(ArmDiagnosticSeverity.Error, "MultiScopeNotDeployable",
+                            $"'{key}' carries an explicit {parsed}-scope path '{value}'; this pipeline deploys exactly one resource-group scope."));
+                    }
+                    else if (!bound)
+                    {
+                        errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeTargetUnbound",
+                            $"'{key}' carries an explicit resource-group scope '{value}'; without a bound (subscription, resource group) target the gate cannot prove it matches what was approved."));
+                    }
+                    else if (!parsedSub.Equals(subscriptionId, StringComparison.OrdinalIgnoreCase)
+                          || !parsedRg.Equals(resourceGroup, StringComparison.OrdinalIgnoreCase))
+                    {
+                        errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeTargetMismatch",
+                            $"'{key}' carries an explicit scope '{value}' outside the approved target /subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}."));
+                    }
+
+                    continue;
+                }
+
+                // Nested-deployment retarget: a literal must name the approved target; an
+                // expression target is unprovable and fails closed (ScopeExpressionNotPlanned precedent).
+                if (value.Contains('['))
+                {
+                    errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeExpressionNotPlanned",
+                        $"'{key}' overrides the deployment target with an expression {property} that staging cannot resolve; refusing to deploy an unprovable scope."));
+                }
+                else if (!bound)
                 {
                     errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeTargetUnbound",
-                        $"'{key}' carries an explicit resource-group scope '{scope}'; without a bound (subscription, resource group) target the gate cannot prove it matches what was approved."));
+                        $"'{key}' overrides the deployment target with an explicit {property}; without a bound (subscription, resource group) target the gate cannot prove it matches what was approved."));
                 }
-                else if (!ScopeMatchesTarget(scope, subscriptionId!, resourceGroup!))
+                else
                 {
-                    errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeTargetMismatch",
-                        $"'{key}' carries an explicit scope '{scope}' outside the approved target /subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}."));
+                    var expected = property == "subscriptionId" ? subscriptionId! : resourceGroup!;
+                    if (!value.Equals(expected, StringComparison.OrdinalIgnoreCase))
+                    {
+                        errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeTargetMismatch",
+                            $"'{key}' overrides the deployment target with {property} '{value}' outside the approved target /subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}."));
+                    }
                 }
             }
         }
@@ -354,10 +400,12 @@ public static partial class DeployScopePlanner
         return errors.Count > 0;
     }
 
-    /// <summary>Literal <c>scope</c> paths the classifier reads as resource-group scope. Expression scopes are
-    /// skipped (Create already failed the plan closed); empty scope inherits the ambient deployment target.</summary>
-    private static IEnumerable<(string Key, string Scope)> ExplicitResourceGroupScopes(string templateJson)
+    /// <summary>Every non-empty literal target override on a resource declaration: <c>scope</c> plus the
+    /// nested-deployment retarget properties <c>resourceGroup</c>/<c>subscriptionId</c>, including resources
+    /// inside nested deployment templates (recursively). Empty values inherit the ambient target.</summary>
+    private static List<(string Key, string Property, string Value)> ExplicitTargetOverrides(string templateJson)
     {
+        var found = new List<(string, string, string)>();
         JsonNode? root;
         try
         {
@@ -365,12 +413,23 @@ public static partial class DeployScopePlanner
         }
         catch (JsonException)
         {
-            yield break;
+            return found;
         }
 
-        if (root is not JsonObject template || template["resources"] is not JsonArray resources)
+        if (root is not JsonObject template)
         {
-            yield break;
+            return found;
+        }
+
+        CollectTargetOverrides(template["resources"] as JsonArray, found);
+        return found;
+    }
+
+    private static void CollectTargetOverrides(JsonArray? resources, List<(string Key, string Property, string Value)> found)
+    {
+        if (resources is null)
+        {
+            return;
         }
 
         foreach (var item in resources)
@@ -380,39 +439,79 @@ public static partial class DeployScopePlanner
                 continue;
             }
 
-            var scope = Str(resource, "scope");
-            if (scope.Length == 0 || scope.Contains('[') || ScopeKindFromPath(scope) != DeployScopeKind.ResourceGroup)
+            var key = Key(Str(resource, "type"), Str(resource, "name"));
+            foreach (var property in new[] { "scope", "resourceGroup", "subscriptionId" })
             {
-                continue;
+                var value = Str(resource, property);
+                if (value.Length > 0)
+                {
+                    found.Add((key, property, value));
+                }
             }
 
-            yield return (Key(Str(resource, "type"), Str(resource, "name")), scope);
+            if (resource["properties"] is JsonObject properties && properties["template"] is JsonObject inner)
+            {
+                CollectTargetOverrides(inner["resources"] as JsonArray, found);
+            }
         }
     }
 
-    private static bool ScopeMatchesTarget(string scope, string subscriptionId, string resourceGroup)
+    /// <summary>
+    /// Strict ARM scope-path grammar: <c>/</c> (tenant),
+    /// <c>/providers/Microsoft.Management/managementGroups/{name}</c>, or
+    /// <c>/subscriptions/{id}...</c> where the subscription-scope form is bare or
+    /// <c>/providers/...</c>, and the resource-group form is <c>/resourceGroups/{name}</c>
+    /// with no second resource-group segment anywhere deeper. Anything else is unparseable -
+    /// notably a relative <c>/resourceGroups/{name}</c> and a spoofed path that hides a
+    /// second resource-group behind a provider segment.
+    /// </summary>
+    private static bool TryParseScopePath(string scope, out DeployScopeKind kind, out string subscriptionId, out string resourceGroup)
     {
+        kind = DeployScopeKind.Tenant;
+        subscriptionId = "";
+        resourceGroup = "";
         var segments = scope.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var sub = -1;
-        var rg = -1;
-        for (var i = 0; i < segments.Length - 1; i++)
+        if (segments.Length == 0)
         {
-            if (sub < 0)
-            {
-                if (segments[i].Equals("subscriptions", StringComparison.OrdinalIgnoreCase))
-                {
-                    sub = i;
-                }
-            }
-            else if (segments[i].Equals("resourceGroups", StringComparison.OrdinalIgnoreCase))
-            {
-                rg = i;
-                break;
-            }
+            return true; // "/"
         }
 
-        return sub >= 0 && rg > sub
-            && segments[sub + 1].Equals(subscriptionId, StringComparison.OrdinalIgnoreCase)
-            && segments[rg + 1].Equals(resourceGroup, StringComparison.OrdinalIgnoreCase);
+        if (segments.Length >= 4
+            && segments[0].Equals("providers", StringComparison.OrdinalIgnoreCase)
+            && segments[1].Equals("microsoft.management", StringComparison.OrdinalIgnoreCase)
+            && segments[2].Equals("managementGroups", StringComparison.OrdinalIgnoreCase))
+        {
+            kind = DeployScopeKind.ManagementGroup;
+            return true;
+        }
+
+        if (!segments[0].Equals("subscriptions", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (segments.Length >= 4 && segments[2].Equals("resourceGroups", StringComparison.OrdinalIgnoreCase))
+        {
+            for (var i = 4; i < segments.Length; i++)
+            {
+                if (segments[i].Equals("resourceGroups", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+
+            kind = DeployScopeKind.ResourceGroup;
+            subscriptionId = segments[1];
+            resourceGroup = segments[3];
+            return true;
+        }
+
+        if (segments.Length == 2 || (segments.Length > 2 && segments[2].Equals("providers", StringComparison.OrdinalIgnoreCase)))
+        {
+            kind = DeployScopeKind.Subscription;
+            return true;
+        }
+
+        return false;
     }
 }

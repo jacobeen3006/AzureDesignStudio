@@ -179,16 +179,63 @@ public class DeployScopePlannerTests
             """{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"/subscriptions/bbb/resourceGroups/target-rg/providers/Microsoft.Network/virtualNetworks/vn1"}""");
         Assert.False(DeployScopePlanner.TryFindBlockingErrors(nested, "bbb", "target-rg", out _));
 
-        // The classifier reads an unparseable path as resource-group scope; without provable
-        // identity it fails closed instead of riding the deployment.
-        var junk = Template(
-            """{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"/nonsense/"}""");
-        Assert.True(DeployScopePlanner.TryFindBlockingErrors(junk, "bbb", "target-rg", out var junkMessage));
-        Assert.Contains("ScopeTargetMismatch", junkMessage);
+        // Unparseable literals - which the classifier's fallback reads as resource-group scope -
+        // are rejected, never treated as ambient. A spoofed path hiding a second resource-group
+        // behind a provider segment parses as malformed too.
+        foreach (var junkScope in new[] { "/nonsense/", "garbage", "/resourceGroups/relative",
+                                          "/subscriptions/bbb/resourceGroups/target-rg/providers/x/resourceGroups/y" })
+        {
+            var junk = Template(
+                $$"""{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"{{junkScope}}"}""");
+            Assert.True(DeployScopePlanner.TryFindBlockingErrors(junk, "bbb", "target-rg", out var junkMessage));
+            Assert.Contains("ScopePathMalformed", junkMessage);
+        }
+
+        // Subscription-level provider paths parse as Subscription scope: beyond this pipeline.
+        var subLevel = Template(
+            """{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"/subscriptions/bbb/providers/Microsoft.Authorization/policyDefinitions/x"}""");
+        Assert.True(DeployScopePlanner.TryFindBlockingErrors(subLevel, "bbb", "target-rg", out var subMessage));
+        Assert.Contains("MultiScopeNotDeployable", subMessage);
 
         // Without a bound target identity the gate cannot prove the path, so it blocks unbound.
         Assert.True(DeployScopePlanner.TryFindBlockingErrors(offTarget, DeployScopeKind.ResourceGroup, out var unbound));
         Assert.Contains("ScopeTargetUnbound", unbound);
+    }
+
+    [Fact]
+    public void NestedDeploymentRetarget_MustMatchTheApprovedTarget()
+    {
+        // Microsoft Learn: an RG-scoped template retargets a nested deployment to another
+        // resource group in the same subscription via top-level resourceGroup - invisible
+        // to kind-only classification.
+        var offRg = Template(
+            """{"name":"n1","type":"Microsoft.Resources/deployments","apiVersion":"2022-09-01","resourceGroup":"other-rg","properties":{"mode":"Incremental","template":{"resources":[]}}}""");
+        Assert.True(DeployScopePlanner.TryFindBlockingErrors(offRg, "bbb", "target-rg", out var retarget));
+        Assert.Contains("ScopeTargetMismatch", retarget);
+
+        // Retargeting to the approved group itself is the approved scope: clears.
+        var onRg = Template(
+            """{"name":"n1","type":"Microsoft.Resources/deployments","apiVersion":"2022-09-01","resourceGroup":"TARGET-RG","properties":{"mode":"Incremental","template":{"resources":[]}}}""");
+        Assert.False(DeployScopePlanner.TryFindBlockingErrors(onRg, "bbb", "target-rg", out _));
+
+        // An expression target cannot be proven, so it fails closed.
+        var expression = Template(
+            """{"name":"n1","type":"Microsoft.Resources/deployments","apiVersion":"2022-09-01","resourceGroup":"[parameters('rg')]","properties":{"mode":"Incremental","template":{"resources":[]}}}""");
+        Assert.True(DeployScopePlanner.TryFindBlockingErrors(expression, "bbb", "target-rg", out var unprovable));
+        Assert.Contains("ScopeExpressionNotPlanned", unprovable);
+
+        // Overrides hidden inside the nested template are seen too.
+        var inner = Template(
+            """{"name":"n1","type":"Microsoft.Resources/deployments","apiVersion":"2022-09-01","properties":{"mode":"Incremental","template":{"resources":[{"name":"ra1","type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","scope":"/subscriptions/AAA/resourceGroups/other-rg"}]}}}""");
+        Assert.True(DeployScopePlanner.TryFindBlockingErrors(inner, "bbb", "target-rg", out var hidden));
+        Assert.Contains("ScopeTargetMismatch", hidden);
+
+        // An explicit subscriptionId retarget is beyond the single-scope pipeline even when
+        // it names the approved subscription: conservative by design.
+        var crossSub = Template(
+            """{"name":"n1","type":"Microsoft.Resources/deployments","apiVersion":"2022-09-01","subscriptionId":"bbb","resourceGroup":"target-rg","properties":{"mode":"Incremental","template":{"resources":[]}}}""");
+        Assert.True(DeployScopePlanner.TryFindBlockingErrors(crossSub, "bbb", "target-rg", out var subScope));
+        Assert.Contains("MultiScopeNotDeployable", subScope);
     }
 
     [Fact]
