@@ -81,6 +81,8 @@
 **Gate:** exported TF passes `terraform init/validate` in CI; live→Bicep of a scanned RG redeploys to a sandbox matching source.
 **Effort:** 3–4 weeks.
 
+**Status (2026-10-14):** 10.1 first cut done - `AdsDesignText` (Core/Common): canonical `.ads.json` v1 text format over the existing `DiagramGraph` DTO document. Deterministic-by-construction: entities identity-sorted (id, full-text tiebreak; links by source/target), one entity one JSON object, `Write(Read(Write(g))) == Write(g)` - the git-diff invariant for §C review; unknown per-type payload survives roundtrip untouched (TypeKey dispatch intact), casing matches the live saved-design format so the canvas loader path is compatible. Malformed text fails typed (`AdsDesignFormatException`, localized message) - bad version/section/entity never half-loads. 10 offline tests (roundtrip losslessness incl. extra fields, idempotence, sorting, casing, 6 malformed-input rows). Canvas cutover (save/load via text + git import/export UI) and workspace seam follow; DB/gRPC blob path untouched meanwhile.
+
 ## Phase 11 — Safe execution
 
 - 11.1 **[50]** What-if mandatory preflight (FullResourcePayloads; surface limits + `reference()` caveat honestly).
