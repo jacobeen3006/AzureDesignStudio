@@ -40,13 +40,13 @@ public sealed record AdoptionResult(DiagramGraph Graph, IReadOnlyList<AdoptedIte
 /// </summary>
 public static class AdoptEngine
 {
-    private const int Columns = 4;
-    private const double CellWidth = 260;
-    private const double CellHeight = 220;
-    private const double ChildInset = 24;
-    private const double ChildStepX = 150;
-    private const double ChildStepY = 120;
-    private const int ChildColumns = 2;
+    internal const int Columns = 4;
+    internal const double CellWidth = 260;
+    internal const double CellHeight = 220;
+    internal const double ChildInset = 24;
+    internal const double ChildStepX = 150;
+    internal const double ChildStepY = 120;
+    internal const int ChildColumns = 2;
 
     private sealed record Item(AdoptableResource Source, string TypeKey, bool Mapped)
     {

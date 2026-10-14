@@ -169,6 +169,12 @@
                 <Button Type="ButtonType.Primary" Size="ButtonSize.Small"
                         Disabled="@(adoptBusy || FilteredCount == 0 || FilteredCount > AdoptLimit)"
                         OnClick="AdoptAsync">@(adoptBusy ? "Adopting…" : $"Adopt {FilteredCount} as design")</Button>
+                @if (!string.IsNullOrEmpty(adsContext.CurrentDesignName))
+                {
+                    <Button Size="ButtonSize.Small"
+                            Disabled="@(adoptBusy || FilteredCount == 0 || FilteredCount > AdoptLimit)"
+                            OnClick="MergePlaneAsync">@(adoptBusy ? "Merging…" : "Refresh live plane")</Button>
+                }
                 @if (FilteredCount > AdoptLimit)
                 {
                     <span style="color:#faad14;font-size:12px;">too many to open on the canvas - narrow below @AdoptLimit</span>
@@ -422,9 +428,7 @@
         adoptBusy = true;
         try
         {
-            var icons = (adsContext.AllStencils ?? [])
-                .GroupBy(s => s.Key, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.First().IconPath, StringComparer.OrdinalIgnoreCase);
+            var icons = BuildIconIndex();
             var adoption = AdoptEngine.Adopt(items.Select(i =>
                 new AdoptableResource(i.Id, i.Type, i.Name,
                     string.IsNullOrWhiteSpace(i.Location) ? null : i.Location)),
@@ -453,6 +457,73 @@
             Message.Success($"Adopted {adoption.Items.Count} resource(s)"
                 + (placeholders > 0 ? $", {placeholders} unknown type(s) kept as placeholders" : "")
                 + $" into design '{designName}'.");
+            if (FeedbackRef as DrawerRef<string> is { } dr)
+                await dr.CloseAsync(string.Empty);
+        }
+        finally
+        {
+            adoptBusy = false;
+        }
+    }
+
+    private Dictionary<string, string> BuildIconIndex() => (adsContext.AllStencils ?? [])
+        .GroupBy(s => s.Key, StringComparer.OrdinalIgnoreCase)
+        .ToDictionary(g => g.Key, g => g.First().IconPath, StringComparer.OrdinalIgnoreCase);
+
+    // Live-plane refresh [12.1]: fold current scan truth into the open design WITHOUT
+    // destroying edits - matched resources take live name/location, live-only ones are
+    // added, design-only nodes are kept and reported (never deleted here). Saved under the
+    // current name through the ordinary save contract; only the undo history resets,
+    // because the canvas is reloaded from the merged graph.
+    private async Task MergePlaneAsync()
+    {
+        if (browseScanId is null || adoptBusy)
+            return;
+        var designName = adsContext.CurrentDesignName;
+        if (string.IsNullOrEmpty(designName))
+            return;
+        var items = Filtered().ToList();
+        if (items.Count == 0 || items.Count > AdoptLimit)
+            return;
+        if (!await Modal.ConfirmAsync(new ConfirmOptions
+        {
+            Title = "Merge live state into the design?",
+            Content = $"'{designName}' is updated from this scan: matched resources take live names/locations and new resources are added. Nothing is moved or deleted; the undo history resets.",
+            OkType = ButtonType.Primary,
+            OkText = "Merge",
+            CancelText = "Cancel",
+        }))
+            return;
+
+        adoptBusy = true;
+        try
+        {
+            var intent = await DataModelFactory.SaveDiagramToDto(adsContext.Diagram, mapper);
+            var icons = BuildIconIndex();
+            var merged = LivePlaneMerger.Merge(intent, items.Select(i =>
+                new AdoptableResource(i.Id, i.Type, i.Name,
+                    string.IsNullOrWhiteSpace(i.Location) ? null : i.Location)),
+                key => icons.GetValueOrDefault(key));
+            var status = await designService.SaveDesign(designName, JsonSerializer.Serialize(merged.Graph));
+            if (status != 200)
+            {
+                Message.Error("The merged design could not be saved; the canvas is unchanged.");
+                return;
+            }
+
+            adsContext.Diagram.History.Suspend(() =>
+            {
+                adsContext.Diagram.Nodes.Clear();
+                adsContext.Diagram.Links.Clear();
+                adsContext.Diagram.Groups.Clear();
+            });
+            adsContext.Diagram.History.Suspend(() =>
+                DataModelFactory.LoadDiagramFromDto(adsContext.Diagram, merged.Graph, mapper));
+            adsContext.Diagram.History.Clear();
+
+            Message.Success($"Merged into '{designName}': {merged.Updated} confirmed, {merged.Added.Count} new"
+                + (merged.MissingInLive.Count > 0 ? $", {merged.MissingInLive.Count} no longer in Azure (kept on the canvas)" : "")
+                + ".");
             if (FeedbackRef as DrawerRef<string> is { } dr)
                 await dr.CloseAsync(string.Empty);
         }
