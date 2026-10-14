@@ -231,7 +231,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
 
         private async Task RunDeployment(string whatIfToken, string planHash)
         {
-            _stepsStatus.Status = "started";
+            _stepsStatus = new() { Status = "started" };
             _showDeployStatus = true;
 
             await _deployService.CreateDeployment(_linkedSubscription!.SubscriptionId,
@@ -272,6 +272,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
 
                     else if (deploymentStatus == "unknown")
                     {
+                        _stepsStatus.CurrentStep = 1;
                         _stepsStatus.Status = "unknown";
                         _stepsStatus.ErrorMessage = errorMessage;
                         stateHasChanged = true;
@@ -283,7 +284,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private void CloseDeployStatus(MouseEventArgs e)
         {
             _showDeployStatus = false;
-            if (_stepsStatus.Status == "error" || _stepsStatus.Status == "finish")
+            if (_stepsStatus.Status is "error" or "finish" or "unknown")
             {
                 _stepsStatus = new();
             }

@@ -522,7 +522,21 @@ namespace AzureDesignStudio.Server.Services
                 // The submission may still have reached ARM; the outcome is unknown, not failed.
                 await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
                     PlanApplyEventModel.OutcomeUnknown, $"submission outcome unconfirmable: {ex.GetType().Name}: {ex.Message}");
-                throw;
+                // Rethrowing would only reach a gRPC status the client maps to a generic error;
+                // the drawer awaits this stream and must hear the honest state instead.
+                _logger.LogError(ex, "Deployment submission failed unconfirmably for apply {ApplyId}", applyId);
+                try
+                {
+                    response.StatusCode = StatusCodes.Status202Accepted;
+                    response.DeploymentStatus = "unknown";
+                    response.ErrorMessage = $"Submission outcome unconfirmable ({ex.GetType().Name}). The deployment may still have been accepted - verify its state in Azure (audit apply {applyId}).";
+                    await responseStream.WriteAsync(response);
+                }
+                catch (Exception wex)
+                {
+                    _logger.LogWarning(wex, "Deploy unknown-outcome write failed for apply {ApplyId}; the outcome is already recorded durably", applyId);
+                }
+                return;
             }
 
             var clientGone = false;
