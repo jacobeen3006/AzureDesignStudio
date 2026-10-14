@@ -27,8 +27,8 @@ public sealed record RevertEntry(RevertActionKind Action, string? ResourceId, st
 /// <summary>
 /// Pre-deploy snapshot plus inverse plan (v2 plan 11.4/[57]), built from the FULL (untruncated)
 /// what-if before payloads: what existed before the apply, and one typed undo entry per predicted
-/// change. The document is canonical by construction (fixed member order, entries sorted by
-/// resource id) so its <see cref="Hash"/> is stable. Execution is deliberately never enabled here:
+/// change. The document is canonical by construction (fixed member order, entries sorted by the
+/// serialized action string then resource id, both ordinal) so its <see cref="Hash"/> is stable. Execution is deliberately never enabled here:
 /// revert entries carry delete-bearing operations, and the deletion safety gate keeps them inert
 /// until Phase 13. The plan is stored with the approval and referenced by hash on every apply
 /// audit event; it is not part of the plan-hash identity (scope + template + parameters only).
@@ -39,7 +39,7 @@ public sealed class RevertPlan
 
     /// <summary>Why nothing here executes, surfaced verbatim in the document.</summary>
     public const string ExecutableNote =
-        "Revert execution is disabled until Phase 13: entries carry delete-bearing operations.";
+        "Revert execution is disabled until Phase 13 (guard-protected deprecation): the revert contains delete operations.";
 
     private RevertPlan(string documentJson, string hash, IReadOnlyList<RevertEntry> entries, int unrevertableCount)
     {
@@ -70,6 +70,14 @@ public sealed class RevertPlan
 
         foreach (var change in summary.Changes)
         {
+            // No undo can name a resource ARM never identified - true for every non-skipped kind.
+            if (change.Kind is not (WhatIfChangeKind.NoChange or WhatIfChangeKind.Ignore)
+                && string.IsNullOrWhiteSpace(change.ResourceId))
+            {
+                Add(entries, ref unrevertable, RevertActionKind.Unrevertable, change, payload: null, reason: "the resource ID is unknown");
+                continue;
+            }
+
             switch (change.Kind)
             {
                 case WhatIfChangeKind.NoChange:
@@ -84,43 +92,40 @@ public sealed class RevertPlan
                 case WhatIfChangeKind.Delete:
                 {
                     var action = change.Kind == WhatIfChangeKind.Modify ? RevertActionKind.Restore : RevertActionKind.Recreate;
-                    if (string.IsNullOrWhiteSpace(change.ResourceId))
-                    {
-                        Add(entries, ref unrevertable, RevertActionKind.Unrevertable, change, payload: null, reason: "what-if reported no resource id");
-                        continue;
-                    }
-
                     if (string.IsNullOrWhiteSpace(change.BeforeJson))
                     {
-                        Add(entries, ref unrevertable, RevertActionKind.Unrevertable, change, payload: null, reason: "what-if returned no pre-deployment payload");
+                        Add(entries, ref unrevertable, RevertActionKind.Unrevertable, change, payload: null, reason: "ARM did not return the pre-change payload");
                         continue;
                     }
 
-                    string normalized;
+                    // Any valid JSON is a snapshot (objects, arrays, scalars, JSON null included)
+                    // and embeds as-is; only malformed JSON is unrevertable. JsonNode.Parse maps
+                    // JSON null to a null node, so the null payload is preserved explicitly.
+                    string? payload;
                     try
                     {
-                        normalized = JsonNode.Parse(change.BeforeJson)!.ToJsonString();
+                        payload = JsonNode.Parse(change.BeforeJson)?.ToJsonString() ?? "null";
                     }
                     catch (JsonException)
                     {
-                        Add(entries, ref unrevertable, RevertActionKind.Unrevertable, change, payload: null, reason: "pre-deployment payload is not valid JSON");
+                        Add(entries, ref unrevertable, RevertActionKind.Unrevertable, change, payload: null, reason: "failed to parse pre-deployment payload");
                         continue;
                     }
 
-                    Add(entries, ref unrevertable, action, change, payload: normalized, reason: null);
+                    Add(entries, ref unrevertable, action, change, payload: payload, reason: null);
                     continue;
                 }
 
                 default:
                     // Bad/Unknown: ARM's prediction was indeterminate, so the undo is too.
-                    Add(entries, ref unrevertable, RevertActionKind.Unrevertable, change, payload: null, reason: "what-if could not classify the predicted change");
+                    Add(entries, ref unrevertable, RevertActionKind.Unrevertable, change, payload: null, reason: "ARM could not classify the predicted change");
                     continue;
             }
         }
 
         var ordered = entries
-            .OrderBy(e => e.ResourceId ?? "", StringComparer.Ordinal)
-            .ThenBy(e => e.Action)
+            .OrderBy(e => e.Action.ToString().ToLowerInvariant(), StringComparer.Ordinal)
+            .ThenBy(e => e.ResourceId ?? "", StringComparer.Ordinal)
             .ToList();
 
         var document = new JsonObject
@@ -129,7 +134,6 @@ public sealed class RevertPlan
             ["coverageNote"] = coverageNote,
             ["executable"] = false,
             ["executableNote"] = ExecutableNote,
-            ["unrevertableCount"] = unrevertable,
             ["entries"] = new JsonArray(ordered
                 .Select<RevertEntry, JsonNode?>(e => new JsonObject
                 {
@@ -139,6 +143,7 @@ public sealed class RevertPlan
                     ["reason"] = e.Reason,
                 })
                 .ToArray()),
+            ["unrevertableCount"] = unrevertable,
         };
 
         var json = document.ToJsonString();

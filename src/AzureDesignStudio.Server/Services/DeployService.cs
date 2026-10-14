@@ -917,6 +917,7 @@ namespace AzureDesignStudio.Server.Services
             ApprovedAtUtc = approval.ApprovedAtUtc,
             PreviewEvidence = previewEvidence,
             RevertPlanHash = RevertPlan.HashOf(approval.RevertPlanJson),
+            RevertPlanJson = approval.RevertPlanJson,
             EventType = eventType,
             Detail = PlanApplyEventModel.Truncate(detail),
             TimestampUtc = DateTime.UtcNow,

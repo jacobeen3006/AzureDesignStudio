@@ -10,8 +10,9 @@ namespace AzureDesignStudio.Core.Tests;
 
 /// <summary>
 /// v2 plan 11.4/[57]: the revert plan derives typed undo entries from full what-if before
-/// payloads, stays canonical (stable hash), and never claims executability; the token gate
-/// carries it to approval without touching the plan-hash identity.
+/// payloads, stays canonical (stable hash, member order, (action, resourceId) ordinal sort),
+/// and never claims executability; the token gate carries it to approval without touching
+/// the plan-hash identity.
 /// </summary>
 public class RevertPlanTests
 {
@@ -34,6 +35,19 @@ public class RevertPlanTests
     }
 
     [Fact]
+    public void CreateWithoutId_IsUnrevertableNotBlindDelete()
+    {
+        var plan = RevertPlan.Build(Summary(
+            new WhatIfChange(WhatIfChangeKind.Create, null, null, "{\"id\":1}", 1)));
+
+        var entry = Assert.Single(plan.Entries);
+        Assert.Equal(RevertActionKind.Unrevertable, entry.Action);
+        Assert.Null(entry.ResourceId);
+        Assert.Equal("the resource ID is unknown", entry.Reason);
+        Assert.Equal(1, plan.UnrevertableCount);
+    }
+
+    [Fact]
     public void ModifyAndDelete_CarryFullBeforePayloads()
     {
         var before = "{\"properties\":{\"sku\":\"Basic\"},\"location\":\"westeurope\"}";
@@ -49,6 +63,22 @@ public class RevertPlanTests
             Assert.Equal("Basic", payload.RootElement.GetProperty("properties").GetProperty("sku").GetString());
             Assert.Equal("westeurope", payload.RootElement.GetProperty("location").GetString());
         }
+    }
+
+    [Fact]
+    public void ValidJsonPayloads_EmbedAsIs_NotJustObjects()
+    {
+        var plan = RevertPlan.Build(Summary(
+            new WhatIfChange(WhatIfChangeKind.Modify, "/null-payload", "null", null, 1),
+            new WhatIfChange(WhatIfChangeKind.Modify, "/array", "[1, 2]", null, 1),
+            new WhatIfChange(WhatIfChangeKind.Modify, "/scalar", "42", null, 1)));
+
+        Assert.Equal(0, plan.UnrevertableCount);
+        Assert.Equal("null", plan.Entries.Single(e => e.ResourceId == "/null-payload").PayloadJson);
+        Assert.Equal("[1,2]", plan.Entries.Single(e => e.ResourceId == "/array").PayloadJson);
+        Assert.Equal("42", plan.Entries.Single(e => e.ResourceId == "/scalar").PayloadJson);
+        // The JSON-null snapshot survives as an explicit null member, not a missing one.
+        Assert.Contains("\"payload\":null", plan.DocumentJson);
     }
 
     [Fact]
@@ -68,13 +98,13 @@ public class RevertPlanTests
         var plan = RevertPlan.Build(Summary(
             new WhatIfChange(WhatIfChangeKind.Modify, "/no-before", null, null, 1),
             new WhatIfChange(WhatIfChangeKind.Delete, "/bad-json", "{oops", null, 1),
-            new WhatIfChange(WhatIfChangeKind.Modify, null, "{\"a\":1}", null, 1)));
+            new WhatIfChange(WhatIfChangeKind.Delete, null, "{\"a\":1}", null, 1)));
 
         Assert.Equal(3, plan.UnrevertableCount);
         Assert.All(plan.Entries, e => Assert.Equal(RevertActionKind.Unrevertable, e.Action));
-        Assert.Contains(plan.Entries, e => e.Reason == "what-if returned no pre-deployment payload");
-        Assert.Contains(plan.Entries, e => e.Reason == "pre-deployment payload is not valid JSON");
-        Assert.Contains(plan.Entries, e => e.Reason == "what-if reported no resource id" && e.ResourceId is null);
+        Assert.Contains(plan.Entries, e => e.Reason == "ARM did not return the pre-change payload");
+        Assert.Contains(plan.Entries, e => e.Reason == "failed to parse pre-deployment payload");
+        Assert.Contains(plan.Entries, e => e.Reason == "the resource ID is unknown" && e.ResourceId is null);
     }
 
     [Fact]
@@ -85,16 +115,17 @@ public class RevertPlanTests
             new WhatIfChange(WhatIfChangeKind.Unknown, "/u", null, null, 0)));
 
         Assert.Equal(2, plan.UnrevertableCount);
-        Assert.All(plan.Entries, e => Assert.Equal("what-if could not classify the predicted change", e.Reason));
+        Assert.All(plan.Entries, e => Assert.Equal("ARM could not classify the predicted change", e.Reason));
     }
 
     [Fact]
-    public void Document_IsCanonicalExecutableFalse_AndSortedById()
+    public void Document_MemberAndEntryOrderAreCanonical()
     {
         var plan = RevertPlan.Build(
             Summary(
                 new WhatIfChange(WhatIfChangeKind.Create, "/z", null, null, 1),
-                new WhatIfChange(WhatIfChangeKind.Delete, "/a", "{\"k\":1}", null, 1),
+                new WhatIfChange(WhatIfChangeKind.Delete, "/y", "{\"k\":1}", null, 1),
+                new WhatIfChange(WhatIfChangeKind.Modify, "/x", "{\"k\":2}", null, 1),
                 new WhatIfChange(WhatIfChangeKind.Bad, "/m", null, null, 0)),
             coverageNote: "only the first batch was previewed");
 
@@ -102,11 +133,18 @@ public class RevertPlanTests
         Assert.False(doc.RootElement.GetProperty("executable").GetBoolean());
         Assert.Equal(RevertPlan.ExecutableNote, doc.RootElement.GetProperty("executableNote").GetString());
         Assert.Equal("only the first batch was previewed", doc.RootElement.GetProperty("coverageNote").GetString());
+
+        // Fixed top-level member order, entries before unrevertableCount.
+        Assert.Equal(
+            new[] { "version", "coverageNote", "executable", "executableNote", "entries", "unrevertableCount" },
+            doc.RootElement.EnumerateObject().Select(p => p.Name).ToArray());
         Assert.Equal(1, doc.RootElement.GetProperty("unrevertableCount").GetInt32());
 
+        // Entries sort by serialized action (ordinal), then resource id:
+        // delete < recreate < restore < unrevertable - recreate BEFORE restore.
         var ids = doc.RootElement.GetProperty("entries").EnumerateArray()
             .Select(e => e.GetProperty("resourceId").GetString()).ToList();
-        Assert.Equal(new[] { "/a", "/m", "/z" }, ids);
+        Assert.Equal(new[] { "/z", "/y", "/x", "/m" }, ids);
     }
 
     [Fact]

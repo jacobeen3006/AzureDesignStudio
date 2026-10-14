@@ -99,6 +99,7 @@ var app = builder.Build();
                     ApprovedAtUtc datetime2 NOT NULL,
                     PreviewEvidence nvarchar(64) NULL,
                     RevertPlanHash nvarchar(71) NULL,
+                    RevertPlanJson nvarchar(max) NULL,
                     EventType nvarchar(16) NOT NULL,
                     Detail nvarchar(1024) NULL,
                     TimestampUtc datetime2 NOT NULL);
@@ -108,6 +109,8 @@ var app = builder.Build();
                 ALTER TABLE AdsPlanApprovals ADD RevertPlanJson nvarchar(max) NULL;
                 IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApplyEvents', N'RevertPlanHash') IS NULL
                 ALTER TABLE AdsPlanApplyEvents ADD RevertPlanHash nvarchar(71) NULL;
+                IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApplyEvents', N'RevertPlanJson') IS NULL
+                ALTER TABLE AdsPlanApplyEvents ADD RevertPlanJson nvarchar(max) NULL;
                 """);
         }
     }

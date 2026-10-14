@@ -88,6 +88,10 @@ public record PlanApplyEventModel
     [StringLength(71)]
     public string? RevertPlanHash { get; set; }
 
+    /// <summary>The full pre-deploy snapshot document as stored with the approval (v2 11.4); mirrored here
+    /// because the approval row is consumed at apply time - the trail alone must keep the snapshot.</summary>
+    public string? RevertPlanJson { get; set; }
+
     [StringLength(EventTypeCap, MinimumLength = 6)]
     public string EventType { get; set; } = null!;
 
