@@ -71,7 +71,7 @@
                 }
                 else
                 {
-                    <Button Size="ButtonSize.Small" OnClick="@(_ => Session.Pause())" Disabled="@Session.Paused">Pause</Button>
+                    <Button Size="ButtonSize.Small" OnClick="@(_ => Session.PauseAsync())" Disabled="@Session.Paused">Pause</Button>
                     <Button Size="ButtonSize.Small" OnClick="@(_ => Session.ResumeRun())" Disabled="@(!Session.Paused)">Resume</Button>
                     <Button Danger Size="ButtonSize.Small" OnClick="@(_ => Session.Cancel())">Cancel</Button>
                 }
@@ -109,7 +109,7 @@
                 <div style="display:flex;gap:8px;font-size:13px;border-bottom:1px solid #fafafa;padding:4px 0;">
                     <Tag Color="@ScanColor(scan.Status)">@scan.Status</Tag>
                     <span>@scan.Scope · @scan.ResourceCount rows</span>
-                    <span style="color:#999">@scan.StartedAt.LocalDateTime:dd.MM HH:mm</span>
+                    <span style="color:#999">@(scan.StartedAt.LocalDateTime.ToString("dd.MM HH:mm"))</span>
                     @if (scan.Error is { } e)
                     {
                         <span style="color:#cf1322;">@e</span>
@@ -132,7 +132,7 @@
                     <select @bind="browseScanId" @bind:after="LoadBrowseAsync">
                         @foreach (var scan in completed)
                         {
-                            <option value="@scan.Id">@scan.StartedAt.LocalDateTime:dd.MM HH:mm · @scan.Scope · @scan.ResourceCount rows</option>
+                            <option value="@scan.Id">@(scan.StartedAt.LocalDateTime.ToString("dd.MM HH:mm")) · @scan.Scope · @scan.ResourceCount rows</option>
                         }
                     </select>
                 }
@@ -199,8 +199,8 @@
     else
     {
         <div style="margin-bottom:8px;font-size:13px;">
-            <b>@reportItems.Count resources</b> scanned @reportScan.FinishedAt?.LocalDateTime:dd.MM HH:mm ·
-            retirement data as of <b>@catalog.DataAsOf.LocalDateTime:yyyy-MM-dd</b>
+            <b>@reportItems.Count resources</b> scanned @(reportScan.FinishedAt?.LocalDateTime.ToString("dd.MM HH:mm")) ·
+            retirement data as of <b>@(catalog.DataAsOf.LocalDateTime.ToString("yyyy-MM-dd"))</b>
             <Tag Color="@FreshnessColor(catalog.FreshnessAt(DateTimeOffset.UtcNow))">@catalog.FreshnessAt(DateTimeOffset.UtcNow)</Tag>
         </div>
 

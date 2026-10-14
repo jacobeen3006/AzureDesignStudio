@@ -44,11 +44,13 @@ public sealed class ScanControl
     private readonly SemaphoreSlim _gate = new(1, 1);
     public bool Paused { get; private set; }
 
-    public void Pause()
+    public async Task PauseAsync()
     {
         if (Paused) return;
         Paused = true;
-        _gate.Wait();
+        // Awaited (not blocking): desktop calls this from the Blazor UI thread,
+        // which must keep pumping while the scan parks at the gate.
+        await _gate.WaitAsync().ConfigureAwait(false);
     }
 
     public void Resume()

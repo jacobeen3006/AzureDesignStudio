@@ -157,4 +157,26 @@ public class TenantDiscoveryTests
         Assert.Equal(ProbeStatus.Available, report.Single(p => p.Source == "resourceGraph").Status);
         Assert.Equal(ProbeStatus.Available, report.Single(p => p.Source == "subscriptions").Status);
     }
+
+    [Fact]
+    public async Task ArmTransport_PostCarriesBodyAndBearerToken()
+    {
+        HttpRequestMessage? seen = null;
+        string? seenBody = null;
+        var transport = new ArmTransport(
+            new HttpClient(new RoutingHandler(r =>
+            {
+                seen = r;
+                seenBody = r.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                return Json("{}");
+            })),
+            new FakeCredential(), ArmEndpointSet.AzureCloud, NoDelay);
+
+        await transport.PostAsync("https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2024-04-01", """{"query":"x"}""");
+
+        Assert.NotNull(seen);
+        Assert.Equal("Bearer", seen!.Headers.Authorization!.Scheme);
+        Assert.Equal("fake", seen.Headers.Authorization!.Parameter);
+        Assert.Equal("""{"query":"x"}""", seenBody);
+    }
 }

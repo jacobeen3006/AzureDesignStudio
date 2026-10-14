@@ -113,15 +113,21 @@ public static class MauiProgram
         // Tenant scan drawer (plan 7.8): the shared TopMenu opens it through the seam.
         // DrawerService must be the current circuit's instance - the func gets the
         // scoped provider straight from the click site in TopMenu.
+        AntDesign.DrawerRef<string>? scanDrawer = null;
         builder.Services.AddSingleton(new AdsHostFeatures
         {
             TenantScanLabel = "Tenant scan",
             OpenTenantScan = async circuitServices =>
             {
                 var drawers = circuitServices.GetRequiredService<AntDesign.DrawerService>();
-                var drawer = await drawers.CreateAsync<Components.TenantScanDrawerTemplate, string, string>(
+                // TopMenu only tracks drawers it opened itself; close a previous
+                // scan drawer here so repeated menu clicks never stack.
+                if (scanDrawer is not null)
+                    await scanDrawer.CloseAsync();
+                var drawerRef = await drawers.CreateAsync<Components.TenantScanDrawerTemplate, string, string>(
                     new AntDesign.DrawerOptions { Title = "Tenant scan", Width = "720" }, string.Empty);
-                drawer.OnClose = () => Task.CompletedTask;
+                drawerRef.OnClose = () => { scanDrawer = null; return Task.CompletedTask; };
+                scanDrawer = drawerRef;
             },
         });
 
@@ -137,6 +143,7 @@ public static class MauiProgram
         Services = app.Services;
         return app;
     }
+
 }
 
 internal sealed class FileLoggerProvider(string path) : ILoggerProvider

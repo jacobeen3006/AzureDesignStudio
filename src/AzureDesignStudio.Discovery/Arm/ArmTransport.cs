@@ -48,7 +48,14 @@ public sealed class ArmTransport(HttpClient http, TokenCredential credential, Ar
             try
             {
                 using var message = new HttpRequestMessage(method, url);
-                message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", GetToken());
+                // Never block here: on the desktop host this method can be entered
+                // on the Blazor UI thread, and the interactive (WAM) credential
+                // needs that thread to pump - a sync-over-async token acquire
+                // deadlocks it.
+                var token = await credential
+                    .GetTokenAsync(new TokenRequestContext(new[] { Endpoints.Scope }), ct)
+                    .ConfigureAwait(false);
+                message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
                 if (body is not null) message.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
                 using var response = await http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
@@ -74,10 +81,6 @@ public sealed class ArmTransport(HttpClient http, TokenCredential credential, Ar
             }
         }
     }
-
-    private string GetToken() => credential
-        .GetTokenAsync(new TokenRequestContext(new[] { Endpoints.Scope }), CancellationToken.None)
-        .GetAwaiter().GetResult().Token;
 }
 
 /// <summary>Cloud endpoint set (7.6: sovereign clouds swap all four, never a hardcoded host).</summary>

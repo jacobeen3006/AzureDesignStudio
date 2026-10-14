@@ -103,7 +103,7 @@ public sealed class ResourceGraphClient
             {
                 await WaitForQuotaAsync(ct).ConfigureAwait(false);
 
-                using var message = BuildRequest(request, ct);
+                using var message = await BuildRequestAsync(request).ConfigureAwait(false);
                 using var response = await _http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, ct)
                     .ConfigureAwait(false);
 
@@ -133,26 +133,23 @@ public sealed class ResourceGraphClient
         }
     }
 
-    private HttpRequestMessage BuildRequest(JsonObject request, CancellationToken ct)
+    private async Task<HttpRequestMessage> BuildRequestAsync(JsonObject request)
     {
-        var token = GetToken(ct);
+        // Never block for a token here: on the desktop host callers can run on the
+        // Blazor UI thread, and the interactive (WAM) credential needs that thread
+        // to pump. The token fetch ignores query cancellation; a cache hit
+        // completes synchronously.
+        var token = await _credential.GetTokenAsync(
+                new TokenRequestContext(new[] { _options.Scope }), CancellationToken.None)
+            .ConfigureAwait(false);
         var message = new HttpRequestMessage(HttpMethod.Post,
             $"{_options.Endpoint.TrimEnd('/')}/providers/Microsoft.ResourceGraph/resources?api-version={_options.ApiVersion}")
         {
             Content = new StringContent(request.ToJsonString(), Encoding.UTF8, "application/json"),
         };
-        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         message.Headers.Add("x-ms-request-id", Guid.NewGuid().ToString());
         return message;
-    }
-
-    private string GetToken(CancellationToken ct)
-    {
-        // TokenCredential is sync-hostile; request with infinite cancellation - token fetch itself
-        // never honors our query cancellation and a token cache hit completes synchronously.
-        var value = _credential.GetTokenAsync(
-            new TokenRequestContext(new[] { _options.Scope }), CancellationToken.None).GetAwaiter().GetResult();
-        return value.Token;
     }
 
     private void ObserveQuota(HttpResponseMessage response)

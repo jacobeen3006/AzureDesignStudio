@@ -91,9 +91,10 @@ public sealed class TenantScanSession(
         return true;
     }
 
-    public void Pause()
+    public async Task PauseAsync()
     {
-        control?.Pause();
+        if (control is { } c)
+            await c.PauseAsync();
         StateChanged?.Invoke();
     }
 

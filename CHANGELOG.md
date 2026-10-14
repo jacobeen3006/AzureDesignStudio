@@ -3,6 +3,14 @@
 All notable changes to Azure Design Studio are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version scheme is SemVer via Nerdbank.GitVersioning.
 
+
+## [Unreleased]
+
+### Fixed
+- Desktop sign-in hang: the WAM broker requires `AcquireTokenInteractive` on the UI thread (MSAL `WamUiThread` contract); interactive acquisition now runs directly on the Blazor renderer thread instead of a timer-deferred sync block.
+- Removed every UI-thread-reachable sync-over-async block in the scan stack (`ArmTransport` token fetch, `ResourceGraphClient` request build, `ScanControl.Pause` → `PauseAsync`) — each could freeze the desktop UI when the token cache was cold.
+- Tenant-scan drawer history timestamps rendered a literal `dd.MM HH:mm` (Razor treated the format suffix as text); now proper `ToString` calls.
+- Repeated "Tenant scan" menu clicks no longer stack duplicate drawers — the host seam closes the previous one first.
 ## [1.0.0] - 2026-10-13
 
 ### Added

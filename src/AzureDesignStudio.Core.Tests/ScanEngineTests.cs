@@ -175,7 +175,7 @@ public class ScanEngineTests
         var sink = new RecordingSink();
         var control = new ScanControl();
         // Pause inside the first page callback: the first worker still holds its slot,
-        sink.onPage = n => { if (n == 1) control.Pause(); return Task.CompletedTask; };
+        sink.onPage = async n => { if (n == 1) await control.PauseAsync(); };
         var engine = new ScanEngine(Graph(handler), groupSize: 1, maxParallel: 1);
 
         var run = engine.RunAsync(Request("a", "b"), sink, control: control);
