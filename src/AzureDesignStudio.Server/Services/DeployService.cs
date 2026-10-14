@@ -460,9 +460,8 @@ namespace AzureDesignStudio.Server.Services
             // Consume the approval: one apply per approval, re-deploy needs a fresh review.
             // The apply trail (v2 plan [62]/11.3) is the append-only AdsPlanApplyEvents stream:
             // Started - canonical plan body + hash of the consumed preview token, written before
-            // any ARM mutation - followed by exactly one terminal Completed/Failed event. The
-            // approval row is consumed, but the applied artifact stays recoverable from the
-            // trail and a failed start is never labeled applied.
+            // any ARM mutation - then exactly one true terminal event from ARM's own state.
+            // Transport failure is never a provisioning outcome: see the polling loop below.
             var applyId = Guid.NewGuid();
             var previewEvidence = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
                 System.Text.Encoding.UTF8.GetBytes(request.WhatIfToken)));
@@ -473,68 +472,117 @@ namespace AzureDesignStudio.Server.Services
             _logger.LogInformation("Plan apply started hash={PlanHash} approver={ApprovedBy} user={UserId} target={Subscription}/{ResourceGroup} applyId={ApplyId}",
                 planHash, approval.ApprovedBy, userIdClaim, subscriptionId, request.ResourceGroupName, applyId);
 
-            // Deploy the template
+            // Deploy the template. Transport and provisioning are separate concerns: the client
+            // stream is best-effort, the ARM LRO is the only source of terminal truth.
+            ArmDeploymentCollection armDeployments = rg.GetArmDeployments();
+            string deploymentName = WhatIfClient.DeploymentName;
+            var input = new ArmDeploymentContent(new ArmDeploymentProperties(ArmDeploymentMode.Incremental)
+            {
+                Template = BinaryData.FromString(request.ArmTemplate),
+                Parameters = BinaryData.FromString(parametersJson),
+            });
+
+            ArmOperation<ArmDeploymentResource> lro;
             try
             {
-                ArmDeploymentCollection armDeployments = rg.GetArmDeployments();
-                string deploymentName = WhatIfClient.DeploymentName;
-                var input = new ArmDeploymentContent(new ArmDeploymentProperties(ArmDeploymentMode.Incremental)
-                {
-                    Template = BinaryData.FromString(request.ArmTemplate),
-                    Parameters = BinaryData.FromString(parametersJson),
-                });
-
-                ArmOperation<ArmDeploymentResource> lro = await armDeployments.CreateOrUpdateAsync(WaitUntil.Started, deploymentName, input);
-
-                while(!lro.HasCompleted)
-                {
-                    response.StatusCode = StatusCodes.Status200OK;
-                    response.DeploymentStatus = "processing";
-                    await responseStream.WriteAsync(response);
-                    await Task.Delay(2000);
-                    await lro.UpdateStatusAsync();
-                }
-
-                var provisioningState = lro.Value?.Data?.Properties?.ProvisioningState?.ToString();
-                if (string.Equals(provisioningState, "Succeeded", StringComparison.OrdinalIgnoreCase))
-                {
-                    response.StatusCode = StatusCodes.Status200OK;
-                    response.DeploymentStatus = "completed";
-                    await responseStream.WriteAsync(response);
-                    await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
-                        PlanApplyEventModel.Completed, $"provisioningState={provisioningState}");
-                }
-                else
-                {
-                    // The LRO finished but the deployment itself failed or partially failed:
-                    // terminal Failed, never a silent "completed".
-                    response.StatusCode = StatusCodes.Status400BadRequest;
-                    response.DeploymentStatus = "failed";
-                    response.ErrorMessage = $"Deployment finished with provisioningState={provisioningState ?? "Unknown"}.";
-                    await responseStream.WriteAsync(response);
-                    await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
-                        PlanApplyEventModel.Failed, response.ErrorMessage);
-                }
+                lro = await armDeployments.CreateOrUpdateAsync(WaitUntil.Started, deploymentName, input);
             }
             catch (RequestFailedException ex)
             {
-                _logger.LogWarning(ex, "Request Failed Exception");
+                // ARM refused the submission; no deployment was started.
                 response.StatusCode = StatusCodes.Status400BadRequest;
                 response.DeploymentStatus = "failed";
                 response.ErrorMessage = $"HTTP {ex.Status}: {ex.ErrorCode}";
                 await responseStream.WriteAsync(response);
                 await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
-                    PlanApplyEventModel.Failed, response.ErrorMessage);
+                    PlanApplyEventModel.Failed, $"submission refused: HTTP {ex.Status}: {ex.ErrorCode}");
+                return;
             }
             catch (Exception ex)
             {
-                // Client disconnect, cancellation, or unexpected fault mid-apply: the terminal
-                // audit event still lands, then the exception propagates to the gRPC layer.
+                // The submission may still have reached ARM; the outcome is unknown, not failed.
                 await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
-                    PlanApplyEventModel.Failed, $"{ex.GetType().Name}: {ex.Message}");
+                    PlanApplyEventModel.OutcomeUnknown, $"submission outcome unconfirmable: {ex.GetType().Name}: {ex.Message}");
                 throw;
             }
+
+            var clientGone = false;
+            var consecutivePollFailures = 0;
+            while (!lro.HasCompleted)
+            {
+                if (!clientGone)
+                {
+                    try
+                    {
+                        response.StatusCode = StatusCodes.Status200OK;
+                        response.DeploymentStatus = "processing";
+                        await responseStream.WriteAsync(response);
+                    }
+                    catch (Exception ex)
+                    {
+                        // A dead stream says nothing about provisioning: the LRO keeps running and
+                        // ARM keeps being polled for the true outcome. This is not a Failed event.
+                        clientGone = true;
+                        _logger.LogWarning(ex, "Deploy stream write failed for apply {ApplyId}; continuing ARM polling without a client", applyId);
+                        await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
+                            PlanApplyEventModel.TransportLost, $"client stream lost mid-deployment ({ex.GetType().Name}); ARM polling continues for the true outcome");
+                    }
+                }
+
+                await Task.Delay(2000);
+                try
+                {
+                    await lro.UpdateStatusAsync();
+                    consecutivePollFailures = 0;
+                }
+                catch (RequestFailedException ex)
+                {
+                    // A status-query failure is not a deployment failure; tolerate transient ARM
+                    // unavailability before declaring the outcome unconfirmable.
+                    _logger.LogWarning(ex, "Provisioning status query failed for apply {ApplyId}", applyId);
+                    if (++consecutivePollFailures >= MaxConsecutivePollFailures)
+                    {
+                        await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
+                            PlanApplyEventModel.OutcomeUnknown, $"provisioning state unconfirmable after {consecutivePollFailures} consecutive status-query failures: HTTP {ex.Status}: {ex.ErrorCode}");
+                        return;
+                    }
+                }
+            }
+
+            var provisioningState = lro.Value?.Data?.Properties?.ProvisioningState?.ToString();
+            var succeeded = string.Equals(provisioningState, "Succeeded", StringComparison.OrdinalIgnoreCase);
+            // Truth lands first, even when nobody is listening anymore: the durable terminal
+            // event is recorded from ARM's state alone, never gated on a client write.
+            await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
+                succeeded ? PlanApplyEventModel.Completed : PlanApplyEventModel.Failed,
+                succeeded ? $"provisioningState={provisioningState}" : $"Deployment finished with provisioningState={provisioningState ?? "Unknown"}.");
+
+            if (!clientGone)
+            {
+                try
+                {
+                    if (succeeded)
+                    {
+                        response.StatusCode = StatusCodes.Status200OK;
+                        response.DeploymentStatus = "completed";
+                    }
+                    else
+                    {
+                        response.StatusCode = StatusCodes.Status400BadRequest;
+                        response.DeploymentStatus = "failed";
+                        response.ErrorMessage = $"Deployment finished with provisioningState={provisioningState ?? "Unknown"}.";
+                    }
+                    await responseStream.WriteAsync(response);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Deploy final write failed for apply {ApplyId}; the true outcome is already recorded durably", applyId);
+                }
+            }
         }
+
+        /// <summary>Consecutive ARM status-query failures tolerated before the outcome is declared unconfirmable.</summary>
+        private const int MaxConsecutivePollFailures = 5;
 
         private static PlanApplyEventModel NewApplyEvent(Guid applyId, PlanApprovalModel approval, string subscriptionId,
             string resourceGroupName, string eventType, string? previewEvidence, string? detail) => new()
@@ -550,7 +598,7 @@ namespace AzureDesignStudio.Server.Services
             ApprovedAtUtc = approval.ApprovedAtUtc,
             PreviewEvidence = previewEvidence,
             EventType = eventType,
-            Detail = detail is { Length: <= 1024 } ? detail : detail is not null ? detail[..1016] + "…[trunc]" : null,
+            Detail = PlanApplyEventModel.Truncate(detail),
             TimestampUtc = DateTime.UtcNow,
         };
 
