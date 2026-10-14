@@ -163,6 +163,32 @@ public static class DeploymentStack
         return new DeploymentStackBody(json, hash, diagnostics);
     }
 
+    /// <summary>Wire form of an unmanage action, case-insensitive; blank, unknown or
+    /// out-of-range values are refused so callers answer 400 instead of guessing. A parsed
+    /// <see cref="StackUnmanageAction.Delete"/> still meets <c>StackDeleteActionLocked</c> in Build.</summary>
+    public static bool TryParseAction(string? value, out StackUnmanageAction action)
+    {
+        action = default;
+        if (!IsNamedWire(value) || !Enum.TryParse<StackUnmanageAction>(value, ignoreCase: true, out var parsed) || !Enum.IsDefined(parsed))
+            return false;
+        action = parsed;
+        return true;
+    }
+
+    /// <summary>Wire form of a deny lock level, case-insensitive; blank, numeric or unknown values are refused.</summary>
+    public static bool TryParseDenyLock(string? value, out StackDenyLock denyLock)
+    {
+        denyLock = default;
+        if (!IsNamedWire(value) || !Enum.TryParse<StackDenyLock>(value, ignoreCase: true, out var parsed) || !Enum.IsDefined(parsed))
+            return false;
+        denyLock = parsed;
+        return true;
+    }
+
+    // Enum names never start with a digit: a numeric wire value is someone's guess at the
+    // protocol, not a policy statement - refuse it rather than let "1" smuggle in Delete.
+    private static bool IsNamedWire(string? value) => !string.IsNullOrWhiteSpace(value) && !char.IsDigit(value[0]);
+
     /// <summary>
     /// Reads the managed resource ids a stack GET reports. A stack with no managed list is a
     /// malformed payload (Error), an empty list is legitimate (a stack that detached everything);

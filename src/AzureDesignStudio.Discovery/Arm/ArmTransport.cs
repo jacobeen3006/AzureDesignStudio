@@ -57,6 +57,26 @@ public sealed class ArmTransport(HttpClient http, TokenCredential credential, Ar
         throw ResourceGraphException.FromErrorBody((int)r.Status, r.Body);
     }
 
+    /// <summary>PUT that follows the ARM resource-LRO shape: a 201/202 carrying
+    /// <c>Azure-AsyncOperation</c> (preferred) or <c>Location</c> polls until a terminal answer.</summary>
+    public async Task<string> PutAsyncPolled(string url, string json, int maxPolls = 60, CancellationToken ct = default)
+    {
+        var r = await SendWithThrottleAsync(HttpMethod.Put, url, json, ct).ConfigureAwait(false);
+        var pollUrl = r.AsyncOperation ?? r.Location;
+        for (var poll = 0; r.Status is HttpStatusCode.Accepted or HttpStatusCode.Created && pollUrl is not null; poll++)
+        {
+            if (poll >= maxPolls)
+                throw new ResourceGraphException("Timeout", $"ARM operation did not finish within {maxPolls} polls: {url}", 408);
+            await _delay(r.RetryAfter ?? TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+            r = await SendWithThrottleAsync(HttpMethod.Get, pollUrl, null, ct).ConfigureAwait(false);
+            // A 202 without operation headers keeps the last poll URI (retry the status endpoint).
+            pollUrl = r.AsyncOperation ?? r.Location ?? (r.Status == HttpStatusCode.Accepted ? pollUrl : null);
+        }
+
+        if (r.IsSuccess) return r.Body;
+        throw ResourceGraphException.FromErrorBody((int)r.Status, r.Body);
+    }
+
     private Task<string> SendAsync(HttpMethod method, string url, string? body, CancellationToken ct) =>
         FinishAsync(method, url, body, ct);
 
@@ -100,7 +120,8 @@ public sealed class ArmTransport(HttpClient http, TokenCredential credential, Ar
 
                 var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                 return new Response(response.StatusCode, text, response.Headers.Location?.ToString(),
-                    response.Headers.RetryAfter?.Delta, response.IsSuccessStatusCode);
+                    response.Headers.RetryAfter?.Delta, response.IsSuccessStatusCode,
+                    response.Headers.TryGetValues("Azure-AsyncOperation", out var asyncOp) ? asyncOp.FirstOrDefault() : null);
             }
             finally
             {
@@ -109,7 +130,7 @@ public sealed class ArmTransport(HttpClient http, TokenCredential credential, Ar
         }
     }
 
-    private sealed record Response(HttpStatusCode Status, string Body, string? Location, TimeSpan? RetryAfter, bool IsSuccess);
+    private sealed record Response(HttpStatusCode Status, string Body, string? Location, TimeSpan? RetryAfter, bool IsSuccess, string? AsyncOperation);
 }
 
 /// <summary>Cloud endpoint set (7.6: sovereign clouds swap all four, never a hardcoded host).</summary>

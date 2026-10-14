@@ -683,6 +683,294 @@ namespace AzureDesignStudio.Server.Services
                 previewEvidence, batchLabel: null, successStatus: "completed", consumesApproval: true,
                 cancellationToken: context.CancellationToken, response, responseStream);
         }
+        /// <summary>
+        /// v2 plan 12.3: deploy the design as a deployment-stack under the same double gate as
+        /// CreateDeployment - a fresh what-if token plus a named principal's approval bound to the
+        /// canonical scope+template+parameters identity. The stack name and unmanage policy ride
+        /// beside the hash (the revert-plan convention), are validated fail-closed by the engine
+        /// before anything is sent, and land in the append-only apply trail keyed by stack name.
+        /// </summary>
+        public override async Task<CreateStackResponse> CreateStack(CreateStackRequest request, ServerCallContext context)
+        {
+            var response = new CreateStackResponse();
+
+            if (string.IsNullOrWhiteSpace(request.ArmTemplate))
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "Template is empty.";
+                return response;
+            }
+
+            if (ArmTemplateValidator.TryFindBlockingErrors(request.ArmTemplate, request.Parameters, out var validationErrors))
+            {
+                _logger.LogWarning("Template blocked before stack deploy: {Errors}", validationErrors);
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = validationErrors;
+                return response;
+            }
+
+            if (DeployScopePlanner.TryStageForApply(request.ArmTemplate, request.SubscriptionId, request.ResourceGroupName,
+                    out _, out var scopeErrors))
+            {
+                _logger.LogWarning("Staged plan blocked before stack deploy: {Errors}", scopeErrors);
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = scopeErrors;
+                return response;
+            }
+
+            // Wire-form policy before anything is spent: unknown values answer 400, never a surprise
+            // mid-apply. Blank optional slots take ARM's Detach default; missing_action is required.
+            if (!DeploymentStack.TryParseAction(request.MissingAction, out var missingAction))
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "missing_action must be Detach or Ignore (Delete is disabled until the decommissioning gates ship).";
+                return response;
+            }
+            var resourceGroupAction = StackUnmanageAction.Detach;
+            if (!string.IsNullOrWhiteSpace(request.ResourceGroupAction) && !DeploymentStack.TryParseAction(request.ResourceGroupAction, out resourceGroupAction))
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "resource_group_action must be Detach or Ignore when set.";
+                return response;
+            }
+            var deploymentAction = StackUnmanageAction.Detach;
+            if (!string.IsNullOrWhiteSpace(request.DeploymentAction) && !DeploymentStack.TryParseAction(request.DeploymentAction, out deploymentAction))
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "deployment_action must be Detach or Ignore when set.";
+                return response;
+            }
+            StackDenySettings? denySettings = null;
+            if (request.DenyEnabled || request.DenyLocks.Count > 0)
+            {
+                var locks = new List<StackDenyLock>();
+                foreach (var rawLock in request.DenyLocks)
+                {
+                    if (!DeploymentStack.TryParseDenyLock(rawLock, out var parsedLock))
+                    {
+                        response.StatusCode = StatusCodes.Status400BadRequest;
+                        response.ErrorMessage = "deny_locks entries must be NotDeletion or NotDeletionAndChildUsage.";
+                        return response;
+                    }
+                    locks.Add(parsedLock);
+                }
+                denySettings = new StackDenySettings(request.DenyEnabled, locks);
+            }
+
+            var userIdClaim = ServiceTools.GetUserId(context);
+            if (string.IsNullOrWhiteSpace(userIdClaim))
+            {
+                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                response.StatusCode = StatusCodes.Status401Unauthorized;
+                response.ErrorMessage = "Access denied.";
+                return response;
+            }
+            var userId = new Guid(userIdClaim);
+
+            Guid subscriptionId;
+            try
+            {
+                subscriptionId = new Guid(request.SubscriptionId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Exception occurred.");
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "Bad request.";
+                return response;
+            }
+
+            var subModel = await GetSubscriptionInfo(userId, subscriptionId);
+            if (subModel == null)
+            {
+                _logger.LogWarning("No subscription is found.");
+                response.StatusCode = StatusCodes.Status404NotFound;
+                response.ErrorMessage = "No subscription is found.";
+                return response;
+            }
+
+            // The stack lives in the resource group's region - the same honest ArmClient lookup
+            // the WhatIf path uses; a stack location is never guessed or defaulted.
+            var credential = new ClientSecretCredential(subModel.TenantId.ToString(),
+                subModel.ClientId.ToString(), subModel.ClientSecret);
+            var armClient = new ArmClient(credential, subscriptionId.ToString());
+            var subResource = await armClient.GetDefaultSubscriptionAsync();
+            var rg = (await subResource.GetResourceGroupAsync(request.ResourceGroupName))?.Value;
+            if (rg == null)
+            {
+                _logger.LogWarning("{ResourceGroup} cannot be found.", request.ResourceGroupName);
+                response.StatusCode = StatusCodes.Status404NotFound;
+                response.ErrorMessage = "Cannot find the resource group.";
+                return response;
+            }
+
+            var parametersJson = string.IsNullOrWhiteSpace(request.Parameters) ? "{}" : request.Parameters;
+
+            // Same identity as WhatIf/ApprovePlan/CreateDeployment: scope + template + parameters.
+            string planHash;
+            try
+            {
+                planHash = DeployPlanArtifact.Create(subscriptionId.ToString(), request.ResourceGroupName,
+                    request.ArmTemplate, parametersJson).PlanHash;
+            }
+            catch (Exception ex) when (ex is System.Text.Json.JsonException or ArgumentException)
+            {
+                _logger.LogWarning(ex, "Stack payload is not canonicalizable.");
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "Template or parameters are not valid JSON.";
+                return response;
+            }
+
+            if (!string.Equals(request.PlanHash, planHash, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Stack payload differs from approved plan {PlanHash}", planHash);
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "PLAN_APPROVAL_REQUIRED: the deployed payload differs from the approved plan hash. Run What-If and approve this exact template and parameters.";
+                return response;
+            }
+
+            var approval = await _designContext.AdsPlanApprovals.FindAsync([planHash], context.CancellationToken);
+            if (approval == null)
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "PLAN_NOT_APPROVED: this plan has no approval. Approve the What-If result before deploying.";
+                return response;
+            }
+
+            if (!string.Equals(approval.ApprovedByUserId, userIdClaim, StringComparison.Ordinal))
+            {
+                _logger.LogWarning("Plan {PlanHash} approved by {Approver} but stacked by a different principal", planHash, approval.ApprovedBy);
+                response.StatusCode = StatusCodes.Status403Forbidden;
+                response.ErrorMessage = "PLAN_APPROVER_MISMATCH: only the principal that approved this plan may deploy it.";
+                return response;
+            }
+
+            var planCheck = PlanApprovalGate.Evaluate(approval.Status, approval.PlanJson, approval.PlanHash, approval.ApprovedBy);
+            if (!planCheck.Cleared)
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = $"PLAN_{planCheck.Reason}: {planCheck.Detail}";
+                return response;
+            }
+
+            // Engine validation before the single-use token burns: refuse-with-diagnostics, never warn.
+            var body = DeploymentStack.Build(request.StackName, rg.Data.Location,
+                request.ArmTemplate, new StackPolicy(missingAction, resourceGroupAction, deploymentAction, denySettings),
+                parametersJson);
+            if (!body.Success)
+            {
+                var errors = string.Join(" ", body.Diagnostics
+                    .Where(d => d.Severity == ArmDiagnosticSeverity.Error).Select(d => $"{d.Code}: {d.Message}"));
+                _logger.LogWarning("Stack body refused: {Errors}", errors);
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = errors;
+                return response;
+            }
+
+            var whatIfCheck = _whatIfGate.ValidateAndConsume(request.WhatIfToken, subscriptionId.ToString(),
+                request.ResourceGroupName, request.ArmTemplate, parametersJson);
+            if (!whatIfCheck.IsOk)
+            {
+                _logger.LogWarning("Stack deploy blocked by what-if gate: {Code}", whatIfCheck.Code);
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = $"{whatIfCheck.Code}: {whatIfCheck.Detail}";
+                return response;
+            }
+
+            // Consume the approval: one apply per approval, re-apply needs a fresh review. The
+            // Started row lands before any ARM mutation; exactly one true terminal event follows
+            // per applyId, ARM's own state being the only source of terminal truth (v2 11.3/[62]).
+            var applyId = Guid.NewGuid();
+            var previewEvidence = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(request.WhatIfToken)));
+            _designContext.AdsPlanApplyEvents.Add(NewApplyEvent(applyId, approval, subscriptionId.ToString(),
+                request.ResourceGroupName, PlanApplyEventModel.Started, previewEvidence, detail: null, deploymentName: request.StackName));
+            _designContext.AdsPlanApprovals.Remove(approval);
+            await _designContext.SaveChangesAsync(context.CancellationToken);
+            _logger.LogInformation("Stack apply started hash={PlanHash} stack={StackName} applyId={ApplyId}",
+                planHash, request.StackName, applyId);
+
+            var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), credential, ArmEndpointSet.AzureCloud);
+            string stackJson;
+            try
+            {
+                stackJson = await new DeploymentStackClient(transport).CreateOrUpdateAsync(
+                    subscriptionId.ToString(), request.ResourceGroupName, request.StackName, body.Json, context.CancellationToken);
+            }
+            catch (ResourceGraphException ex)
+            {
+                // Only ARM's own 4xx (bar 408) proves the submission was never accepted;
+                // transport failure, 408 and 5xx may still have landed at ARM.
+                var rejected = PlanApplyEventModel.ProvesSubmissionRejected(ex.StatusCode);
+                await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
+                    rejected ? PlanApplyEventModel.Failed : PlanApplyEventModel.OutcomeUnknown,
+                    rejected ? $"stack submission refused: HTTP {ex.StatusCode}: {ex.Code}"
+                             : $"stack submission outcome unconfirmable: HTTP {ex.StatusCode}: {ex.Code}",
+                    request.StackName);
+                response.StatusCode = rejected ? StatusCodes.Status400BadRequest : StatusCodes.Status502BadGateway;
+                response.ErrorMessage = rejected
+                    ? $"STACK_SUBMISSION_REFUSED: HTTP {ex.StatusCode}: {ex.Code}"
+                    : "STACK_OUTCOME_UNKNOWN: the stack apply could not be confirmed; check the stack in Azure before retrying.";
+                return response;
+            }
+            catch (OperationCanceledException)
+            {
+                // Client disconnect and the HttpClient deadline are the same audit fact: the apply
+                // left Started and no terminal ARM state was observed - OutcomeUnknown, never a
+                // failure claim, and never silence.
+                await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
+                    PlanApplyEventModel.OutcomeUnknown, context.CancellationToken.IsCancellationRequested
+                        ? "client cancelled before a terminal ARM state was observed"
+                        : "transport deadline elapsed before a terminal ARM state was observed",
+                    request.StackName);
+                if (context.CancellationToken.IsCancellationRequested)
+                    throw;
+                response.StatusCode = StatusCodes.Status502BadGateway;
+                response.ErrorMessage = "STACK_OUTCOME_UNKNOWN: the stack apply may still be running in Azure; check the stack before retrying.";
+                return response;
+            }
+
+            // ARM state decides the terminal event: Failed-in-200 is Failed, an unreadable
+            // state is OutcomeUnknown - never a silent success claim.
+            var state = TryGetProvisioningState(stackJson);
+            var terminal = state switch
+            {
+                "Succeeded" => PlanApplyEventModel.Completed,
+                "Failed" or "Canceled" => PlanApplyEventModel.Failed,
+                _ => PlanApplyEventModel.OutcomeUnknown,
+            };
+            await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
+                terminal, $"stack {request.StackName}: {state ?? "provisioningState unreadable"}", request.StackName);
+            response.StackState = state ?? "";
+            response.PlanHash = planHash;
+            response.StatusCode = terminal == PlanApplyEventModel.Completed ? StatusCodes.Status200OK : StatusCodes.Status502BadGateway;
+            response.ErrorMessage = terminal switch
+            {
+                PlanApplyEventModel.Completed => "",
+                PlanApplyEventModel.Failed => $"STACK_PROVISIONING_FAILED: ARM reported {state}.",
+                _ => "STACK_OUTCOME_UNKNOWN: ARM returned no readable terminal state; check the stack in Azure before retrying.",
+            };
+            return response;
+        }
+
+        private static string? TryGetProvisioningState(string json)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object
+                    && doc.RootElement.TryGetProperty("properties", out var props)
+                    && props.ValueKind == JsonValueKind.Object
+                    && props.TryGetProperty("provisioningState", out var state)
+                    && state.ValueKind == JsonValueKind.String)
+                    return state.GetString();
+            }
+            catch (JsonException)
+            {
+                // Unreadable is not Succeeded; the caller records OutcomeUnknown honestly.
+            }
+            return null;
+        }
 
         /// <summary>Prefix for client-facing messages when one batch of a staged run ended the plan.</summary>
         private static string Context(string? batchLabel) => batchLabel is null ? "" : $"{batchLabel}: ";

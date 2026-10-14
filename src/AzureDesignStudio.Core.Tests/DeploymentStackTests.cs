@@ -1,7 +1,16 @@
+using System;
+using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using AzureDesignStudio.Discovery.Iac;
+using Azure.Core;
+using AzureDesignStudio.Discovery.Arm;
+using AzureDesignStudio.Discovery.ResourceGraph;
 using Xunit;
 
 namespace AzureDesignStudio.Core.Tests;
@@ -203,5 +212,114 @@ public class DeploymentStackTests
         var noise = DeploymentStack.CheckDrift(["", "  ", "/a"], [null!, "/a"]);
         Assert.False(noise.IsOutOfSync);
         Assert.Single(noise.Rows);
+    }
+
+    // ---- 12.3 execution wiring: the client sends the engine's exact bytes to ARM's stack
+    // endpoint and follows the resource LRO; refusals surface as typed statuses (scripted ARM). ----
+
+    private sealed class FakeHandler(Func<HttpRequestMessage, int, HttpResponseMessage> responder) : HttpMessageHandler
+    {
+        public List<string> Uris { get; } = [];
+        public List<string> Methods { get; } = [];
+        public List<string?> Bodies { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Uris.Add(request.RequestUri!.ToString());
+            Methods.Add(request.Method.Method);
+            Bodies.Add(request.Content is null ? null : request.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+            return Task.FromResult(responder(request, Uris.Count - 1));
+        }
+    }
+
+    private sealed class FakeCredential : TokenCredential
+    {
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext context, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new AccessToken("fake-token", DateTimeOffset.MaxValue));
+        public override AccessToken GetToken(TokenRequestContext context, CancellationToken cancellationToken)
+            => new("fake-token", DateTimeOffset.MaxValue);
+    }
+
+    private static HttpResponseMessage Json(string json, HttpStatusCode status = HttpStatusCode.OK,
+        string? location = null, string? asyncOperation = null)
+    {
+        var response = new HttpResponseMessage(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+        if (location is not null) response.Headers.Location = new Uri(location);
+        if (asyncOperation is not null) response.Headers.TryAddWithoutValidation("Azure-AsyncOperation", asyncOperation);
+        return response;
+    }
+
+    private static DeploymentStackClient Client(FakeHandler handler) =>
+        new(new ArmTransport(new HttpClient(handler), new FakeCredential(),
+            ArmEndpointSet.AzureCloud, (_, _) => Task.CompletedTask));
+
+    [Fact]
+    public async Task Client_CreateOrUpdate_SendsEngineBytesAndFollowsAsyncOperationLro()
+    {
+        var body = DeploymentStack.Build("ads-stack", "westeurope", Template, DefaultPolicy);
+        const string asyncUrl = "https://management.azure.com/operationLocations/async-42?api-version=2021-04-01";
+        var handler = new FakeHandler((_, call) => call switch
+        {
+            0 => Json("""{"properties":{"provisioningState":"Creating"}}""", HttpStatusCode.Created, asyncOperation: asyncUrl),
+            1 => Json("""{"status":"InProgress"}""", HttpStatusCode.Accepted), // headerless 202 keeps the last poll URI
+            _ => Json("""{"name":"ads-stack","properties":{"provisioningState":"Succeeded","managedResources":[{"resourceId":"/subscriptions/sub-1/resourceGroups/rg1/providers/Microsoft.Storage/storageAccounts/sa1"}]}}"""),
+        });
+
+        var result = await Client(handler).CreateOrUpdateAsync("sub-1", "rg1", "ads-stack", body.Json);
+
+        Assert.Equal("PUT", handler.Methods[0]);
+        Assert.Equal(
+            "https://management.azure.com/subscriptions/sub-1/resourcegroups/rg1/providers/Microsoft.Resources/deploymentStacks/ads-stack?api-version=2021-04-01",
+            handler.Uris[0]);
+        Assert.Equal(body.Json, handler.Bodies[0]); // the engine's exact bytes reach ARM
+        Assert.Equal(3, handler.Uris.Count);
+        Assert.Equal(asyncUrl, handler.Uris[1]);
+        Assert.Equal(asyncUrl, handler.Uris[2]);
+        Assert.Contains("Succeeded", result);
+    }
+
+    [Fact]
+    public async Task Client_CreateOrUpdate_FollowsLocationLroAndGetReadsTheSameUrl()
+    {
+        const string pollUrl = "https://management.azure.com/operationLocations/loc-7?api-version=2021-04-01";
+        var handler = new FakeHandler((_, call) => call switch
+        {
+            0 => Json("{}", HttpStatusCode.Accepted, location: pollUrl),
+            _ => Json("""{"properties":{"provisioningState":"Succeeded","managedResources":[]}}"""),
+        });
+
+        var client = Client(handler);
+        await client.CreateOrUpdateAsync("sub-1", "rg1", "ads-stack", "{}");
+        await client.GetAsync("sub-1", "rg1", "ads-stack");
+
+        Assert.Equal(pollUrl, handler.Uris[1]);
+        Assert.Equal("GET", handler.Methods[2]);
+        Assert.Equal(handler.Uris[0], handler.Uris[2]);
+    }
+
+    [Fact]
+    public async Task Client_ArmRefusalSurfacesTypedStatus_AndNeverRetriesTheWrite()
+    {
+        var handler = new FakeHandler((_, _) =>
+            Json("""{"error":{"code":"InvalidTemplateDeployment","message":"nope"}}""", HttpStatusCode.BadRequest));
+
+        var ex = await Assert.ThrowsAsync<ResourceGraphException>(() =>
+            Client(handler).CreateOrUpdateAsync("sub-1", "rg1", "ads-stack", "{}"));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Single(handler.Uris); // one send: the audit caller decides, the transport never retries a write
+    }
+
+    [Fact]
+    public void TryParse_WireFormsRejectGuesses()
+    {
+        Assert.True(DeploymentStack.TryParseAction("detach", out var action) && action == StackUnmanageAction.Detach);
+        Assert.True(DeploymentStack.TryParseAction("IGNORE", out action) && action == StackUnmanageAction.Ignore);
+        Assert.False(DeploymentStack.TryParseAction("", out _));   // blank: no silent default at the wire
+        Assert.False(DeploymentStack.TryParseAction("1", out _));  // a numeric protocol-guess is refused, not Delete
+        Assert.False(DeploymentStack.TryParseAction("bogus", out _));
+        Assert.False(DeploymentStack.TryParseAction(null, out _));
+        Assert.True(DeploymentStack.TryParseDenyLock("notdeletion", out var denyLock) && denyLock == StackDenyLock.NotDeletion);
+        Assert.False(DeploymentStack.TryParseDenyLock("5", out _));
     }
 }

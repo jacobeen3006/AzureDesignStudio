@@ -13,6 +13,7 @@ service Deploy {
 	rpc CreateDeployment(DeploymentRequest) returns(stream DeploymentResponse);
 	rpc GetDeploymentOperations(DeploymentOperationsRequest) returns(DeploymentOperationsResponse);
 	rpc PrepareRetry(PrepareRetryRequest) returns(PrepareRetryResponse);
+	rpc CreateStack(CreateStackRequest) returns(CreateStackResponse);
 }
 
 message SubscriptionInfo {
@@ -116,4 +117,30 @@ message PrepareRetryResponse {
 	string filtered_template_json = 3;
 	repeated string warnings = 4;
 	repeated string matched_keys = 5;
+}
+
+// v2 plan 12.3: deploy the design as a deployment-stack. The plan identity stays
+// scope+template+parameters (what-if token + plan_hash bind those); the stack name and
+// unmanage policy ride beside the hash like the revert plan does, and are recorded in the
+// apply audit trail. Delete-flavored policy values are refused server-side until Phase 13.
+message CreateStackRequest {
+	string subscription_id = 1;
+	string resource_group_name = 2;
+	string stack_name = 3;
+	string arm_template = 4;
+	string parameters = 5;
+	string what_if_token = 6;
+	string plan_hash = 7;
+	string missing_action = 8;
+	string resource_group_action = 9;
+	string deployment_action = 10;
+	bool deny_enabled = 11;
+	repeated string deny_locks = 12;
+}
+
+message CreateStackResponse {
+	int32 status_code = 1;
+	string error_message = 2;
+	string stack_state = 3;
+	string plan_hash = 4;
 }
