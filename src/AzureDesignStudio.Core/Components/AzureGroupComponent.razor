@@ -6,7 +6,7 @@
 @using Microsoft.Extensions.Configuration
 @inject IConfiguration configuration
 
-<div class="@Group.CssClassName" style="@Group.CssStyle">
+<div class="@Group.CssClassName @Group.HighlightClass" style="@Group.CssStyle">
     @if (!string.IsNullOrEmpty(Group.ImagePath))
     {
         <img src="@(configuration["ResourceRoot"] + Group.ImagePath)" alt=@Group.Name draggable="false" />

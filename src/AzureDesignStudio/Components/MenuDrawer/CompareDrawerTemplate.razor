@@ -1,0 +1,136 @@
+@using AntDesign.TableModels
+@using AzureDesignStudio.Core.Common
+@using AzureDesignStudio.Models
+@using AzureDesignStudio.Services
+@inherits FeedbackComponent<CompareDrawerContent, string>
+@inject DesignGrpcService _designService
+@inject AutoMapper.IMapper _mapper
+
+<div class="ads-compare-bar">
+    <span class="ads-compare-label">Before</span>
+    <Select TItem="string" TItemValue="string" @bind-Value="@_beforeName" Placeholder="saved design"
+            DefaultActiveFirstItem="false" EnableSearch Size="@InputSize.Small">
+        <SelectOptions>
+            @foreach (var name in _designNames)
+            {
+                <SelectOption TItemValue="string" TItem="string" Value="@name" Label="@name" />
+            }
+        </SelectOptions>
+    </Select>
+    <span class="ads-compare-label">After</span>
+    <Select TItem="string" TItemValue="string" @bind-Value="@_afterName" Placeholder="saved design"
+            DefaultActiveFirstItem="false" EnableSearch Size="@InputSize.Small">
+        <SelectOptions>
+            @foreach (var name in _designNames)
+            {
+                <SelectOption TItemValue="string" TItem="string" Value="@name" Label="@name" />
+            }
+        </SelectOptions>
+    </Select>
+    <Button Type="@ButtonType.Primary" OnClick="CompareAsync" Disabled="@_busy" Loading="@_busy">Compare</Button>
+</div>
+
+@if (_offline)
+{
+    <Alert Type="@AlertType.Info" ShowIcon="true" Style="margin-bottom:12px"
+           Message="The list is served from this device's offline cache. It will sync when the server is reachable." />
+}
+
+@if (_error is not null)
+{
+    <Alert Type="@AlertType.Error" Message="@_error" ShowIcon="true" Style="margin-bottom:12px" />
+}
+
+@if (_diff is not null)
+{
+    @if (!_diff.AnyChanges)
+    {
+        <Alert Type="@AlertType.Success" ShowIcon="true" Style="margin-bottom:12px"
+               Message="@($"No changes between \"{_beforeName}\" and \"{_afterName}\" ({_diff.EntityCountBefore} entities on each side).")" />
+    }
+    else
+    {
+        <div class="ads-compare-summary">
+            @foreach (var group in _diff.Changes.GroupBy(c => c.Kind).OrderBy(g => (int)g.Key))
+            {
+                <span class="ads-diff-chip" style="@ChipStyle(group.Key)">@group.Key × @group.Count()</span>
+            }
+            <span class="ads-compare-counts">@_diff.EntityCountBefore → @_diff.EntityCountAfter entities</span>
+        </div>
+    }
+    @if (_diff.Diagnostics.Count > 0)
+    {
+        <ul class="ads-compare-diagnostics">
+            @foreach (var d in _diff.Diagnostics)
+            {
+                <li>@d</li>
+            }
+        </ul>
+    }
+
+    <div class="ads-compare-panes">
+        <div class="ads-compare-pane">
+            <div class="ads-compare-pane-title"><b>@_beforeName</b> <em>before</em></div>
+            @if (_beforeDiagram is not null)
+            {
+                <div class="ads-compare-canvas-holder">
+                    <CascadingValue Value="@_beforeDiagram">
+                        <DiagramCanvas Class="ads-compare-canvas" />
+                    </CascadingValue>
+                </div>
+            }
+        </div>
+        <div class="ads-compare-pane">
+            <div class="ads-compare-pane-title"><b>@_afterName</b> <em>after</em></div>
+            @if (_afterDiagram is not null)
+            {
+                <div class="ads-compare-canvas-holder">
+                    <CascadingValue Value="@_afterDiagram">
+                        <DiagramCanvas Class="ads-compare-canvas" />
+                    </CascadingValue>
+                </div>
+            }
+        </div>
+    </div>
+    <div class="ads-compare-legend">
+        <span class="ads-legend ads-diff-added"></span>added
+        <span class="ads-legend ads-diff-removed"></span>removed
+        <span class="ads-legend ads-diff-changed"></span>changed
+    </div>
+
+    <div class="ads-compare-changes">
+        <Table TItem="DesignChange" DataSource="@_diff.Changes" RowKey="c => c.Key" HidePagination Bordered
+               Size="@TableSize.Small" Context="tableCtx"
+               ExpandTemplate="@_expandTemplate"
+               RowExpandable="row => row.Data.Props.Count > 0">
+            <PropertyColumn Property="c => c.Kind.ToString()" Title="Kind" Width="110">
+                <Tag Color="@KindColor(tableCtx.Kind)">@tableCtx.Kind</Tag>
+            </PropertyColumn>
+            <PropertyColumn Property="c => c.SubjectKind" Title="Subject" Width="90" />
+            <PropertyColumn Property="c => c.Name ?? string.Empty" Title="Name" />
+            <PropertyColumn Property="c => c.Key" Title="Key" />
+        </Table>
+    </div>
+}
+
+@code {
+    private RenderFragment<RowData<DesignChange>> _expandTemplate = row => @<div class="ads-compare-props">
+        @if (row.Data.Props.Count == 0)
+        {
+            <em>no property detail for this change</em>
+        }
+        else
+        {
+            <Table TItem="DesignPropChange" DataSource="@row.Data.Props" RowKey="p => p.Path"
+                   HidePagination Bordered Size="@TableSize.Small">
+                <PropertyColumn Property="p => p.Path" Title="Path" />
+                <PropertyColumn Property="p => p.OldJson ?? string.Empty" Title="Old" />
+                <PropertyColumn Property="p => p.NewJson ?? string.Empty" Title="New" />
+            </Table>
+            @if (row.Data.PropsTruncated)
+            {
+                <em class="ads-compare-truncated">…[truncated]</em>
+            }
+        }
+    </div>;
+}

@@ -256,7 +256,7 @@ public static partial class DataModelFactory
         return nodesDto;
     }
 
-    public static void LoadDiagramFromDto(Diagram diagram, DiagramGraph diagramGraph, IMapper mapper)
+    public static void LoadDiagramFromDto(Diagram diagram, DiagramGraph diagramGraph, IMapper mapper, Dictionary<NodeModel, string>? savedEntityIds = null)
     {
         diagram.SuspendRefresh = true;
         // Handle Json deserialization.
@@ -275,6 +275,7 @@ public static partial class DataModelFactory
             {
                 diagram.Groups.Add(g);
                 groupById[parent.Id] = g;
+                savedEntityIds?[g] = parent.Id;
             }
         }
         foreach (var child in childGroups)
@@ -285,6 +286,7 @@ public static partial class DataModelFactory
                 var group = groupById.GetValueOrDefault(child.GroupId!);
                 // Sequence is important
                 diagram.Groups.Add(n);
+                savedEntityIds?[n] = child.Id;
                 group?.AddChild(n);
             }
         }
@@ -297,6 +299,7 @@ public static partial class DataModelFactory
             var node = GetNodeModelFromDto(nodeDto, mapper) ?? throw new Exception("NodeModel is null");
             diagram.Nodes.Add(node);
             nodeById[nodeDto.Id] = node;
+            savedEntityIds?[node] = nodeDto.Id;
             if (!string.IsNullOrEmpty(nodeDto.GroupId))
             {
                 var parentGroup = groupById.GetValueOrDefault(nodeDto.GroupId);

@@ -102,3 +102,21 @@
     color: #52c41a;
     font-size: 12px;
 }
+
+/*
+ *   Compare-view diff highlighting (v2 9.2): outline keeps tile geometry identical.
+*/
+.ads-azure-node.ads-diff-added {
+    outline: 3px solid #52c41a;
+    outline-offset: 1px;
+}
+
+.ads-azure-node.ads-diff-removed {
+    outline: 3px solid #ff4d4f;
+    outline-offset: 1px;
+}
+
+.ads-azure-node.ads-diff-changed {
+    outline: 3px solid #faad14;
+    outline-offset: 1px;
+}

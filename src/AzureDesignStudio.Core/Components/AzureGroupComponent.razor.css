@@ -91,3 +91,25 @@
     font-size: 12px;
     margin-left: 4px;
 }
+
+/* Compare-view diff highlighting (v2 9.2): frames the group frame. */
+.ads-group.ads-diff-added,
+::deep .ads-group.ads-diff-added {
+    outline-color: #52c41a !important;
+    outline-width: 3px !important;
+    outline-style: solid !important;
+}
+
+.ads-group.ads-diff-removed,
+::deep .ads-group.ads-diff-removed {
+    outline-color: #ff4d4f !important;
+    outline-width: 3px !important;
+    outline-style: solid !important;
+}
+
+.ads-group.ads-diff-changed,
+::deep .ads-group.ads-diff-changed {
+    outline-color: #faad14 !important;
+    outline-width: 3px !important;
+    outline-style: solid !important;
+}

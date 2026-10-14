@@ -37,6 +37,9 @@ namespace AzureDesignStudio.Components
                 case "guardrails":
                     await OpenGuardrailsDrawer();
                     break;
+                case "compare":
+                    await OpenCompareDrawer();
+                    break;
                 case "user":
                     await OpenUserDrawer();
                     break;
@@ -289,6 +292,19 @@ namespace AzureDesignStudio.Components
             };
 
             await drawerService.CreateAsync<GuardrailsDrawerTemplate, GuardrailsDrawerContent, string>(options, new GuardrailsDrawerContent());
+        }
+
+        private async Task OpenCompareDrawer()
+        {
+            var currentWindowSize = await JS.InvokeAsync<WindowSize>("getWindowSize");
+            var options = new DrawerOptions
+            {
+                Title = "Compare saved designs",
+                Placement = DrawerPlacement.Bottom,
+                Height = currentWindowSize.Height.ToString()
+            };
+
+            await drawerService.CreateAsync<CompareDrawerTemplate, CompareDrawerContent, string>(options, new CompareDrawerContent());
         }
 
         private async Task InvokePrintJS()

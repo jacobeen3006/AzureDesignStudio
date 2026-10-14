@@ -22,6 +22,8 @@ namespace AzureDesignStudio.Core.Models
         /// (Model.Id is a session Guid) and keys the live-plane merge and reconcile.
         /// Round-trips with AzureNodeDto.ArmId by AutoMapper name convention.</summary>
         public string ArmId { get; set; } = string.Empty;
+        /// <summary>Optional extra CSS class on the rendered tile (compare view diff highlighting); empty renders nothing extra.</summary>
+        public string HighlightClass { get; set; } = string.Empty;
 
         #region IAzureNode
         public virtual string ServiceName => string.Empty;
