@@ -83,7 +83,8 @@ var app = builder.Build();
                     Status nvarchar(20) NOT NULL,
                     ApprovedBy nvarchar(320) NOT NULL,
                     ApprovedByUserId nvarchar(64) NOT NULL,
-                    ApprovedAtUtc datetime2 NOT NULL DEFAULT GETUTCDATE());
+                    ApprovedAtUtc datetime2 NOT NULL DEFAULT GETUTCDATE(),
+                    RevertPlanJson nvarchar(max) NULL);
                 IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NULL
                 CREATE TABLE AdsPlanApplyEvents (
                     Id int IDENTITY(1,1) NOT NULL PRIMARY KEY,
@@ -97,11 +98,16 @@ var app = builder.Build();
                     ApprovedByUserId nvarchar(64) NOT NULL,
                     ApprovedAtUtc datetime2 NOT NULL,
                     PreviewEvidence nvarchar(64) NULL,
+                    RevertPlanHash nvarchar(71) NULL,
                     EventType nvarchar(16) NOT NULL,
                     Detail nvarchar(1024) NULL,
                     TimestampUtc datetime2 NOT NULL);
                 IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND INDEXPROPERTY(OBJECT_ID(N'AdsPlanApplyEvents'), N'IX_AdsPlanApplyEvents_ApplyId', 'IndexID') IS NULL
                 CREATE INDEX IX_AdsPlanApplyEvents_ApplyId ON AdsPlanApplyEvents (ApplyId);
+                IF OBJECT_ID(N'AdsPlanApprovals', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApprovals', N'RevertPlanJson') IS NULL
+                ALTER TABLE AdsPlanApprovals ADD RevertPlanJson nvarchar(max) NULL;
+                IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApplyEvents', N'RevertPlanHash') IS NULL
+                ALTER TABLE AdsPlanApplyEvents ADD RevertPlanHash nvarchar(71) NULL;
                 """);
         }
     }

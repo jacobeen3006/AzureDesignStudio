@@ -67,5 +67,9 @@ namespace AzureDesignStudio.Server.Models
         public string ApprovedByUserId { get; set; } = null!;
 
         public DateTime ApprovedAtUtc { get; set; }
+
+        /// <summary>Pre-deploy snapshot + undo entries derived from the live preview (v2 11.4);
+        /// persisted with the approval so the record carries exactly what existed before apply.</summary>
+        public string? RevertPlanJson { get; set; }
     }
 }

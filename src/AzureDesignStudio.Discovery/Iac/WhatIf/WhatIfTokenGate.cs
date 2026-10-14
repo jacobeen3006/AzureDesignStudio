@@ -45,11 +45,16 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
     private DateTimeOffset Now => (clock ?? (() => DateTimeOffset.UtcNow))();
 
     private sealed record Entry(string PayloadHash, DateTimeOffset Expires, bool HasDelete,
-        IReadOnlyList<string> DeleteResourceIds, string CanonicalPlanJson, string PlanHash);
+        IReadOnlyList<string> DeleteResourceIds, string CanonicalPlanJson, string PlanHash, string? RevertPlanJson);
 
-    /// <summary>Record a completed what-if review; returns the token the later deploy must present.</summary>
+    /// <summary>
+    /// Record a completed what-if review; returns the token the later deploy must present.
+    /// The revert plan (pre-deploy snapshot + undo entries) rides the same live-preview record
+    /// so approval persists exactly what the preview observed, while the plan hash keeps its
+    /// scope + template + parameters identity.
+    /// </summary>
     public string Issue(string subscriptionId, string resourceGroupName, string armTemplate, string parameters,
-        WhatIfSummary summary, string canonicalPlanJson, string planHash)
+        WhatIfSummary summary, string canonicalPlanJson, string planHash, string? revertPlanJson = null)
     {
         // Fail closed: an indeterminate prediction never earns a deploy token, no matter
         // what the caller's checks looked like. This is the single choke point.
@@ -58,7 +63,7 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
 
         var token = Guid.NewGuid().ToString("N");
         var entry = new Entry(Hash(subscriptionId, resourceGroupName, armTemplate, parameters),
-            Now.Add(ttl), summary.HasDelete, summary.DeleteResourceIds, canonicalPlanJson, planHash);
+            Now.Add(ttl), summary.HasDelete, summary.DeleteResourceIds, canonicalPlanJson, planHash, revertPlanJson);
 
         lock (_sync)
         {
@@ -74,13 +79,18 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
     /// Approved-plan flow: a plan hash is approvable only while its what-if preview is live.
     /// Non-consuming peek by plan hash; expired previews are invisible here too.
     /// </summary>
-    public bool TryPeekPlan(string planHash, out string canonicalPlanJson)
+    public bool TryPeekPlan(string planHash, out string canonicalPlanJson) =>
+        TryPeekPlan(planHash, out canonicalPlanJson, out _);
+
+    /// <summary>Peek that also yields the revert plan document recorded with the preview (null if none).</summary>
+    public bool TryPeekPlan(string planHash, out string canonicalPlanJson, out string? revertPlanJson)
     {
         lock (_sync)
         {
             var hit = _tokens.Values.FirstOrDefault(e => e.Expires > Now
                 && string.Equals(e.PlanHash, planHash, StringComparison.OrdinalIgnoreCase));
             canonicalPlanJson = hit?.CanonicalPlanJson ?? string.Empty;
+            revertPlanJson = hit?.RevertPlanJson;
             return hit is not null;
         }
     }

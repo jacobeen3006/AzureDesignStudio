@@ -243,8 +243,12 @@ namespace AzureDesignStudio.Server.Services
 
                 var plan = DeployPlanArtifact.Create(subscriptionId.ToString(), request.ResourceGroupName,
                     request.ArmTemplate, parametersJson);
+                // Pre-deploy snapshot + inverse plan from the FULL before payloads (v2 11.4):
+                // it rides the live preview so approval persists the undo trail; the plan hash
+                // keeps its scope + template + parameters identity untouched.
+                var revert = RevertPlan.Build(summary, preview.Caveat);
                 var token = _whatIfGate.Issue(subscriptionId.ToString(), request.ResourceGroupName,
-                    request.ArmTemplate, parametersJson, summary, plan.CanonicalJson, plan.PlanHash);
+                    request.ArmTemplate, parametersJson, summary, plan.CanonicalJson, plan.PlanHash, revert.DocumentJson);
 
                 response.StatusCode = StatusCodes.Status200OK;
                 response.Status = summary.Status;
@@ -257,6 +261,7 @@ namespace AzureDesignStudio.Server.Services
                 {
                     caveats.Add(preview.Caveat);
                 }
+                caveats.Add($"Revert plan: {revert.Entries.Count} undo entries recorded ({revert.UnrevertableCount} unrevertable). {RevertPlan.ExecutableNote}");
 
                 response.Caveats = string.Join("\n", caveats);
                 response.PlanHash = plan.PlanHash;
@@ -439,7 +444,7 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            if (!_whatIfGate.TryPeekPlan(planHash, out var planJson))
+            if (!_whatIfGate.TryPeekPlan(planHash, out var planJson, out var revertJson))
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
                 response.ErrorMessage = "WHAT_IF_STALE: no live What-If preview exists for this plan; run What-If first.";
@@ -461,6 +466,7 @@ namespace AzureDesignStudio.Server.Services
                 ApprovedBy = principal,
                 ApprovedByUserId = userIdClaim,
                 ApprovedAtUtc = DateTime.UtcNow,
+                RevertPlanJson = revertJson,
             };
             _designContext.AdsPlanApprovals.Add(approval);
             await _designContext.SaveChangesAsync(context.CancellationToken);
@@ -910,6 +916,7 @@ namespace AzureDesignStudio.Server.Services
             ApprovedByUserId = approval.ApprovedByUserId,
             ApprovedAtUtc = approval.ApprovedAtUtc,
             PreviewEvidence = previewEvidence,
+            RevertPlanHash = RevertPlan.HashOf(approval.RevertPlanJson),
             EventType = eventType,
             Detail = PlanApplyEventModel.Truncate(detail),
             TimestampUtc = DateTime.UtcNow,

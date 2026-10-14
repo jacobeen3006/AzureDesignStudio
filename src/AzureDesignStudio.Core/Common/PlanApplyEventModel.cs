@@ -84,6 +84,10 @@ public record PlanApplyEventModel
     [StringLength(64)]
     public string? PreviewEvidence { get; set; }
 
+    /// <summary>sha256: hash of the revert plan document stored with the approval (v2 11.4): proof the apply recorded its undo snapshot.</summary>
+    [StringLength(71)]
+    public string? RevertPlanHash { get; set; }
+
     [StringLength(EventTypeCap, MinimumLength = 6)]
     public string EventType { get; set; } = null!;
 
