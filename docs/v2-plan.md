@@ -99,6 +99,9 @@
 - 11.4 **[57]** Pre-deploy snapshot + inverse/revert plan.
 
 **Gate (99):** no delete-bearing operation exists yet; CI asserts **no mutating call without approved plan hash**.
+
+**Status (2026-10-14):** 11.3 pre-work done (bookkeeping only, nothing executes) - `DeployPlanArtifact` (Core/Common): plan identity = scope + template + parameters, canonical compact JSON (keys sorted ordinal, arrays ordered, literals verbatim) hashed `sha256:<hex>`; `Verify` re-canonicalizes so a pretty-printed store copy still proves its hash. `PlanApprovalGate.Evaluate`: Approved + named approver + stored body still hashing to the approved hash, else a typed denial (`NotApproved`/`NoApprover`/`MalformedBody`/`BodyEditedAfterApproval`) - an edit to the stored body after approval is caught here, not in Azure. The Workspace `ExecutionPlanRecord`/`AuditRecord` (Phase 9) already carry `PlanHash`/`ApprovedBy`; this slice gives those columns a single, testable meaning. Host-side approval writes + audit rows land with the 11.x execution wiring (delete-gate policy). 11 offline tests.
+
 **Effort:** 3–4 weeks.
 
 ## Phase 12 — Reconcile & deployment stacks
