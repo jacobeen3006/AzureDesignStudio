@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -178,6 +179,34 @@ public class DecommissionRunbookTests
         Assert.NotEqual(a.PlanHash, b.PlanHash);
         Assert.Contains(a.PlanHash, a.Markdown());
         Assert.Contains(a.PlanHash, a.CliScript());
+    }
+
+    [Fact]
+    public void ExecutionHash_TheServerReplayOfTheWiredOStringsAndStageZeroScopes_ReproducesTheClientSignature()
+    {
+        // The desktop signs the execution hash over the runbook's own identity + the Stage 0
+        // line scopes; the server re-parses the round-trip "O" strings from the wire (the exact
+        // DateTimeStyles ExecuteDecomWindow uses) and re-sorts the scopes before recomputing.
+        // Any drift on either side means every real execute 409s - this pins the whole seam.
+        var inventory = new[] { VmItem(), NicItem() };
+        var rb = GenerateFor(PlanAll(inventory, new[] { Vm, Nic }), inventory);
+
+        var stage0 = rb.Stages.Single(s => s.Title.StartsWith("Stage 0", StringComparison.Ordinal));
+        var scopes = stage0.Lines.Select(l => l.ResourceId)
+            .OrderBy(s => s.ToLowerInvariant(), StringComparer.Ordinal).ToList();
+        // The approval binds exactly the staged lock set - the scopes are the staged ids.
+        Assert.Equal(new[] { Vm, Nic }, scopes);
+
+        var client = DecomExecution.ExecutionHash(rb.Window.WindowId, rb.PlanHash, "sub1",
+            rb.PurgeNotBefore, scopes);
+
+        var purge = DateTimeOffset.Parse(rb.PurgeNotBefore.ToString("O"), null,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.RoundtripKind);
+        var server = DecomExecution.ExecutionHash(rb.Window.WindowId, rb.PlanHash, "sub1", purge,
+            // reversed input: the server sorts itself, order must not leak into the hash
+            scopes.OrderByDescending(s => s, StringComparer.Ordinal));
+
+        Assert.Equal(client, server);
     }
 
     // --- checklist honesty ---

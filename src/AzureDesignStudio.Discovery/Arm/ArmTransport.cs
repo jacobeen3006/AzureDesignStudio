@@ -39,6 +39,7 @@ public sealed class ArmTransport(HttpClient http, TokenCredential credential, Ar
 
     public Task<string> GetAsync(string url, CancellationToken ct = default) => SendAsync(HttpMethod.Get, url, null, ct);
     public Task<string> PostAsync(string url, string json, CancellationToken ct = default) => SendAsync(HttpMethod.Post, url, json, ct);
+    public Task<string> DeleteAsync(string url, CancellationToken ct = default) => SendAsync(HttpMethod.Delete, url, null, ct);
 
     /// <summary>POST that follows the LRO shape (202 + <c>Location</c>, poll to completion):
     /// Cost Management queries run as async jobs for anything but tiny windows.</summary>
@@ -118,7 +119,11 @@ public sealed class ArmTransport(HttpClient http, TokenCredential credential, Ar
                     continue;
                 }
 
-                var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                // A 204 carries no body; read nothing (an empty-body read would still work, but
+                // skipping it keeps DELETE/204 cheap and uniform with the other success paths).
+                var text = response.StatusCode == HttpStatusCode.NoContent
+                    ? string.Empty
+                    : await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                 return new Response(response.StatusCode, text, response.Headers.Location?.ToString(),
                     response.Headers.RetryAfter?.Delta, response.IsSuccessStatusCode,
                     response.Headers.TryGetValues("Azure-AsyncOperation", out var asyncOp) ? asyncOp.FirstOrDefault() : null);

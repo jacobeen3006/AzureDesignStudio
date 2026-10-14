@@ -91,6 +91,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<PermissionPreflight>();
         builder.Services.AddSingleton<WorkspaceScans>();
         builder.Services.AddSingleton<WorkspaceChanges>();
+        builder.Services.AddSingleton<WorkspaceDecomWindows>();
         builder.Services.AddSingleton<ChangeFeedService>();
         builder.Services.AddSingleton<AzureDesignStudio.Discovery.Cost.ActualSpendClient>();
         builder.Services.AddSingleton<WorkspaceScanSink>();

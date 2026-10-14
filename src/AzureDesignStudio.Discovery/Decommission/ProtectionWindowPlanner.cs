@@ -62,7 +62,7 @@ public static class ProtectionWindowPlanner
                 already.Add(item.Id);
             else
                 apply.Add(new ProposedLock(item.Id, name, ArmLockLevel.CanNotDelete,
-                    $"Azure Design Studio decommission window {window.Start:O} .. {window.End:O} (window '{window.WindowId}')"));
+                    DecomExecution.WindowNotes(window.WindowId, window.Start, window.End)));
         }
 
         apply.Sort((a, b) => string.CompareOrdinal(a.Scope.ToLowerInvariant(), b.Scope.ToLowerInvariant()));

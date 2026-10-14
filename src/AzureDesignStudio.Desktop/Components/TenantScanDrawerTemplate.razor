@@ -1,4 +1,6 @@
 @inherits FeedbackComponent<string, string>
+@using Grpc.Net.ClientFactory
+@using AzureDesignStudio.SharedModels.Protos
 @using System.Text.Json
 @using AntDesign
 @using AzureDesignStudio.Discovery.Analysis
@@ -6,6 +8,7 @@
 @using AzureDesignStudio.Discovery.Inventory
 @using AzureDesignStudio.Discovery.Decommission
 @using AzureDesignStudio.Discovery.Preflight
+@using SubscriptionInfo = AzureDesignStudio.Discovery.Arm.SubscriptionInfo
 @using AzureDesignStudio.Workspace
 @implements IDisposable
 @inject TenantScanSession Session
@@ -17,6 +20,8 @@
 @inject DesignGrpcService designService
 @inject AdsContext adsContext
 @inject IMapper mapper
+@inject GrpcClientFactory grpcFactory
+@inject WorkspaceDecomWindows decomWindows
 @inject MessageService Message
 @inject ModalService Modal
 
@@ -285,8 +290,9 @@
     else if (activeTab == "decom")
     {
         <div style="font-size:12px;color:#666;margin-bottom:8px;">
-            Plans only - this tab never calls Azure and deletes nothing. Locks, RBAC and backups are not
-            evaluated here: the planner reports them as caveats, never as an all-clear.
+            Plans first: the planner never calls Azure and deletes nothing; locks, RBAC and backups are
+            evaluated only as caveats, never as an all-clear. Window execution (below) lands
+            can-not-delete locks only - it never deletes anything; purge stays script-side.
         </div>
         @if (decomScanId is null)
         {
@@ -308,7 +314,7 @@
         {
             <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
                 <input style="flex:1;padding:4px;" placeholder="search name / id" @bind="decomSearch" @bind:event="oninput" />
-                <a @onclick="@(() => { decomScanId = null; decomPlan = null; decomManifest = null; decomSelected.Clear(); })">back</a>
+                <a @onclick="@(() => { decomScanId = null; decomPlan = null; decomManifest = null; decomSelected.Clear(); decomRunbook = null; decomWindowRow = null; decomExecRows = null; decomReleaseRows = null; decomExecError = null; decomReleaseError = null; })">back</a>
                 <Button Type="ButtonType.Primary" Size="ButtonSize.Small"
                         Disabled="@(decomSelected.Count == 0)" OnClick="RunDecomPreview">Preview teardown (@decomSelected.Count)</Button>
                 <Button Size="ButtonSize.Small" Disabled="@(decomPlan is null || DecomConfirmed.Count == 0)"
@@ -391,6 +397,71 @@
                         <div style="font-size:12px;color:#999;">@cav</div>
                     }
                 }
+            }
+
+            @if (decomRunbook is { } rb && decomPlan is { Allowed: true })
+            {
+                <h4 style="margin-top:12px;">Window execution</h4>
+                <div style="font-size:13px;margin-bottom:6px;">
+                    window <b>@rb.Window.WindowId</b> · lock <b>@ProtectionWindowPlanner.LockNameFor(rb.Window.WindowId)</b>
+                    · @WindowScopes(rb).Count scope(s) · purge not before <b>@rb.PurgeNotBefore.LocalDateTime.ToString("dd.MM HH:mm")</b>
+                </div>
+                @if (decomWindowRow is { } row)
+                {
+                    <Alert Type="@AlertType.Info" ShowIcon="true" Style="margin-bottom:8px"
+                           Message="@($"window {row.WindowId} {row.State} since {row.UpdatedAtUtc.LocalDateTime:dd.MM HH:mm}")" />
+                }
+                @if (decomExecError is { } err)
+                {
+                    <Alert Type="@AlertType.Error" ShowIcon="true" Style="margin-bottom:8px" Message="@err" />
+                }
+                @if (decomReleaseError is { } rerr)
+                {
+                    <Alert Type="@AlertType.Error" ShowIcon="true" Style="margin-bottom:8px" Message="@rerr" />
+                }
+                <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap;">
+                    <Tooltip Title="@(ArmUnavailable ? $"Sign in / reconnect - the subscription list could not be fetched: {loadError}" : "Approve the execution hash, then land the window's can-not-delete locks")">
+                        <Button Type="ButtonType.Primary" Size="ButtonSize.Small"
+                                Disabled="@(decomExecBusy || ArmUnavailable)"
+                                OnClick="ApproveAndExecuteAsync">@(decomExecBusy ? "Landing…" : "Approve & land window locks")</Button>
+                    </Tooltip>
+                    <Tooltip Title="@(decomWindowRow is null ? "No executed window to release yet"
+                                    : ArmUnavailable ? $"Sign in / reconnect - the subscription list could not be fetched: {loadError}"
+                                    : "Release the window's own locks (the stored scopes, nothing else)")">
+                        <Button Size="ButtonSize.Small"
+                                Disabled="@(decomWindowRow is null || decomReleaseBusy || ArmUnavailable)"
+                                OnClick="ReleaseWindowAsync">@(decomReleaseBusy ? "Releasing…" : "Release window")</Button>
+                    </Tooltip>
+                </div>
+                @if (decomExecRows is { Count: > 0 } rows)
+                {
+                    <table style="width:100%;font-size:13px;margin-bottom:8px;">
+                        <tr><th>scope</th><th>outcome</th><th>detail</th></tr>
+                        @foreach (var r in rows)
+                        {
+                            <tr>
+                                <td>@r.Scope</td>
+                                <td><Tag Color="@LockOutcomeColor(r.Outcome)">@r.Outcome</Tag></td>
+                                <td>@r.Detail</td>
+                            </tr>
+                        }
+                    </table>
+                }
+                @if (decomReleaseRows is { Count: > 0 } rrows)
+                {
+                    <table style="width:100%;font-size:13px;margin-bottom:8px;">
+                        <tr><th>scope</th><th>outcome</th><th>detail</th></tr>
+                        @foreach (var r in rrows)
+                        {
+                            <tr>
+                                <td>@r.Scope</td>
+                                <td><Tag Color="@LockOutcomeColor(r.Outcome)">@r.Outcome</Tag></td>
+                                <td>@r.Detail</td>
+                            </tr>
+                        }
+                    </table>
+                }
+                <div style="font-size:12px;color:#666;">Purge never executes from the app — run the exported purge scripts after @rb.PurgeNotBefore.LocalDateTime.ToString("dd.MM HH:mm") (epoch-guarded).</div>
             }
         }
     }
@@ -482,6 +553,26 @@
     private RetentionManifest? decomManifest;
     private int decomPurgeDays = 7;
 
+    // v2 13.5 window execution: the runbook (generated by "Save runbook") names the window;
+    // the app only lands/releases window-owned can-not-delete locks - purge stays script-side.
+    private Runbook? decomRunbook;
+    private DecomWindowModel? decomWindowRow;
+    private bool decomExecBusy;
+    private bool decomReleaseBusy;
+    private List<DecomLockRow>? decomExecRows;
+    private List<DecomLockRow>? decomReleaseRows;
+    private string? decomExecError;
+    private string? decomReleaseError;
+
+    /// <summary>The named client of the existing Deploy service; the decom RPCs ride it.</summary>
+    private Deploy.DeployClient? _deployClient;
+    private Deploy.DeployClient DeployClient =>
+        _deployClient ??= grpcFactory.CreateClient<Deploy.DeployClient>("DeployClientWithAuth");
+
+    /// <summary>The drawer's offline/unauthenticated signal: the subscription listing failed
+    /// (token broker unresolved or network down) - the ARM-touching verbs stay disabled.</summary>
+    private bool ArmUnavailable => loadError.Length > 0;
+
     private int enabledCount => subscriptions.Count(s => s.State == "Enabled");
 
     protected override async Task OnInitializedAsync()
@@ -531,6 +622,7 @@
             topoScanId = completed.FirstOrDefault()?.Id;
             await LoadTopologyAsync();
         }
+        if (key == "decom") await LoadDecomWindowRowAsync();
     }
 
     private async Task LoadReportAsync()
@@ -840,6 +932,12 @@
     {
         decomPlan = null;
         decomManifest = null;
+        decomRunbook = null;
+        decomWindowRow = null;
+        decomExecRows = null;
+        decomReleaseRows = null;
+        decomExecError = null;
+        decomReleaseError = null;
         decomSelected.Clear();
         decomItems = [];
         if (decomScanId is null)
@@ -930,6 +1028,8 @@
         {
             var rb = DecommissionRunbook.Generate(decomPlan, decomItems,
                 new RunbookOptions(DateTimeOffset.UtcNow, TimeSpan.FromDays(decomPurgeDays)));
+            decomRunbook = rb;
+            await LoadDecomWindowRowAsync();
             // Folder named by scan + deterministic window id: re-running the same plan shape
             // lands on the same reviewed bytes, so the folder is the review record.
             var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads",
@@ -957,6 +1057,210 @@
             Message.Error($"Could not render the runbook: {e.Message}");
         }
     }
+
+    // v2 13.5 window execution: the runbook's Stage 0 lines are the lock scopes (one per
+    // protected resource); the execution hash binds exactly that set (DecomExecution
+    // canonical), so the server re-verifies the caller against the approved hash.
+    private static IReadOnlyList<string> WindowScopes(Runbook rb) =>
+        rb.Stages.Count > 0 ? rb.Stages[0].Lines.Select(l => l.ResourceId).ToList() : [];
+
+    // The window's subscription is embedded in every scope (/subscriptions/{id}/...); a
+    // multi-subscription scan yields the first scope's subscription for the hash's sub field.
+    private static string SubscriptionOf(IReadOnlyList<string> scopes)
+    {
+        foreach (var scope in scopes)
+        {
+            var s = scope.TrimStart('/');
+            if (s.StartsWith("subscriptions/", StringComparison.OrdinalIgnoreCase))
+            {
+                var rest = s["subscriptions/".Length..];
+                var slash = rest.IndexOf('/');
+                if (slash > 0)
+                    return rest[..slash];
+                if (rest.Length > 0)
+                    return rest;
+            }
+        }
+        return "";
+    }
+
+    // On tab open / runbook save: the workspace row for this subscription + window id (or,
+    // with no runbook open, the most recent one) - it gates the release verb and the banner.
+    private async Task LoadDecomWindowRowAsync()
+    {
+        if (decomRunbook is { } rb)
+        {
+            decomWindowRow = await decomWindows.GetAsync(SubscriptionOf(WindowScopes(rb)), rb.Window.WindowId);
+            return;
+        }
+        decomWindowRow = await decomWindows.LatestAsync();
+    }
+
+    // [13.5] Approve (naming the execution hash) then land: the server re-verifies the hash
+    // and lands can-not-delete locks only - nothing is deleted here, purge stays script-side.
+    private async Task ApproveAndExecuteAsync()
+    {
+        if (decomRunbook is not { } rb || decomPlan is not { Allowed: true } || decomExecBusy || ArmUnavailable)
+            return;
+        var windowId = rb.Window.WindowId;
+        var scopes = WindowScopes(rb);
+        var subscriptionId = SubscriptionOf(scopes);
+        var executionHash = DecomExecution.ExecutionHash(windowId, rb.PlanHash, subscriptionId, rb.PurgeNotBefore,
+            scopes.OrderBy(s => s.ToLowerInvariant(), StringComparer.Ordinal));
+
+        if (!await Modal.ConfirmAsync(new ConfirmOptions
+        {
+            Title = "Approve & land the window locks?",
+            Content = $"""
+                {scopes.Count} scope(s)
+                plan {rb.PlanHash}
+                execution {executionHash}
+                purge not before {rb.PurgeNotBefore.LocalDateTime:dd.MM HH:mm}
+                The app lands can-not-delete locks only - it never deletes anything; purge stays script-side.
+                """,
+            OkType = ButtonType.Primary,
+            OkText = "Approve & land",
+            CancelText = "Cancel",
+        }))
+            return;
+
+        decomExecBusy = true;
+        decomExecError = null;
+        decomExecRows = null;
+        try
+        {
+            var approval = await DeployClient.ApproveDecomWindowAsync(new ApproveDecomWindowRequest
+            {
+                SubscriptionId = subscriptionId,
+                WindowId = windowId,
+                PlanHash = rb.PlanHash,
+                ExecutionHash = executionHash,
+            });
+            if (approval.StatusCode != 200)
+            {
+                // Refusal (403/409/412): surface verbatim, do not execute.
+                decomExecError = approval.ErrorMessage.Length > 0
+                    ? approval.ErrorMessage
+                    : $"approval refused (HTTP {approval.StatusCode})";
+                return;
+            }
+
+            var exec = await DeployClient.ExecuteDecomWindowAsync(new ExecuteDecomWindowRequest
+            {
+                SubscriptionId = subscriptionId,
+                ScanId = decomScanId ?? "",
+                WindowId = windowId,
+                PlanHash = rb.PlanHash,
+                ExecutionHash = executionHash,
+                // "O" round-trip: the server rebuilds the window notes from these bytes.
+                WindowStartUtc = rb.Window.Start.ToUniversalTime().ToString("O"),
+                WindowEndUtc = rb.Window.End.ToUniversalTime().ToString("O"),
+                PurgeNotBeforeUtc = rb.PurgeNotBefore.ToUniversalTime().ToString("O"),
+                Scopes = { scopes.OrderBy(s => s.ToLowerInvariant(), StringComparer.Ordinal) },
+            });
+
+            if (exec.StatusCode != 200)
+            {
+                decomExecError = exec.ErrorMessage.Length > 0
+                    ? exec.ErrorMessage
+                    : $"execution refused (HTTP {exec.StatusCode})";
+                await PersistDecomWindowAsync(rb, subscriptionId, executionHash, "failed", []);
+                return;
+            }
+
+            decomExecRows = exec.Rows.ToList();
+            var notLocked = decomExecRows.Count(r => r.Outcome is not ("locked" or "already-locked"));
+            var state = notLocked == 0 ? "executed" : "partial";
+            await PersistDecomWindowAsync(rb, subscriptionId, executionHash, state, decomExecRows);
+            Message.Success($"Window {windowId}: {decomExecRows.Count(r => r.Outcome == "locked")} locked, "
+                + $"{decomExecRows.Count(r => r.Outcome == "already-locked")} already-locked, {notLocked} not locked "
+                + $"({state}); apply {exec.ApplyId}");
+        }
+        catch (Exception e)
+        {
+            Message.Error($"Window execution failed: {e.Message}");
+        }
+        finally
+        {
+            decomExecBusy = false;
+        }
+    }
+
+    // [13.5] Release: re-sends the STORED scopes (selection drift-proof) - the server removes
+    // only the window's own locks by name; foreign locks survive.
+    private async Task ReleaseWindowAsync()
+    {
+        if (decomWindowRow is not { } row || decomReleaseBusy || ArmUnavailable)
+            return;
+        decomReleaseBusy = true;
+        decomReleaseError = null;
+        decomReleaseRows = null;
+        try
+        {
+            var scopes = JsonSerializer.Deserialize<List<string>>(row.ScopesJson) ?? [];
+            var resp = await DeployClient.ReleaseDecomWindowAsync(new ReleaseDecomWindowRequest
+            {
+                SubscriptionId = row.SubscriptionId,
+                WindowId = row.WindowId,
+                Scopes = { scopes },
+            });
+
+            if (resp.StatusCode != 200)
+            {
+                decomReleaseError = resp.ErrorMessage.Length > 0
+                    ? resp.ErrorMessage
+                    : $"release refused (HTTP {resp.StatusCode})";
+                return;
+            }
+
+            decomReleaseRows = resp.Rows.ToList();
+            row.State = "released";
+            row.RowsJson = JsonSerializer.Serialize(decomReleaseRows);
+            row.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            await decomWindows.UpsertAsync(row);
+            var removed = decomReleaseRows.Count(r => r.Outcome == "released");
+            Message.Success($"Window {row.WindowId} released: {removed} lock(s) removed, "
+                + $"{decomReleaseRows.Count - removed} left in place or failed");
+        }
+        catch (Exception e)
+        {
+            Message.Error($"Window release failed: {e.Message}");
+        }
+        finally
+        {
+            decomReleaseBusy = false;
+        }
+    }
+
+    private async Task PersistDecomWindowAsync(Runbook rb, string subscriptionId, string executionHash,
+        string state, IReadOnlyList<DecomLockRow> rows)
+    {
+        var scopes = WindowScopes(rb);
+        var row = new DecomWindowModel
+        {
+            WindowId = rb.Window.WindowId,
+            ScanId = decomScanId ?? "",
+            SubscriptionId = subscriptionId,
+            PlanHash = rb.PlanHash,
+            ExecutionHash = executionHash,
+            ScopesJson = JsonSerializer.Serialize(scopes),
+            State = state,
+            RowsJson = rows.Count > 0 ? JsonSerializer.Serialize(rows) : null,
+            UpdatedAtUtc = DateTimeOffset.UtcNow,
+        };
+        await decomWindows.UpsertAsync(row);
+        decomWindowRow = row;
+    }
+
+    private static string LockOutcomeColor(string outcome) => outcome switch
+    {
+        "locked" => "green",
+        "released" => "green",
+        "already-locked" => "blue",
+        "left-in-place" => "orange",
+        "foreign-locked" => "orange",
+        _ => "red",
+    };
 
     private static string SeverityColor(DecommissionSeverity s) => s switch
     {

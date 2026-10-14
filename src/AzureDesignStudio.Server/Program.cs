@@ -124,6 +124,29 @@ var app = builder.Build();
                     UpdatedBy nvarchar(320) NOT NULL,
                     UpdatedByUserId nvarchar(64) NOT NULL,
                     UpdatedAtUtc datetime2 NOT NULL);
+                IF OBJECT_ID(N'AdsDecomApprovals', N'U') IS NULL
+                CREATE TABLE AdsDecomApprovals (
+                    ExecutionHash nvarchar(71) NOT NULL PRIMARY KEY,
+                    WindowId nvarchar(64) NOT NULL,
+                    PlanHash nvarchar(71) NOT NULL,
+                    SubscriptionId nvarchar(64) NOT NULL,
+                    ApprovedBy nvarchar(320) NOT NULL,
+                    ApprovedByUserId nvarchar(64) NOT NULL,
+                    ApprovedAtUtc datetime2 NOT NULL);
+                IF OBJECT_ID(N'AdsDecomWindowEvents', N'U') IS NULL
+                CREATE TABLE AdsDecomWindowEvents (
+                    Id uniqueidentifier NOT NULL PRIMARY KEY,
+                    ApplyId uniqueidentifier NOT NULL,
+                    Event nvarchar(16) NOT NULL,
+                    WindowId nvarchar(64) NOT NULL,
+                    PlanHash nvarchar(71) NOT NULL,
+                    ExecutionHash nvarchar(71) NOT NULL,
+                    SubscriptionId nvarchar(64) NOT NULL,
+                    Principal nvarchar(320) NOT NULL,
+                    Detail nvarchar(1024) NULL,
+                    AtUtc datetime2 NOT NULL);
+                IF OBJECT_ID(N'AdsDecomWindowEvents', N'U') IS NOT NULL AND INDEXPROPERTY(OBJECT_ID(N'AdsDecomWindowEvents'), N'IX_AdsDecomWindowEvents_ApplyId', 'IndexID') IS NULL
+                CREATE INDEX IX_AdsDecomWindowEvents_ApplyId ON AdsDecomWindowEvents (ApplyId);
                 """);
         }
     }

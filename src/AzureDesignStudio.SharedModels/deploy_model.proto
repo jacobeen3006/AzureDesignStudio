@@ -18,6 +18,12 @@ service Deploy {
 	// reads it at review and apply, so a client can never deploy around it by omitting it.
 	rpc SetGuardrailPolicy(GuardrailPolicyRequest) returns(GuardrailPolicyResponse);
 	rpc GetGuardrailPolicy(google.protobuf.Empty) returns(GuardrailPolicyResponse);
+	// v2 plan 13.5: decommission window execution. Approval names the execution hash that
+	// binds the exact lock set; the app only lands and releases window-owned locks. Purge is
+	// NEVER executed here - it stays script-side behind its epoch guard.
+	rpc ApproveDecomWindow(ApproveDecomWindowRequest) returns(ApproveDecomWindowResponse);
+	rpc ExecuteDecomWindow(ExecuteDecomWindowRequest) returns(ExecuteDecomWindowResponse);
+	rpc ReleaseDecomWindow(ReleaseDecomWindowRequest) returns(ReleaseDecomWindowResponse);
 }
 
 message SubscriptionInfo {
@@ -168,4 +174,60 @@ message CreateStackResponse {
 	string error_message = 2;
 	string stack_state = 3;
 	string plan_hash = 4;
+}
+
+// v2 plan 13.5: decommission window execution. A window lock is not a deployment, so the
+// what-if gate cannot bind it; the execution hash binds the exact lock set instead
+// (DecomExecution canonical: window + plan hash + subscription + purge date + sorted scopes).
+// The app only ever LANDS and RELEASES window-owned locks - purge never executes here;
+// it stays script-side behind its epoch guard. Rows echo per-scope outcomes honestly.
+message DecomLockRow {
+	string scope = 1;
+	string outcome = 2;   // locked | already-locked | foreign-locked | failed | released | left-in-place
+	string detail = 3;
+}
+
+message ApproveDecomWindowRequest {
+	string subscription_id = 1;
+	string window_id = 2;
+	string plan_hash = 3;      // sha256: the runbook plan hash
+	string execution_hash = 4; // sha256: binds the exact lock set (DecomExecution.ExecutionHash)
+}
+
+message ApproveDecomWindowResponse {
+	int32 status_code = 1;
+	string error_message = 2;
+	string approved_by = 3;
+	string approved_at = 4;
+}
+
+message ExecuteDecomWindowRequest {
+	string subscription_id = 1;
+	string scan_id = 2;
+	string window_id = 3;
+	string plan_hash = 4;
+	string execution_hash = 5;
+	string window_start_utc = 6;      // round-tripped "O" - notes are rebuilt server-side from these
+	string window_end_utc = 7;        // "O" bytes, byte-identical to the runbook notes
+	string purge_not_before_utc = 8;  // "O" - informational, part of the execution hash
+	repeated string scopes = 9;       // caller sorts; server re-sorts before hash verify
+}
+
+message ExecuteDecomWindowResponse {
+	int32 status_code = 1;
+	string error_message = 2;
+	repeated DecomLockRow rows = 3;
+	string apply_id = 4; // audit correlation id
+}
+
+message ReleaseDecomWindowRequest {
+	string subscription_id = 1;
+	string window_id = 2;
+	repeated string scopes = 3;
+}
+
+message ReleaseDecomWindowResponse {
+	int32 status_code = 1;
+	string error_message = 2;
+	repeated DecomLockRow rows = 3;
 }

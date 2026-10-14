@@ -7,6 +7,7 @@ using SubscriptionInfo = AzureDesignStudio.SharedModels.Protos.SubscriptionInfo;
 using AzureDesignStudio.Discovery.Iac;
 using AzureDesignStudio.Discovery.Iac.WhatIf;
 using AzureDesignStudio.Discovery.ResourceGraph;
+using AzureDesignStudio.Discovery.Decommission;
 using AzureDesignStudio.Discovery.Unmanaged;
 using AzureDesignStudio.Server.Models;
 using Grpc.Core;
@@ -18,6 +19,7 @@ using SubscriptionResource = Azure.ResourceManager.Resources.SubscriptionResourc
 using Azure;
 using Azure.ResourceManager.Resources.Deployments;
 using Azure.ResourceManager.Resources.Deployments.Models;
+using System.Globalization;
 using System.Text.Json;
 
 namespace AzureDesignStudio.Server.Services
@@ -1468,6 +1470,477 @@ namespace AzureDesignStudio.Server.Services
             response.StatusCode = StatusCodes.Status200OK;
 
             return response;
+        }
+
+        /// <summary>
+        /// v2 plan 13.5: approves a decommission-window execution. The approver principal is taken
+        /// from the authenticated claims - the wire carries no approver field. The approval is
+        /// bound to the execution hash (the exact lock set), not a what-if token: a window lock
+        /// is not a deployment. Re-approving the same execution hash replaces the row.
+        /// </summary>
+        public override async Task<ApproveDecomWindowResponse> ApproveDecomWindow(ApproveDecomWindowRequest request, ServerCallContext context)
+        {
+            var response = new ApproveDecomWindowResponse();
+
+            var userIdClaim = ServiceTools.GetUserId(context);
+            if (string.IsNullOrWhiteSpace(userIdClaim))
+            {
+                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                response.StatusCode = StatusCodes.Status401Unauthorized;
+                response.ErrorMessage = "Access denied.";
+                return response;
+            }
+
+            var planHash = request.PlanHash ?? string.Empty;
+            var executionHash = request.ExecutionHash ?? string.Empty;
+            if (!IsValidHash(planHash) || !IsValidHash(executionHash))
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "DECOM_HASH_INVALID: expected sha256: plan and execution hashes (71 chars).";
+                return response;
+            }
+
+            if (string.IsNullOrWhiteSpace(request.WindowId))
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "DECOM_WINDOW_MISSING: window_id is required.";
+                return response;
+            }
+
+            Guid subscriptionId;
+            try
+            {
+                subscriptionId = new Guid(request.SubscriptionId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Exception occurred.");
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "Bad request.";
+                return response;
+            }
+
+            var subModel = await GetSubscriptionInfo(new Guid(userIdClaim), subscriptionId);
+            if (subModel == null)
+            {
+                _logger.LogWarning("No subscription is found.");
+                response.StatusCode = StatusCodes.Status404NotFound;
+                response.ErrorMessage = "No subscription is found.";
+                return response;
+            }
+
+            var displayName = context.GetHttpContext().User.FindFirst("name")?.Value;
+            var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
+
+            var existing = await _designContext.AdsDecomApprovals.FindAsync(executionHash, context.CancellationToken);
+            if (existing != null)
+                _designContext.AdsDecomApprovals.Remove(existing);
+
+            var approval = new DecomApprovalModel
+            {
+                ExecutionHash = executionHash,
+                WindowId = request.WindowId,
+                PlanHash = planHash,
+                SubscriptionId = subscriptionId.ToString(),
+                ApprovedBy = principal,
+                ApprovedByUserId = userIdClaim,
+                ApprovedAtUtc = DateTime.UtcNow,
+            };
+            _designContext.AdsDecomApprovals.Add(approval);
+            await _designContext.SaveChangesAsync(context.CancellationToken);
+
+            _logger.LogInformation("Decom window approved window={WindowId} execution={ExecutionHash} by {Principal}",
+                approval.WindowId, executionHash, principal);
+
+            response.StatusCode = StatusCodes.Status200OK;
+            response.ApprovedBy = principal;
+            response.ApprovedAt = approval.ApprovedAtUtc.ToString("O");
+            return response;
+        }
+
+        /// <summary>
+        /// v2 plan 13.5: lands the window's CanNotDelete locks. The guardrail re-judges before
+        /// any ARM mutation; the approval is consumed and the Started audit row lands before the
+        /// first lock write (a failed audit write aborts the run - fail closed). Per-scope
+        /// outcomes are honest: locked, already-locked, foreign-locked (a foreign lock already
+        /// shields the scope; the window lock is not stacked on it), or failed. The terminal
+        /// audit event is Completed only when every scope is locked or already-locked. Purge
+        /// never executes here - it stays script-side behind its epoch guard.
+        /// </summary>
+        public override async Task<ExecuteDecomWindowResponse> ExecuteDecomWindow(ExecuteDecomWindowRequest request, ServerCallContext context)
+        {
+            var response = new ExecuteDecomWindowResponse();
+
+            var userIdClaim = ServiceTools.GetUserId(context);
+            if (string.IsNullOrWhiteSpace(userIdClaim))
+            {
+                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                response.StatusCode = StatusCodes.Status401Unauthorized;
+                response.ErrorMessage = "Access denied.";
+                return response;
+            }
+
+            var planHash = request.PlanHash ?? string.Empty;
+            var executionHash = request.ExecutionHash ?? string.Empty;
+            if (!IsValidHash(planHash) || !IsValidHash(executionHash))
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "DECOM_HASH_INVALID: expected sha256: plan and execution hashes (71 chars).";
+                return response;
+            }
+
+            Guid subscriptionId;
+            try
+            {
+                subscriptionId = new Guid(request.SubscriptionId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Exception occurred.");
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "Bad request.";
+                return response;
+            }
+
+            var subModel = await GetSubscriptionInfo(new Guid(userIdClaim), subscriptionId);
+            if (subModel == null)
+            {
+                _logger.LogWarning("No subscription is found.");
+                response.StatusCode = StatusCodes.Status404NotFound;
+                response.ErrorMessage = "No subscription is found.";
+                return response;
+            }
+
+            DateTimeOffset purge, start, end;
+            try
+            {
+                purge = DateTimeOffset.Parse(request.PurgeNotBeforeUtc, null,
+                    DateTimeStyles.AdjustToUniversal | DateTimeStyles.RoundtripKind);
+                start = DateTimeOffset.Parse(request.WindowStartUtc, null,
+                    DateTimeStyles.AdjustToUniversal | DateTimeStyles.RoundtripKind);
+                end = DateTimeOffset.Parse(request.WindowEndUtc, null,
+                    DateTimeStyles.AdjustToUniversal | DateTimeStyles.RoundtripKind);
+            }
+            catch (FormatException ex)
+            {
+                _logger.LogWarning(ex, "Decom window timestamps are not round-trip O strings.");
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "DECOM_WINDOW_INVALID: window_start_utc/window_end_utc/purge_not_before_utc must be round-trip 'O' strings.";
+                return response;
+            }
+
+            var approval = await _designContext.AdsDecomApprovals.FindAsync(executionHash, context.CancellationToken);
+            if (approval == null)
+            {
+                response.StatusCode = StatusCodes.Status412PreconditionFailed;
+                response.ErrorMessage = "DECOM_APPROVAL_MISSING: approve the execution hash first; no locks were touched.";
+                return response;
+            }
+
+            // The server re-sorts the scopes itself; the sorted set is used everywhere after.
+            var scopes = request.Scopes.Select(s => s.Trim()).OrderBy(s => s.ToLowerInvariant(), StringComparer.Ordinal).ToList();
+
+            // Verify the lock set matches the approval before anything is consumed or mutated.
+            var recomputed = DecomExecution.ExecutionHash(request.WindowId, planHash, subscriptionId.ToString(), purge, scopes);
+            if (!string.Equals(recomputed, executionHash, StringComparison.Ordinal))
+            {
+                _logger.LogWarning("Decom execution hash mismatch for window {WindowId}", request.WindowId);
+                response.StatusCode = StatusCodes.Status409Conflict;
+                response.ErrorMessage = "EXECUTION_HASH_MISMATCH: the lock set or window changed since approval - re-approve.";
+                return response;
+            }
+
+            // Guardrail re-judgement BEFORE any ARM mutation: the scope ids and the resources under
+            // them against the live policy. A match refuses with the offending ids; the approval is
+            // never consumed and no lock is touched.
+            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(context.CancellationToken);
+            if (guardrailPolicy is null)
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = policyError;
+                return response;
+            }
+
+            var credential = new ClientSecretCredential(subModel.TenantId.ToString(),
+                subModel.ClientId.ToString(), subModel.ClientSecret);
+
+            var findings = new List<string>();
+            var emptyTags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var scope in scopes)
+                if (guardrailPolicy.ProtectionReasonFor(scope, "", emptyTags) is { } scopeReason)
+                    findings.Add($"{scope} ({scopeReason})");
+
+            try
+            {
+                var graph = new ResourceGraphClient(_httpClientFactory.CreateClient("arm"), credential);
+                var result = await graph.QueryAllAsync("Resources | project id, type, tags",
+                    [subscriptionId.ToString()], context.CancellationToken);
+                foreach (var row in result.Rows)
+                {
+                    var id = JsonString(row, "id");
+                    if (id.Length == 0 || !IsUnderAnyScope(id, scopes)) continue;
+                    var reason = guardrailPolicy.ProtectionReasonFor(id, JsonString(row, "type"), JsonTags(row));
+                    if (reason is not null) findings.Add($"{id} ({reason})");
+                }
+            }
+            catch (ResourceGraphException ex)
+            {
+                // Fail closed: an unreadable guardrail view must not green-light the locks.
+                _logger.LogWarning(ex, "Guardrail re-judgement could not read the resource graph.");
+                response.StatusCode = StatusCodes.Status502BadGateway;
+                response.ErrorMessage = $"GUARDRAIL_CHECK_FAILED: the do-not-touch re-judgement could not read the resource graph (HTTP {ex.StatusCode}: {ex.Code}); no locks were touched.";
+                return response;
+            }
+
+            if (findings.Count > 0)
+            {
+                var listed = findings.Count <= 50 ? findings : findings.Take(50).Append($"…and {findings.Count - 50} more");
+                _logger.LogWarning("Decom window lock set vetoed by guardrail: {Findings}", string.Join("; ", findings));
+                response.StatusCode = StatusCodes.Status403Forbidden;
+                response.ErrorMessage = "GUARDRAIL_VETO: the window lock set touches do-not-touch resources: " + string.Join("; ", listed);
+                return response;
+            }
+
+            var displayName = context.GetHttpContext().User.FindFirst("name")?.Value;
+            var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
+
+            // Consume the approval and land the Started row before any ARM mutation; a failed audit
+            // write aborts the run - fail closed, the run has no durable trail without it.
+            var applyId = Guid.NewGuid();
+            _designContext.AdsDecomWindowEvents.Add(NewDecomWindowEvent(applyId, request.WindowId, planHash,
+                executionHash, subscriptionId.ToString(), principal, PlanApplyEventModel.Started, null));
+            _designContext.AdsDecomApprovals.Remove(approval);
+            try
+            {
+                await _designContext.SaveChangesAsync(context.CancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogCritical(ex, "AUDIT WRITE FAILED: decom apply {ApplyId} event Started execution {ExecutionHash} - aborting the lock run",
+                    applyId, executionHash);
+                response.StatusCode = StatusCodes.Status500InternalServerError;
+                response.ErrorMessage = "AUDIT_WRITE_FAILED: the started audit event could not be recorded durably; nothing was locked.";
+                return response;
+            }
+            _logger.LogInformation("Decom window execute started window={WindowId} execution={ExecutionHash} applyId={ApplyId} by {Principal}",
+                request.WindowId, executionHash, applyId, principal);
+
+            var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), credential, ArmEndpointSet.AzureCloud);
+            var endpoint = transport.Endpoints.ManagementEndpoint + "/";
+            var notes = DecomExecution.WindowNotes(request.WindowId, start, end);
+            var lockName = ProtectionWindowPlanner.LockNameFor(request.WindowId);
+            var rows = new List<DecomLockRow>();
+
+            try
+            {
+                foreach (var scope in scopes)
+                {
+                    try
+                    {
+                        var listUrl = $"{endpoint}{scope.TrimStart('/')}/providers/Microsoft.Authorization/locks?api-version=2016-09-01";
+                        var (ours, foreignNames, _) = DecomExecution.ParseLockState(
+                            await transport.GetAsync(listUrl, context.CancellationToken), lockName);
+                        if (ours)
+                            rows.Add(new DecomLockRow { Scope = scope, Outcome = "already-locked" });
+                        else if (foreignNames.Count > 0)
+                            rows.Add(new DecomLockRow { Scope = scope, Outcome = "foreign-locked", Detail = string.Join(", ", foreignNames) });
+                        else
+                        {
+                            await transport.PutAsyncPolled(
+                                DecomExecution.LockUri(endpoint, scope, DecomExecution.LockIdFor(request.WindowId, scope)),
+                                DecomExecution.LockBody(notes), ct: context.CancellationToken);
+                            rows.Add(new DecomLockRow { Scope = scope, Outcome = "locked" });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Per-scope isolation: one scope's refusal must not abort the rest.
+                        rows.Add(new DecomLockRow { Scope = scope, Outcome = "failed", Detail = ex.Message });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // The loop itself cannot proceed after Started: the outcome is unknown, not failed.
+                await RecordDecomWindowEventAsync(applyId, request.WindowId, planHash, executionHash,
+                    subscriptionId.ToString(), principal, PlanApplyEventModel.OutcomeUnknown,
+                    $"lock run aborted: {ex.GetType().Name}: {ex.Message}");
+                response.StatusCode = StatusCodes.Status502BadGateway;
+                response.ErrorMessage = $"DECOM_LOCKS_OUTCOME_UNKNOWN: the lock run could not be completed ({ex.GetType().Name}); verify lock state in Azure (audit apply {applyId}).";
+                response.ApplyId = applyId.ToString();
+                foreach (var row in rows) response.Rows.Add(row);
+                return response;
+            }
+
+            var allLocked = rows.Count > 0 && rows.All(r => r.Outcome is "locked" or "already-locked");
+            var summary = rows.Count == 0
+                ? "no scopes supplied"
+                : string.Join("; ", rows.Select(r => $"{r.Scope}: {r.Outcome}{(string.IsNullOrEmpty(r.Detail) ? "" : $" ({r.Detail})")}"));
+            // The terminal event lands first - the client may already be gone.
+            await RecordDecomWindowEventAsync(applyId, request.WindowId, planHash, executionHash,
+                subscriptionId.ToString(), principal,
+                allLocked ? PlanApplyEventModel.Completed : PlanApplyEventModel.Failed,
+                allLocked ? null : summary);
+
+            response.StatusCode = StatusCodes.Status200OK;
+            response.ApplyId = applyId.ToString();
+            foreach (var row in rows) response.Rows.Add(row);
+            return response;
+        }
+
+        /// <summary>
+        /// v2 plan 13.5: releases the window's own locks. Auth only - releasing is protective
+        /// (it removes CanNotDelete locks), so no approval is required. Only the window's own
+        /// lock name is deleted; a foreign lock is left in place by construction. The run is
+        /// recorded as an Aborted audit event (the window's undo path).
+        /// </summary>
+        public override async Task<ReleaseDecomWindowResponse> ReleaseDecomWindow(ReleaseDecomWindowRequest request, ServerCallContext context)
+        {
+            var response = new ReleaseDecomWindowResponse();
+
+            var userIdClaim = ServiceTools.GetUserId(context);
+            if (string.IsNullOrWhiteSpace(userIdClaim))
+            {
+                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                response.StatusCode = StatusCodes.Status401Unauthorized;
+                response.ErrorMessage = "Access denied.";
+                return response;
+            }
+
+            if (string.IsNullOrWhiteSpace(request.WindowId))
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "DECOM_WINDOW_MISSING: window_id is required.";
+                return response;
+            }
+
+            Guid subscriptionId;
+            try
+            {
+                subscriptionId = new Guid(request.SubscriptionId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Exception occurred.");
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "Bad request.";
+                return response;
+            }
+
+            var subModel = await GetSubscriptionInfo(new Guid(userIdClaim), subscriptionId);
+            if (subModel == null)
+            {
+                _logger.LogWarning("No subscription is found.");
+                response.StatusCode = StatusCodes.Status404NotFound;
+                response.ErrorMessage = "No subscription is found.";
+                return response;
+            }
+
+            var displayName = context.GetHttpContext().User.FindFirst("name")?.Value;
+            var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
+            var applyId = Guid.NewGuid();
+
+            // The Aborted event lands before the first delete; a failed write is logged critical
+            // but never blocks a protective release.
+            await RecordDecomWindowEventAsync(applyId, request.WindowId, "", "",
+                subscriptionId.ToString(), principal, "Aborted", null);
+
+            var credential = new ClientSecretCredential(subModel.TenantId.ToString(),
+                subModel.ClientId.ToString(), subModel.ClientSecret);
+            var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), credential, ArmEndpointSet.AzureCloud);
+            var endpoint = transport.Endpoints.ManagementEndpoint + "/";
+            var lockName = ProtectionWindowPlanner.LockNameFor(request.WindowId);
+            var scopes = request.Scopes.Select(s => s.Trim()).OrderBy(s => s.ToLowerInvariant(), StringComparer.Ordinal).ToList();
+            var rows = new List<DecomLockRow>();
+
+            foreach (var scope in scopes)
+            {
+                try
+                {
+                    var listUrl = $"{endpoint}{scope.TrimStart('/')}/providers/Microsoft.Authorization/locks?api-version=2016-09-01";
+                    var (ours, foreignNames, ourLockId) = DecomExecution.ParseLockState(
+                        await transport.GetAsync(listUrl, context.CancellationToken), lockName);
+                    if (ours && ourLockId is not null)
+                    {
+                        await transport.DeleteAsync(DecomExecution.LockUri(endpoint, scope, ourLockId.Value), context.CancellationToken);
+                        rows.Add(new DecomLockRow { Scope = scope, Outcome = "released" });
+                    }
+                    else if (ours)
+                        rows.Add(new DecomLockRow { Scope = scope, Outcome = "failed", Detail = "window lock present but its id is unparseable" });
+                    else if (foreignNames.Count > 0)
+                        rows.Add(new DecomLockRow { Scope = scope, Outcome = "left-in-place", Detail = string.Join(", ", foreignNames) });
+                    else
+                        rows.Add(new DecomLockRow { Scope = scope, Outcome = "released", Detail = "no window lock on scope" });
+                }
+                catch (Exception ex)
+                {
+                    rows.Add(new DecomLockRow { Scope = scope, Outcome = "failed", Detail = ex.Message });
+                }
+            }
+
+            response.StatusCode = StatusCodes.Status200OK;
+            foreach (var row in rows) response.Rows.Add(row);
+            return response;
+        }
+
+        private static bool IsValidHash(string hash) =>
+            hash.StartsWith(DeployPlanArtifact.HashPrefix, StringComparison.Ordinal) && hash.Length == 71;
+
+        private static DecomWindowEventModel NewDecomWindowEvent(Guid applyId, string windowId, string planHash,
+            string executionHash, string subscriptionId, string principal, string eventType, string? detail) => new()
+        {
+            Id = Guid.NewGuid(),
+            ApplyId = applyId,
+            Event = eventType,
+            WindowId = windowId,
+            PlanHash = planHash,
+            ExecutionHash = executionHash,
+            SubscriptionId = subscriptionId,
+            Principal = principal,
+            Detail = PlanApplyEventModel.Truncate(detail),
+            AtUtc = DateTime.UtcNow,
+        };
+
+        private async Task RecordDecomWindowEventAsync(Guid applyId, string windowId, string planHash,
+            string executionHash, string subscriptionId, string principal, string eventType, string? detail)
+        {
+            try
+            {
+                _designContext.AdsDecomWindowEvents.Add(NewDecomWindowEvent(applyId, windowId, planHash,
+                    executionHash, subscriptionId, principal, eventType, detail));
+                // The event must land even when the caller's token is already cancelled
+                // (client disconnect); audit failures are logged loudly but never mask the outcome.
+                await _designContext.SaveChangesAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogCritical(ex, "AUDIT WRITE FAILED: decom apply {ApplyId} event {EventType} execution {ExecutionHash} outcome not recorded durably",
+                    applyId, eventType, executionHash);
+            }
+        }
+
+        private static string JsonString(JsonElement element, string property) =>
+            element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString() ?? ""
+                : "";
+
+        private static Dictionary<string, string> JsonTags(JsonElement element)
+        {
+            var tags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (element.TryGetProperty("tags", out var value) && value.ValueKind == JsonValueKind.Object)
+                foreach (var property in value.EnumerateObject())
+                    if (property.Value.ValueKind == JsonValueKind.String)
+                        tags[property.Name] = property.Value.GetString() ?? "";
+            return tags;
+        }
+
+        private static bool IsUnderAnyScope(string id, IReadOnlyList<string> scopes)
+        {
+            foreach (var scope in scopes)
+                if (string.Equals(id, scope, StringComparison.OrdinalIgnoreCase) ||
+                    id.StartsWith(scope + "/", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
         }
     }
 }

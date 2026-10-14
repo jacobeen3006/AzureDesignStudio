@@ -17,6 +17,7 @@ public class WorkspaceDbContext(DbContextOptions<WorkspaceDbContext> options) : 
     public DbSet<AuditRecord> AuditRecords => Set<AuditRecord>();
     public DbSet<NodePositionRecord> NodePositions => Set<NodePositionRecord>();
     public DbSet<ChangeFeedRecord> ChangeFeed => Set<ChangeFeedRecord>();
+    public DbSet<DecomWindowModel> DecomWindows => Set<DecomWindowModel>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -61,6 +62,11 @@ public class WorkspaceDbContext(DbContextOptions<WorkspaceDbContext> options) : 
             e.HasIndex(c => new { c.TargetResourceId, c.ChangeKey }).IsUnique();
             e.HasIndex(c => c.ChangeTime);
             e.HasIndex(c => c.ScanId);
+        });
+        model.Entity<DecomWindowModel>(e =>
+        {
+            e.HasKey(w => w.WindowId);
+            e.HasIndex(w => new { w.SubscriptionId, w.WindowId });
         });
     }
 }
@@ -140,6 +146,18 @@ public sealed class WorkspaceDb
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_ChangeFeed_TargetResourceId_ChangeKey" ON "ChangeFeed" ("TargetResourceId", "ChangeKey");
             CREATE INDEX IF NOT EXISTS "IX_ChangeFeed_ChangeTime" ON "ChangeFeed" ("ChangeTime");
             CREATE INDEX IF NOT EXISTS "IX_ChangeFeed_ScanId" ON "ChangeFeed" ("ScanId");
+            CREATE TABLE IF NOT EXISTS "DecomWindows" (
+                "WindowId" TEXT NOT NULL PRIMARY KEY,
+                "ScanId" TEXT NOT NULL,
+                "SubscriptionId" TEXT NOT NULL,
+                "PlanHash" TEXT NOT NULL,
+                "ExecutionHash" TEXT NOT NULL,
+                "ScopesJson" TEXT NOT NULL,
+                "State" TEXT NOT NULL,
+                "RowsJson" TEXT NULL,
+                "UpdatedAtUtc" TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS "IX_DecomWindows_SubscriptionId_WindowId" ON "DecomWindows" ("SubscriptionId", "WindowId");
             """;
         cmd.ExecuteNonQuery();
         conn.Close();

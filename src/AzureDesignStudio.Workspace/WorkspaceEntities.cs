@@ -122,3 +122,25 @@ public class ChangeFeedRecord
     public int ChangesCount { get; set; }
     public string? ChangedPropertiesJson { get; set; }
 }
+
+/// <summary>
+/// v2 13.5: one decommission window's execution state, persisted so the release verb
+/// re-sends the stored scopes (selection drift-proof) and an offline reopen shows the
+/// last known state. State: executed (all locked|already-locked), partial (some failed),
+/// released, failed.
+/// </summary>
+public class DecomWindowModel
+{
+    public required string WindowId { get; set; }
+    public required string ScanId { get; set; }
+    public required string SubscriptionId { get; set; }
+    public required string PlanHash { get; set; }
+    public required string ExecutionHash { get; set; }
+    /// <summary>JSON array of the window-owned scopes; release re-sends exactly these.</summary>
+    public required string ScopesJson { get; set; }
+    /// <summary>executed | partial | released | failed.</summary>
+    public required string State { get; set; }
+    /// <summary>Latest per-scope outcomes (DecomLockRow shape) as JSON.</summary>
+    public string? RowsJson { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
