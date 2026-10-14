@@ -55,6 +55,8 @@
 **Gate:** drift between two scans renders; every $ figure carries provenance; nightly green.
 **Effort:** 3–4 weeks. **This closes the read-only product.**
 
+**Status (2026-10-14):** 9.1 spine done - `ChangeFeedCollector` over the ARG `resourcechanges` table: time-windowed, newest-first, projected flat with Change Actor attribution (`changedBy`/`clientType`/RBAC `operation` - the existing Reader role covers the table; the Activity Log probe in preflight stays as the enrichment path for richer operation names). Rows normalize `Unspecified`/`Unknown` to null and drop partially-written records; persisted to `workspace.db` `ChangeFeed` via `WorkspaceChanges` (idempotent by resource+change key, overlapping collection windows add nothing) and exposed to the desktop host through `ChangeFeedService` (`CollectAsync` / `FeedAsync` / `MovedAsync` - the "what moved since the scan" shape 9.2 diffs against). Changes-tab UI lands when the scan drawer integration point is free; 10 offline tests (row normalization, partial-row drops, idempotent persistence, newest-per-resource fold).
+
 ## Phase 10 — IaC breadth
 
 - 10.1 **[48]** Text-first `.ads.json` as source of truth (canvas = view) — precondition for §C diffs in git.
