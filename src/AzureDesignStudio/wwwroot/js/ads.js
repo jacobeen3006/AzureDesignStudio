@@ -73,9 +73,11 @@ window.AdsDropZone = {
             self.dragKey = tile ? tile.getAttribute('data-stencil-key') : '';
         });
         zone.addEventListener('dragover', function (e) { e.preventDefault(); });
-        // Dropping over a node icon (<img> is natively draggable) otherwise
-        // makes Chrome abandon the external drag session: no further dragover
-        // reaches the zone and no drop fires. Keep the session alive.
+        // Without a dragenter cancel, an external drag that enters node/group
+        // content is abandoned by Chrome (observed: dragenter on the icon IMG,
+        // then no further dragover dispatch and no drop). Cancelling dragenter
+        // keeps the session alive so drop bubbles to the zone - verified by
+        // stencil-drop grouping into an availability set.
         zone.addEventListener('dragenter', function (e) { e.preventDefault(); });
         zone.addEventListener('drop', function (e) {
             e.preventDefault();
