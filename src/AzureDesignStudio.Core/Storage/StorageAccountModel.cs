@@ -1,5 +1,9 @@
-﻿using AzureDesignStudio.AzureResources.Base;
+﻿﻿using AutoMapper;
+using AzureDesignStudio.AzureResources.Base;
 using AzureDesignStudio.AzureResources.Storage;
+using AzureDesignStudio.Core.Attributes;
+using AzureDesignStudio.Core.Common;
+using AzureDesignStudio.Core.DTO;
 using AzureDesignStudio.Core.Models;
 using Blazor.Diagrams.Core.Models;
 using System.ComponentModel;
@@ -8,6 +12,7 @@ using System.Text.RegularExpressions;
 
 namespace AzureDesignStudio.Core.Storage
 {
+    [MapToDto(TypeKey = AdsConstants.StorageAccount)]
     public class StorageAccountModel : AzureNodeBase
     {
         public StorageAccountModel() : base()
@@ -19,6 +24,10 @@ namespace AzureDesignStudio.Core.Storage
         }
         public override string ServiceName => "Storage Account";
         public override Type? DataFormType => typeof(StorageAccountForm);
+        public override AzureNodeDto GetNodeDto(IMapper mapper)
+        {
+            return mapper.Map<StorageAccountModelDto>(this);
+        }
         private readonly StorageAccounts _storageAccount = new()
         {
             Sku = new(),
@@ -29,17 +38,17 @@ namespace AzureDesignStudio.Core.Storage
             }
         };
         protected override ResourceBase ArmResource => _storageAccount;
-        [Required, DisplayName("Sku")]
-        public string SkuName 
-        { 
-            get => _storageAccount.Sku.Name; 
-            set => _storageAccount.Sku.Name = value; 
+        [Required, DisplayName("Sku"), MapToDto]
+        public string SkuName
+        {
+            get => _storageAccount.Sku.Name;
+            set => _storageAccount.Sku.Name = value;
         }
-        [Required, DisplayName("Kind")]
-        public string Kind 
-        { 
-            get => _storageAccount.Kind; 
-            set => _storageAccount.Kind = value; 
+        [Required, DisplayName("Kind"), MapToDto]
+        public string Kind
+        {
+            get => _storageAccount.Kind;
+            set => _storageAccount.Kind = value;
         }
         public string AccountKey
         {
