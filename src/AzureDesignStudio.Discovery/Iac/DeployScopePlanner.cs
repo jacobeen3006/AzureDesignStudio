@@ -333,6 +333,118 @@ public static partial class DeployScopePlanner
         out DeployScopePlan plan, out string message) =>
         TryFindBlockingErrorsCore(templateJson, DeployScopeKind.ResourceGroup, subscriptionId, resourceGroup, out plan, out message);
 
+    /// <summary>
+    /// Staged-apply gate bound to a full target identity (v2 plan 11.2): the approval names one of
+    /// the four ARM deployment scopes, the plan stages with that scope as ambient, and every batch
+    /// must be deployable at an endpoint the identity names (<see cref="DeployTargetScope.AllowedBatchKinds"/>).
+    /// A subscription target rides its resource-group batch at the subscription endpoint (the
+    /// scoped resources carry explicit paths the gate proves name the approved subscription);
+    /// management-group and tenant targets stay single-scope: nothing below them is provable from
+    /// the identity. Every explicit literal target override must name the approved target or the
+    /// plan is rejected <c>ScopeTargetMismatch</c> / <c>MultiScopeNotDeployable</c> and never rides
+    /// the approved token. An RG target through this overload behaves exactly like the legacy
+    /// (subscription, resource group) gate.
+    /// </summary>
+    public static bool TryStageForApply(string templateJson, DeployTargetScope target,
+        out DeployScopePlan plan, out string message)
+    {
+        plan = Create(templateJson, target.Kind);
+        var errors = plan.Diagnostics.Where(d => d.Severity == ArmDiagnosticSeverity.Error).ToList();
+        var allowed = target.AllowedBatchKinds;
+        var beyond = plan.Batches.Where(b => !allowed.Contains(b.Kind)).Select(b => b.Kind.ToString()).Distinct().ToList();
+        if (beyond.Count > 0)
+        {
+            errors.Add(new(ArmDiagnosticSeverity.Error, "MultiScopeNotDeployable",
+                $"The staged plan requires batches beyond the approved target {target.ScopePath} ({string.Join(", ", beyond)}); the approval identity binds only the endpoints that target names."));
+        }
+
+        foreach (var (key, property, value) in ExplicitTargetOverrides(templateJson))
+        {
+            if (property == "scope")
+            {
+                if (value.Contains('['))
+                {
+                    continue; // expression scope: Create already failed the plan closed
+                }
+
+                if (!TryParseScopePath(value, out var parsed, out var parsedSub, out var parsedRg))
+                {
+                    errors.Add(new(ArmDiagnosticSeverity.Error, "ScopePathMalformed",
+                        $"'{key}' carries the literal scope '{value}', which is not a valid ARM scope path; refusing to treat it as the deployment target."));
+                }
+                else if (!allowed.Contains(parsed))
+                {
+                    errors.Add(new(ArmDiagnosticSeverity.Error, "MultiScopeNotDeployable",
+                        $"'{key}' carries an explicit {parsed}-scope path '{value}'; the approval identity binds only the endpoints of target {target.ScopePath}."));
+                }
+                else if (parsed == DeployScopeKind.ResourceGroup)
+                {
+                    // Under an RG target the path must name the approved group exactly; under a
+                    // subscription target any group of the approved subscription is in identity.
+                    var matches = target.Kind == DeployScopeKind.ResourceGroup
+                        ? parsedSub.Equals(target.SubscriptionId, StringComparison.OrdinalIgnoreCase)
+                          && parsedRg.Equals(target.ResourceGroup, StringComparison.OrdinalIgnoreCase)
+                        : parsedSub.Equals(target.SubscriptionId, StringComparison.OrdinalIgnoreCase);
+                    if (!matches)
+                    {
+                        errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeTargetMismatch",
+                            $"'{key}' carries an explicit scope '{value}' outside the approved target {target.ScopePath}."));
+                    }
+                }
+                else if (parsed == DeployScopeKind.Subscription)
+                {
+                    if (!parsedSub.Equals(target.SubscriptionId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeTargetMismatch",
+                            $"'{key}' carries an explicit subscription-scope path '{value}' outside the approved subscription '{target.SubscriptionId}'."));
+                    }
+                }
+                else if (parsed == DeployScopeKind.ManagementGroup)
+                {
+                    if (!TryParseManagementGroupPath(value, out var parsedMg)
+                        || !parsedMg.Equals(target.ManagementGroupId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeTargetMismatch",
+                            $"'{key}' carries an explicit management-group scope '{value}' outside the approved management group '{target.ManagementGroupId}'."));
+                    }
+                }
+                // parsed == Tenant under a tenant target: the grammar only answers Tenant for "/",
+                // which is exactly the approved scope.
+
+                continue;
+            }
+
+            // Nested-deployment retarget, scoped to what the identity can prove.
+            if (target.Kind is DeployScopeKind.ManagementGroup or DeployScopeKind.Tenant)
+            {
+                errors.Add(new(ArmDiagnosticSeverity.Error, "MultiScopeNotDeployable",
+                    $"'{key}' overrides the deployment target with an explicit {property}; the {target.Kind}-scope approval binds no endpoint below it."));
+            }
+            else if (property == "resourceGroup" && target.Kind == DeployScopeKind.Subscription)
+            {
+                // A nested group retarget inside the approved subscription cannot leave the
+                // identity: the subscription it lands in is the one already approved.
+            }
+            else if (value.Contains('['))
+            {
+                errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeExpressionNotPlanned",
+                    $"'{key}' overrides the deployment target with an expression {property} that staging cannot resolve; refusing to deploy an unprovable scope."));
+            }
+            else
+            {
+                var expected = property == "subscriptionId" ? target.SubscriptionId : target.ResourceGroup;
+                if (!value.Equals(expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add(new(ArmDiagnosticSeverity.Error, "ScopeTargetMismatch",
+                        $"'{key}' overrides the deployment target with {property} '{value}' outside the approved target {target.ScopePath}."));
+                }
+            }
+        }
+
+        message = string.Join(Environment.NewLine, errors.Select(e => $"{e.Code}: {e.Message}"));
+        return errors.Count > 0;
+    }
+
 
     private static bool TryFindBlockingErrorsCore(string templateJson, DeployScopeKind ambientScope, string? subscriptionId, string? resourceGroup,
         out DeployScopePlan plan, out string message)
@@ -529,6 +641,23 @@ public static partial class DeployScopePlanner
                 CollectTargetOverrides(inner["resources"] as JsonArray, found);
             }
         }
+    }
+
+    /// <summary>The management group id a scope path names (any depth under the group), or false.</summary>
+    private static bool TryParseManagementGroupPath(string scope, out string managementGroupId)
+    {
+        managementGroupId = "";
+        var segments = scope.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length >= 4
+            && segments[0].Equals("providers", StringComparison.OrdinalIgnoreCase)
+            && segments[1].Equals("microsoft.management", StringComparison.OrdinalIgnoreCase)
+            && segments[2].Equals("managementGroups", StringComparison.OrdinalIgnoreCase))
+        {
+            managementGroupId = segments[3];
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>

@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Azure.Core;
 using AzureDesignStudio.Core.Common;
 using AzureDesignStudio.Discovery.Arm;
+using AzureDesignStudio.Discovery.Iac;
 using AzureDesignStudio.Discovery.Iac.WhatIf;
 using AzureDesignStudio.Discovery.ResourceGraph;
 using Xunit;
@@ -378,5 +379,34 @@ public class WhatIfTests
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Contains("InvalidTemplateDeployment", ex.Code);
+    }
+
+    [Fact]
+    public async Task Client_ManagementGroupTarget_PostsUnderTheGroupScope()
+    {
+        const string finalJson = """{"status":"Succeeded","properties":{"changes":[]}}""";
+        var handler = new FakeHandler((_, n) => n == 0 ? Json(finalJson) : Json(finalJson));
+        var client = new WhatIfClient(new ArmTransport(new HttpClient(handler), new FakeCredential(),
+            ArmEndpointSet.AzureCloud, (_, _) => Task.CompletedTask));
+
+        await client.WhatIfAsync(DeployTargetScope.ManagementGroupScope("mg1"), "westeurope", """{"resources":[]}""", "{}");
+
+        Assert.Contains("/providers/Microsoft.Management/managementGroups/mg1/providers/Microsoft.Resources/deployments/ads-deployment/whatIf", handler.Uris[0]);
+        Assert.Contains("api-version=2025-04-01", handler.Uris[0]);
+        using var body = JsonDocument.Parse(handler.Bodies[0]!);
+        Assert.Equal("westeurope", body.RootElement.GetProperty("location").GetString());
+    }
+
+    [Fact]
+    public async Task Client_TenantTarget_PostsAtTheManagementEndpointRoot()
+    {
+        const string finalJson = """{"status":"Succeeded","properties":{"changes":[]}}""";
+        var handler = new FakeHandler((_, n) => n == 0 ? Json(finalJson) : Json(finalJson));
+        var client = new WhatIfClient(new ArmTransport(new HttpClient(handler), new FakeCredential(),
+            ArmEndpointSet.AzureCloud, (_, _) => Task.CompletedTask));
+
+        await client.WhatIfAsync(DeployTargetScope.TenantScope(), "northeurope", """{"resources":[]}""", "{}");
+
+        Assert.Equal("https://management.azure.com/providers/Microsoft.Resources/deployments/ads-deployment/whatIf?api-version=2025-04-01", handler.Uris[0]);
     }
 }

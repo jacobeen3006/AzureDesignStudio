@@ -6,6 +6,16 @@ using System.Text.Json;
 
 namespace AzureDesignStudio.Core.Common
 {
+    /// <summary>Which ARM deployment scope a plan is bound to; the plan hash names it, so an
+    /// approval for a resource group can never authorize the same bytes at another scope (v2 11.2).</summary>
+    public enum DeployPlanScopeKind
+    {
+        ResourceGroup = 0,
+        Subscription = 1,
+        ManagementGroup = 2,
+        Tenant = 3,
+    }
+
     /// <summary>
     /// Canonical, hash-stamped deployment plan (v2 plan 11.3 pre-work for the approved-plan-hash
     /// gate [62]): plan identity is scope + template + parameters and nothing else. Canonical JSON
@@ -31,12 +41,29 @@ namespace AzureDesignStudio.Core.Common
         /// <summary>sha256:, lowercase hex, over the UTF-8 bytes of <see cref="CanonicalJson"/>.</summary>
         public string PlanHash { get; }
 
-        public static DeployPlanArtifact Create(string subscriptionId, string resourceGroup, string templateJson, string parametersJson = "{}")
+        /// <summary>
+        /// Plan bound to a non-resource-group target (v2 plan 11.2): the canonical scope member
+        /// names exactly the approved identity - management group id, subscription id, or nothing
+        /// for tenant - so the hash is unique per target and never collides with a resource-group
+        /// plan (whose member set keeps both ids and stays byte-identical to older approvals).
+        /// </summary>
+        public static DeployPlanArtifact Create(DeployPlanScopeKind kind, string? subscriptionId, string? resourceGroup,
+            string? managementGroupId, string templateJson, string parametersJson = "{}")
         {
-            if (string.IsNullOrWhiteSpace(subscriptionId))
-                throw new ArgumentException("A plan scope needs a subscription id.", nameof(subscriptionId));
-            if (string.IsNullOrWhiteSpace(resourceGroup))
-                throw new ArgumentException("A plan scope needs a resource group.", nameof(resourceGroup));
+            var scopeMember = kind switch
+            {
+                DeployPlanScopeKind.ResourceGroup when !string.IsNullOrWhiteSpace(subscriptionId) && !string.IsNullOrWhiteSpace(resourceGroup) =>
+                    "{\"resourceGroup\":" + JsonSerializer.Serialize(resourceGroup) + ",\"subscriptionId\":" + JsonSerializer.Serialize(subscriptionId) + "}",
+                DeployPlanScopeKind.ResourceGroup => throw new ArgumentException("A plan scope needs a subscription id and a resource group.", nameof(subscriptionId)),
+                DeployPlanScopeKind.Subscription when !string.IsNullOrWhiteSpace(subscriptionId) =>
+                    "{\"subscriptionId\":" + JsonSerializer.Serialize(subscriptionId) + "}",
+                DeployPlanScopeKind.Subscription => throw new ArgumentException("A subscription-scope plan needs a subscription id.", nameof(subscriptionId)),
+                DeployPlanScopeKind.ManagementGroup when !string.IsNullOrWhiteSpace(managementGroupId) =>
+                    "{\"managementGroupId\":" + JsonSerializer.Serialize(managementGroupId) + "}",
+                DeployPlanScopeKind.ManagementGroup => throw new ArgumentException("A management-group-scope plan needs a management group id.", nameof(managementGroupId)),
+                DeployPlanScopeKind.Tenant => "{}",
+                _ => throw new ArgumentException($"Unknown plan scope kind '{kind}'.", nameof(kind)),
+            };
 
             var template = Parse(templateJson, nameof(templateJson));
             var parameters = Parse(parametersJson, nameof(parametersJson));
@@ -44,14 +71,25 @@ namespace AzureDesignStudio.Core.Common
             var sb = new StringBuilder();
             sb.Append("{\"parameters\":");
             AppendCanonical(sb, parameters);
-            sb.Append(",\"scope\":{\"resourceGroup\":").Append(JsonSerializer.Serialize(resourceGroup))
-              .Append(",\"subscriptionId\":").Append(JsonSerializer.Serialize(subscriptionId)).Append('}');
+            sb.Append(",\"scope\":").Append(scopeMember);
             sb.Append(",\"template\":");
             AppendCanonical(sb, template);
             sb.Append('}');
 
             var json = sb.ToString();
             return new DeployPlanArtifact(json, Hash(json));
+        }
+
+        public static DeployPlanArtifact Create(string subscriptionId, string resourceGroup, string templateJson, string parametersJson = "{}")
+        {
+            if (string.IsNullOrWhiteSpace(subscriptionId))
+                throw new ArgumentException("A plan scope needs a subscription id.", nameof(subscriptionId));
+            if (string.IsNullOrWhiteSpace(resourceGroup))
+                throw new ArgumentException("A plan scope needs a resource group.", nameof(resourceGroup));
+
+            // One canonical writer for every target shape; the resource-group member set is
+            // byte-identical to every plan hash recorded before multi-scope targets existed.
+            return Create(DeployPlanScopeKind.ResourceGroup, subscriptionId, resourceGroup, null, templateJson, parametersJson);
         }
 
         /// <summary>

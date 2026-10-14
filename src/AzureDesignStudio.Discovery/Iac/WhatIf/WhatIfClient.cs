@@ -28,6 +28,24 @@ public sealed class WhatIfClient(ArmTransport transport)
         return WhatIfParser.Parse(responseJson);
     }
 
+    /// <summary>
+    /// What-if at the approved target scope (v2 plan 11.2): the URL is built under the target's
+    /// canonical scope path - tenant posts at the management endpoint root. <paramref name="location"/>
+    /// is mandatory for non-resource-group targets: ARM requires a deployment location there, and
+    /// the caller has already rejected an empty one rather than send an unplaceable request.
+    /// </summary>
+    public async Task<WhatIfSummary> WhatIfAsync(DeployTargetScope scope, string location,
+        string armTemplate, string parameters, CancellationToken ct = default)
+    {
+        var scopePath = scope.Kind == DeployScopeKind.Tenant ? "" : scope.ScopePath;
+        var url = $"{transport.Endpoints.ManagementEndpoint}{scopePath}"
+            + $"/providers/Microsoft.Resources/deployments/{DeploymentName}/whatIf?api-version={ApiVersion}";
+
+        var body = BuildRequestBody(location, armTemplate, parameters);
+        var responseJson = await transport.PostAsyncPolled(url, body, maxPolls: 60, ct).ConfigureAwait(false);
+        return WhatIfParser.Parse(responseJson);
+    }
+
     internal static string BuildRequestBody(string location, string armTemplate, string parameters)
     {
         using var template = ParseObject(armTemplate, "template");
