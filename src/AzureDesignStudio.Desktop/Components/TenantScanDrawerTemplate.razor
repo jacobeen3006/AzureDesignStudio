@@ -4,10 +4,16 @@
 @using System.Text.Json
 @using AntDesign
 @using AzureDesignStudio.Discovery.Analysis
+@using EmptyMessage = Google.Protobuf.WellKnownTypes.Empty
 @using AzureDesignStudio.Discovery.Arm
 @using AzureDesignStudio.Discovery.Inventory
 @using AzureDesignStudio.Discovery.Decommission
 @using AzureDesignStudio.Discovery.Preflight
+@using AzureDesignStudio.Discovery.Exposure
+@using AzureDesignStudio.Discovery.Drift
+@using AzureDesignStudio.Discovery.Cost
+@using AzureDesignStudio.Discovery.Unmanaged
+@using AzureDesignStudio.Discovery.Mcp
 @using SubscriptionInfo = AzureDesignStudio.Discovery.Arm.SubscriptionInfo
 @using AzureDesignStudio.Workspace
 @implements IDisposable
@@ -22,6 +28,8 @@
 @inject IMapper mapper
 @inject GrpcClientFactory grpcFactory
 @inject WorkspaceDecomWindows decomWindows
+@inject ChangeFeedService Feed
+@inject ActualSpendClient Spend
 @inject MessageService Message
 @inject ModalService Modal
 
@@ -30,7 +38,7 @@
 
 <div style="padding:0 4px;">
     <div style="display:flex;gap:8px;margin-bottom:12px;">
-        @foreach (var (key, label) in new[] { ("scan", "Scan"), ("browse", "Inventory"), ("topology", "Topology"), ("decom", "Decommission"), ("report", "Report") })
+        @foreach (var (key, label) in new[] { ("scan", "Scan"), ("browse", "Inventory"), ("topology", "Topology"), ("exposure", "Exposure"), ("changes", "Changes"), ("cost", "Cost"), ("decom", "Decommission"), ("report", "Report") })
         {
             <Button Type="@(activeTab == key ? ButtonType.Primary : ButtonType.Default)"
                     Size="ButtonSize.Small" OnClick="@(() => SwitchTabAsync(key))">@label</Button>
@@ -207,6 +215,10 @@
                         }
                         <a @onclick="@(() => browseOwner = null)">clear</a>
                     }
+                    @if (unmanagedAudit is { } au)
+                    {
+                        <span> · <a @onclick="@(() => unmanagedOnly = !unmanagedOnly)">@(unmanagedOnly ? "showing unmanaged only (clear)" : $"{au.Unmanaged.Count} unmanaged")</a> · @au.ProtectedResources.Count protected · <span style="color:#999">@unmanagedPolicyNote</span></span>
+                    }
                 </div>
             }
 
@@ -256,6 +268,14 @@
                             <Tag Color="@("green")">in design</Tag>
                         }
                     }
+                    @if (unmanagedAudit is not null && unmanagedAudit.UnmanagedIds.Contains(item.Id))
+                    {
+                        <Tag Color="@("orange")">unmanaged</Tag>
+                    }
+                    else if (protectedIds.Contains(item.Id))
+                    {
+                        <Tag Color="@("blue")">protected</Tag>
+                    }
                     @if (expandedId == item.Id)
                     {
                         <pre style="max-height:260px;overflow:auto;background:#fafafa;padding:8px;font-size:12px;">@Pretty(item)</pre>
@@ -285,6 +305,189 @@
         else
         {
             <TopologyView Items="topoItems" Positions="Session.Positions" ChangedIds="topoChanged" />
+        }
+    }
+    else if (activeTab == "exposure")
+    {
+        @if (exposureScanId is null)
+        {
+            @if (completed.Count == 0)
+            {
+                <span>No completed scans yet.</span>
+            }
+            else
+            {
+                <select @bind="exposureScanId" @bind:after="LoadExposureAsync">
+                    @foreach (var scan in completed)
+                    {
+                        <option value="@scan.Id">@(scan.StartedAt.LocalDateTime.ToString("dd.MM HH:mm")) · @scan.Scope · @scan.ResourceCount rows</option>
+                    }
+                </select>
+            }
+        }
+        else
+        {
+            <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+                <a @onclick="@(() => { exposureScanId = null; exposureFindings = []; })">back</a>
+                <Tag Color="@("red")">@exposureFindings.Count(f => f.Severity == ExposureSeverity.Critical) Critical</Tag>
+                <Tag Color="@("orange")">@exposureFindings.Count(f => f.Severity == ExposureSeverity.High) High</Tag>
+                <Tag Color="@("gold")">@exposureFindings.Count(f => f.Severity == ExposureSeverity.Medium) Medium</Tag>
+                <Tag Color="@("blue")">@exposureFindings.Count(f => f.Severity == ExposureSeverity.Low) Low</Tag>
+            </div>
+            @if (exposureFindings.Count == 0)
+            {
+                <span>No internet-exposure findings for this scan.</span>
+            }
+            @foreach (var f in exposureFindings)
+            {
+                <div style="border-bottom:1px solid #fafafa;padding:4px 0;font-size:13px;">
+                    <Tag Color="@ExposureColor(f.Severity)">@f.Severity</Tag>
+                    <b>@NameOf(f.ResourceId)</b> <span style="color:#999">@f.ResourceType · @f.Kind</span>
+                    <div style="color:#666;">@f.Detail</div>
+                    <div style="color:#389e0d;">→ @f.Remediation</div>
+                </div>
+            }
+            @foreach (var cav in AdsToolEngine.ExposureCaveats)
+            {
+                <div style="font-size:12px;color:#999;">@cav</div>
+            }
+        }
+    }
+    else if (activeTab == "changes")
+    {
+        @if (changesScanId is null)
+        {
+            @if (completed.Count == 0)
+            {
+                <span>No completed scans yet.</span>
+            }
+            else
+            {
+                <select @bind="changesScanId" @bind:after="LoadChangesAsync">
+                    @foreach (var scan in completed)
+                    {
+                        <option value="@scan.Id">@(scan.StartedAt.LocalDateTime.ToString("dd.MM HH:mm")) · @scan.Scope · @scan.ResourceCount rows</option>
+                    }
+                </select>
+            }
+        }
+        else
+        {
+            <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
+                <a @onclick="@(() => { changesScanId = null; changesRows = []; changesCollected = null; })">back</a>
+                <Tooltip Title="@(ArmUnavailable ? $"Sign in / reconnect - collecting calls Azure Resource Graph: {loadError}" : "Query resourcechanges for this scan's subscriptions (last 7 days) and store it in the workspace")">
+                    <Button Size="ButtonSize.Small" Disabled="@(ArmUnavailable || changesBusy)"
+                            OnClick="CollectFeedAsync">@(changesBusy ? "Collecting…" : "Collect feed (7d)")</Button>
+                </Tooltip>
+                @if (changesCollected is { } n)
+                {
+                    <span style="font-size:12px;color:#666;">@n change row(s) collected</span>
+                }
+            </div>
+            @if (changesError is { } cerr)
+            {
+                <Alert Type="@AlertType.Error" ShowIcon="true" Style="margin-bottom:8px" Message="@cerr" />
+            }
+            <div style="font-size:12px;color:#666;margin-bottom:6px;">what moved since this scan @(changesSince?.LocalDateTime.ToString("dd.MM HH:mm")) - actors come from the ARG change feed; "unknown actor" where Azure did not attribute the row</div>
+            @foreach (var d in changesRows)
+            {
+                <div style="border-bottom:1px solid #fafafa;padding:4px 0;font-size:13px;">
+                    <Tag Color="@DriftColor(d.Status)">@d.Status</Tag>
+                    <b>@NameOf(d.ResourceId)</b> <span style="color:#999">@d.ResourceType</span>
+                    <span style="color:#999;font-size:12px;">@(d.ChangedAt.LocalDateTime.ToString("dd.MM HH:mm")) · @(string.IsNullOrEmpty(d.ChangedBy) ? "unknown actor" : d.ChangedBy)@(d.ClientType is { Length: > 0 } ct ? $" · {ct}" : "")</span>
+                    @if (d.Operation is { Length: > 0 } op)
+                    {
+                        <div style="color:#666;">@op</div>
+                    }
+                </div>
+            }
+            @if (changesRows.Count == 0 && !changesBusy)
+            {
+                <span>Nothing moved since the scan was taken - or the feed was not collected yet (Collect feed above).</span>
+            }
+        }
+    }
+    else if (activeTab == "cost")
+    {
+        @if (costScanId is null)
+        {
+            @if (completed.Count == 0)
+            {
+                <span>No completed scans yet.</span>
+            }
+            else
+            {
+                <select @bind="costScanId" @bind:after="LoadCostScopeAsync">
+                    @foreach (var scan in completed)
+                    {
+                        <option value="@scan.Id">@(scan.StartedAt.LocalDateTime.ToString("dd.MM HH:mm")) · @scan.Scope · @scan.ResourceCount rows</option>
+                    }
+                </select>
+            }
+        }
+        else
+        {
+            <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap;">
+                <a @onclick="@(() => { costScanId = null; costResults = []; costSubs = []; })">back</a>
+                <span style="font-size:12px;color:#888;">window (days)</span>
+                <select @bind="costDays">
+                    <option value="7">7</option>
+                    <option value="30">30</option>
+                </select>
+                <span style="font-size:12px;color:#888;">group by</span>
+                <select @bind="costDimension">
+                    <option value="ResourceGroup">resource group</option>
+                    <option value="ServiceFamily">service family</option>
+                    <option value="MeterCategory">meter category</option>
+                    <option value="Location">location</option>
+                </select>
+                <Tooltip Title="@(ArmUnavailable ? $"Sign in / reconnect - spend is a live Cost Management query: {loadError}" : "Real Cost Management query per subscription in this scan (needs Cost Management Reader); nothing runs until you click")">
+                    <Button Type="ButtonType.Primary" Size="ButtonSize.Small"
+                            Disabled="@(ArmUnavailable || costBusy || costSubs.Count == 0)"
+                            OnClick="QuerySpendAsync">@(costBusy ? "Querying…" : $"Query spend ({costSubs.Count} sub(s))")</Button>
+                </Tooltip>
+            </div>
+            <div style="font-size:12px;color:#666;margin-bottom:6px;">
+                figures are Azure's own Cost Management numbers for the chosen window - every scope below prints its source, currency and as-of. Not cached, not estimated.
+            </div>
+            @if (costError is { } kerr)
+            {
+                <Alert Type="@AlertType.Error" ShowIcon="true" Style="margin-bottom:8px" Message="@kerr" />
+            }
+            @foreach (var (sub, result, error) in costResults)
+            {
+                <h4 style="margin:10px 0 4px;">@(subscriptions.FirstOrDefault(s => s.SubscriptionId == sub)?.DisplayName ?? sub)</h4>
+                @if (error is { } se)
+                {
+                    <div style="color:#cf1322;font-size:13px;">@se</div>
+                }
+                else if (result is { } res)
+                {
+                    <div style="font-size:12px;color:#999;margin-bottom:4px;">
+                        @res.Provenance.Source · @res.Provenance.Scope · endpoint @res.Provenance.Region · currency <b>@(string.IsNullOrEmpty(res.Provenance.Currency) ? "n/a" : res.Provenance.Currency)</b>
+                        · window @(res.Provenance.From.ToLocalTime().ToString("dd.MM")) - @(res.Provenance.To.ToLocalTime().ToString("dd.MM")) · fetched @(res.Provenance.AsOf.LocalDateTime.ToString("dd.MM HH:mm"))
+                        · total <b>@CostRollup.Total(res.Rows).ToString("0.00")</b>
+                    </div>
+                    @if (res.Rows.Count == 0)
+                    {
+                        <div style="font-size:13px;color:#666;">no cost rows for this window (empty subscription or no usage).</div>
+                    }
+                    else
+                    {
+                        <table style="width:100%;font-size:13px;">
+                            <tr><th>@costDimension</th><th style="text-align:right;">cost</th><th style="text-align:right;">share</th></tr>
+                            @foreach (var b in CostRollup.By(res.Rows, CostDim).Take(15))
+                            {
+                                <tr>
+                                    <td>@b.Key</td>
+                                    <td style="text-align:right;">@b.Cost.ToString("0.00")</td>
+                                    <td style="text-align:right;">@b.Share.ToString("P0")</td>
+                                </tr>
+                            }
+                        </table>
+                    }
+                }
+            }
         }
     }
     else if (activeTab == "decom")
@@ -472,9 +675,13 @@
     else
     {
         <div style="margin-bottom:8px;font-size:13px;">
-            <b>@reportItems.Count resources</b> scanned @(reportScan.FinishedAt?.LocalDateTime.ToString("dd.MM HH:mm")) ·
+            <b>@reportItems.Count resources</b> scanned @(reportScan?.FinishedAt?.LocalDateTime.ToString("dd.MM HH:mm")) ·
             retirement data as of <b>@(catalog.DataAsOf.LocalDateTime.ToString("yyyy-MM-dd"))</b>
             <Tag Color="@FreshnessColor(catalog.FreshnessAt(DateTimeOffset.UtcNow))">@catalog.FreshnessAt(DateTimeOffset.UtcNow)</Tag>
+        </div>
+        <div style="margin-bottom:8px;">
+            <Button Size="ButtonSize.Small" OnClick="SaveReportAsync">Save report (Markdown)</Button>
+            <span style="font-size:12px;color:#999;margin-left:6px;">findings + retirement watch + exposure + unmanaged + changes since the scan, with sources</span>
         </div>
 
         @foreach (var finding in reportFindings)
@@ -536,6 +743,34 @@
     private string? topoScanId;
     private List<InventoryItem> topoItems = [];
     private IReadOnlySet<string>? topoChanged;
+
+    // Phase 9 UI integration (v2 9.1/9.3/9.4/9.5): per-tab workspace-snapshot reads; the only
+    // ARM calls on these tabs are Collect feed and Query spend, both gated on ArmUnavailable.
+    private string? exposureScanId;
+    private IReadOnlyList<ExposureFinding> exposureFindings = [];
+
+    private string? changesScanId;
+    private bool changesBusy;
+    private string? changesError;
+    private int? changesCollected;
+    private DateTimeOffset? changesSince;
+    private IReadOnlyList<LiveDriftItem> changesRows = [];
+
+    private string? costScanId;
+    private int costDays = 30;
+    private string costDimension = "ResourceGroup";
+    private SpendDimension CostDim =>
+        System.Enum.TryParse<SpendDimension>(costDimension, out var d) ? d : SpendDimension.ResourceGroup;
+    private bool costBusy;
+    private string? costError;
+    private List<string> costSubs = [];
+    private List<(string Sub, ActualSpendResult? Result, string? Error)> costResults = [];
+
+    // 9.3 chips over the Inventory rows; the note names whether protection was judged at all.
+    private ManagementAudit? unmanagedAudit;
+    private IReadOnlySet<string> protectedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private string unmanagedPolicyNote = "";
+    private bool unmanagedOnly;
 
     private ScanRecord? reportScan;
     private List<InventoryItem> reportItems = [];
@@ -622,6 +857,16 @@
             topoScanId = completed.FirstOrDefault()?.Id;
             await LoadTopologyAsync();
         }
+        if (key == "exposure" && exposureScanId is null)
+        {
+            exposureScanId = completed.FirstOrDefault()?.Id;
+            await LoadExposureAsync();
+        }
+        if (key == "changes" && changesScanId is null)
+        {
+            changesScanId = completed.FirstOrDefault()?.Id;
+            await LoadChangesAsync();
+        }
         if (key == "decom") await LoadDecomWindowRowAsync();
     }
 
@@ -668,6 +913,108 @@
         browseOwner = null;
         expandedId = null;
         await RecomputeReconcileAsync();
+        await RecomputeUnmanagedAsync();
+    }
+
+    // 9.3 overlay on the browse rows: unmanaged = no orchestration marker; protection is
+    // judged only by the server's guardrail policy - offline the note says it was not judged.
+    private async Task RecomputeUnmanagedAsync()
+    {
+        var policy = GuardrailPolicy.Empty;
+        unmanagedPolicyNote = "guardrail policy not loaded - protection not judged";
+        protectedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!ArmUnavailable)
+        {
+            try
+            {
+                var response = await DeployClient.GetGuardrailPolicyAsync(new EmptyMessage());
+                if (response.StatusCode == 0 && response.Json.Length > 0)
+                {
+                    policy = GuardrailPolicy.FromJson(response.Json);
+                    unmanagedPolicyNote = "guardrail policy: server copy";
+                }
+            }
+            catch (Exception) { /* offline: the empty-policy note above stands */ }
+        }
+        unmanagedAudit = UnmanagedDetector.Audit(browseItems, policy);
+        protectedIds = unmanagedAudit.ProtectedResources
+            .Select(f => f.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task LoadExposureAsync()
+    {
+        exposureFindings = [];
+        if (exposureScanId is null) return;
+        var rows = await Session.GetSnapshotsAsync(exposureScanId);
+        exposureFindings = ExposureAnalyzer.Analyze(rows.Select(ToItem).ToList());
+    }
+
+    private async Task LoadChangesAsync()
+    {
+        changesRows = [];
+        changesError = null;
+        changesCollected = null;
+        changesSince = null;
+        if (changesScanId is null) return;
+        var scan = completed.FirstOrDefault(s => s.Id == changesScanId);
+        if (scan is null) return;
+        changesSince = scan.FinishedAt ?? scan.StartedAt;
+        try { changesRows = await Feed.DriftSinceScanAsync(changesScanId, changesSince.Value); }
+        catch (Exception e) { changesError = e.Message; }
+    }
+
+    private async Task<List<string>> ScanSubscriptionsAsync(string scanId) =>
+        (await Session.GetSnapshotsAsync(scanId))
+            .Select(r => r.SubscriptionId)
+            .Where(s => s is { Length: > 0 }).Select(s => s!)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    private async Task CollectFeedAsync()
+    {
+        if (changesScanId is null || changesBusy) return;
+        changesBusy = true;
+        changesError = null;
+        try
+        {
+            var subs = await ScanSubscriptionsAsync(changesScanId);
+            if (subs.Count == 0)
+                changesError = "This scan has no subscription rows - the change feed collects per subscription.";
+            else
+                changesCollected = await Feed.CollectAsync(subs, DateTimeOffset.UtcNow.AddDays(-7), changesScanId);
+        }
+        catch (Exception e) { changesError = e.Message; }
+        changesBusy = false;
+        if (changesError is null && changesSince is { } since)
+        {
+            try { changesRows = await Feed.DriftSinceScanAsync(changesScanId, since); }
+            catch (Exception e) { changesError = e.Message; }
+        }
+    }
+
+    private async Task LoadCostScopeAsync()
+    {
+        // Picking a scan only lists the subscriptions it contains - spend numbers are real
+        // Cost Management queries and never run until "Query spend" is clicked.
+        costResults = [];
+        costError = null;
+        costSubs = costScanId is null ? [] : await ScanSubscriptionsAsync(costScanId);
+    }
+
+    private async Task QuerySpendAsync()
+    {
+        if (costScanId is null || costBusy || costSubs.Count == 0) return;
+        costBusy = true;
+        costError = null;
+        var from = DateTimeOffset.UtcNow.AddDays(-costDays);
+        var to = DateTimeOffset.UtcNow;
+        var results = new List<(string Sub, ActualSpendResult? Result, string? Error)>();
+        foreach (var sub in costSubs)
+        {
+            try { results.Add((sub, await Spend.QueryAsync($"subscriptions/{sub}", from, to), null)); }
+            catch (Exception e) { results.Add((sub, null, e.Message)); }
+        }
+        costResults = results;
+        costBusy = false;
     }
 
     // Adopt [12.2]: the filtered scan rows become an editable design. Saved in the server
@@ -924,6 +1271,7 @@
             if (browseSearch.Length > 0 &&
                 !item.Name.Contains(browseSearch, StringComparison.OrdinalIgnoreCase) &&
                 !item.Id.Contains(browseSearch, StringComparison.OrdinalIgnoreCase)) continue;
+            if (unmanagedOnly && unmanagedAudit?.UnmanagedIds.Contains(item.Id) != true) continue;
             yield return item;
         }
     }
@@ -1251,6 +1599,107 @@
         await decomWindows.UpsertAsync(row);
         decomWindowRow = row;
     }
+
+    // 9.6: a monthly governance report assembled from the same offline engines the tabs
+    // render - findings, retirement watch, exposure, unmanaged audit, drift since the scan.
+    // Every section names its source; the header names the scan, freshness and whether
+    // protection was judged. No spend section: those figures are live-only on demand.
+    private async Task SaveReportAsync()
+    {
+        if (reportScan is null)
+            return;
+        var exposure = ExposureAnalyzer.Analyze(reportItems);
+        var policy = GuardrailPolicy.Empty;
+        var policyNote = "guardrail policy not loaded - protection not judged";
+        if (!ArmUnavailable)
+        {
+            try
+            {
+                var response = await DeployClient.GetGuardrailPolicyAsync(new EmptyMessage());
+                if (response.StatusCode == 0 && response.Json.Length > 0)
+                {
+                    policy = GuardrailPolicy.FromJson(response.Json);
+                    policyNote = "guardrail policy: server copy";
+                }
+            }
+            catch (Exception) { /* the empty-policy note above stands */ }
+        }
+        var audit = UnmanagedDetector.Audit(reportItems, policy);
+        var scanSince = reportScan.FinishedAt ?? reportScan.StartedAt;
+        IReadOnlyList<LiveDriftItem> drift = [];
+        var driftError = (string?)null;
+        try { drift = await Feed.DriftSinceScanAsync(reportScan.Id, scanSince); }
+        catch (Exception e) { driftError = e.Message; }
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("# Azure Design Studio - governance report");
+        sb.AppendLine();
+        sb.AppendLine($"scan {reportScan.Id} · scope {reportScan.Scope} · {reportItems.Count} resources · taken {scanSince.UtcDateTime:yyyy-MM-dd HH:mm} UTC");
+        sb.AppendLine($"retirement data as of {catalog.DataAsOf:yyyy-MM-dd} ({catalog.FreshnessAt(DateTimeOffset.UtcNow)}); {policyNote}");
+        sb.AppendLine();
+        sb.AppendLine($"## Findings ({reportFindings.Count})");
+        foreach (var f in reportFindings)
+            sb.AppendLine($"- [{f.Kind}] {f.ResourceId} ({f.ResourceType}): {f.Detail}");
+        if (reportFindings.Count == 0) sb.AppendLine("- none");
+        sb.AppendLine();
+        sb.AppendLine($"## Retirement watch ({watched.Count})");
+        foreach (var (item, entry) in watched)
+            sb.AppendLine($"- [{entry.Status}] {item.Id} ({item.Type}): {entry.Note}");
+        if (watched.Count == 0) sb.AppendLine("- none");
+        sb.AppendLine();
+        sb.AppendLine($"## Internet exposure ({exposure.Count})");
+        foreach (var f in exposure)
+            sb.AppendLine($"- [{f.Severity}] {f.ResourceId} ({f.ResourceType}) {f.Kind}: {f.Detail} -> {f.Remediation}");
+        if (exposure.Count == 0) sb.AppendLine("- none");
+        foreach (var cav in AdsToolEngine.ExposureCaveats) sb.AppendLine($"  caveat: {cav}");
+        sb.AppendLine();
+        sb.AppendLine($"## Unmanaged ({audit.Unmanaged.Count}) / protected ({audit.ProtectedResources.Count})");
+        foreach (var f in audit.Unmanaged) sb.AppendLine($"- {f.Id} ({f.Type}): {f.Reason}");
+        if (audit.Unmanaged.Count == 0) sb.AppendLine("- none");
+        foreach (var cav in AdsToolEngine.UnmanagedCaveats) sb.AppendLine($"  caveat: {cav}");
+        sb.AppendLine();
+        sb.AppendLine($"## Changes since the scan ({drift.Count})");
+        foreach (var d in drift)
+            sb.AppendLine($"- [{d.Status}] {d.ResourceId}: {d.ChangedAt.UtcDateTime:yyyy-MM-dd HH:mm} UTC by {(string.IsNullOrEmpty(d.ChangedBy) ? "unknown actor" : d.ChangedBy)}");
+        if (drift.Count == 0) sb.AppendLine(driftError is null ? "- none recorded" : $"- not evaluated: {driftError}");
+        sb.AppendLine();
+        sb.AppendLine("Spend figures are not part of this snapshot report - the drawer's Cost tab queries Cost Management on demand and prints source, window, currency and as-of with its numbers.");
+
+        try
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+            Directory.CreateDirectory(dir);
+            // Scan ids are GUIDs but not guaranteed - keep any shape intact, only neutralise path-unsafe chars.
+            var safeId = string.Concat(reportScan.Id.Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '-'));
+            var path = Path.Combine(dir, $"ads-report-{safeId}.md");
+            await File.WriteAllTextAsync(path, sb.ToString());
+            try
+            {
+                await Launcher.OpenAsync(new OpenFileRequest("Governance report", new ReadOnlyFile(path)));
+            }
+            catch (Exception)
+            {
+                // No markdown handler - the file is still on disk where the message says it is.
+            }
+            Message.Success($"Governance report written to {path}");
+        }
+        catch (Exception e) { Message.Error($"Could not write the report: {e.Message}"); }
+    }
+
+    private static string ExposureColor(ExposureSeverity s) => s switch
+    {
+        ExposureSeverity.Critical => "red",
+        ExposureSeverity.High => "orange",
+        ExposureSeverity.Medium => "gold",
+        _ => "blue",
+    };
+
+    private static string DriftColor(LiveDriftStatus s) => s switch
+    {
+        LiveDriftStatus.New => "green",
+        LiveDriftStatus.Deleted => "red",
+        _ => "blue",
+    };
 
     private static string LockOutcomeColor(string outcome) => outcome switch
     {

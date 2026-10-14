@@ -16,14 +16,16 @@ public static class AdsToolEngine
 {
     private static readonly ScanDiffer Differ = new();
 
-    private static readonly string[] ExposureCaveats =
+    /// <summary>Honest coverage limits of the v1 exposure rules - every consumer (MCP, scan drawer) shows these verbatim.</summary>
+    public static readonly string[] ExposureCaveats =
     [
         "coverage: only the v1 rule set is evaluated (VM public IPs, NSG inbound rules, application gateways, load balancers, SQL server firewalls, private endpoint approvals, and seven PaaS endpoint types); other services are not checked",
         "links that cannot be resolved within the snapshot (e.g. cross-subscription ids) are skipped without a claim, never assumed safe",
         "a NIC without an attached NSG is not judged for admin-port exposure (platform defaults vary by placement)",
     ];
 
-    private static readonly string[] UnmanagedCaveats =
+    /// <summary>Honest evidence limits of the v1 management audit - every consumer shows these verbatim.</summary>
+    public static readonly string[] UnmanagedCaveats =
     [
         "evidence: only the ARM managedBy property, ownership tags (providers/managedby, managed-by, provisioned-by) and VMSS membership count as orchestration markers; other control planes (stacks or Terraform without a marker) are not detected",
         "protection: judged by the supplied guardrail policy only; a resource the policy does not claim is not protected",
