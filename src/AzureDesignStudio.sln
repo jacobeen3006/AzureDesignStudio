@@ -34,6 +34,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AzureDesignStudio.Discovery
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AzureDesignStudio.Mcp", "AzureDesignStudio.Mcp\AzureDesignStudio.Mcp.csproj", "{C0F19601-B927-48BE-BCCD-8F8990C5A4DE}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -164,6 +166,18 @@ Global
 		{936398EE-B988-418D-9F3D-B1167CC86036}.Release|x64.Build.0 = Release|Any CPU
 		{936398EE-B988-418D-9F3D-B1167CC86036}.Release|x86.ActiveCfg = Release|Any CPU
 		{936398EE-B988-418D-9F3D-B1167CC86036}.Release|x86.Build.0 = Release|Any CPU
+		{C0F19601-B927-48BE-BCCD-8F8990C5A4DE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C0F19601-B927-48BE-BCCD-8F8990C5A4DE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C0F19601-B927-48BE-BCCD-8F8990C5A4DE}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C0F19601-B927-48BE-BCCD-8F8990C5A4DE}.Debug|x64.Build.0 = Debug|Any CPU
+		{C0F19601-B927-48BE-BCCD-8F8990C5A4DE}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C0F19601-B927-48BE-BCCD-8F8990C5A4DE}.Debug|x86.Build.0 = Debug|Any CPU
+		{C0F19601-B927-48BE-BCCD-8F8990C5A4DE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C0F19601-B927-48BE-BCCD-8F8990C5A4DE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C0F19601-B927-48BE-BCCD-8F8990C5A4DE}.Release|x64.ActiveCfg = Release|Any CPU
+		{C0F19601-B927-48BE-BCCD-8F8990C5A4DE}.Release|x64.Build.0 = Release|Any CPU
+		{C0F19601-B927-48BE-BCCD-8F8990C5A4DE}.Release|x86.ActiveCfg = Release|Any CPU
+		{C0F19601-B927-48BE-BCCD-8F8990C5A4DE}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

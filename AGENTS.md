@@ -37,6 +37,8 @@ AzureDesignStudio/
 │   ├── AzureDesignStudio.SourceGeneration/ # Roslyn source generator (Scriban templates)
 │   ├── AzureDesignStudio.Core.Tests/   # xUnit tests (offline + live-Azure categories)
 │   ├── AzureDesignStudio.Workspace/    # SQLite workspace (EF Core): designs/scans/snapshots/cost cache/plans/audit
+│   ├── AzureDesignStudio.Discovery/    # Tenant analysis engines: scans/drift, exposure, guardrails, decommission planner/runbook, MCP tool engine
+│   ├── AzureDesignStudio.Mcp/          # Stdio MCP server: 12 read-only tools over the workspace (plan-only decom; never mutates)
 │   └── AzureDesignStudio.Desktop/      # MAUI BlazorWebView host (reuses App.razor; EnableTelemetry=false)
 ├── .github/workflows/                  # CI: build + CodeQL
 └── assets/ docs/                       # Screenshots, documentation
@@ -54,6 +56,7 @@ AzureDesignStudio/
 | Local persistence (offline) | AzureDesignStudio.Workspace/ | EF Core SQLite `workspace.db`; `SqliteDesignOfflineStore` = pending-design contract |
 | Fix build/packages | root csproj files | No Directory.Build.props — version per-project |
 | CI/CD | .github/workflows/build.yml + Server/Dockerfile | Docker build via DockerBuild.ps1 |
+| MCP tool surface | AzureDesignStudio.Mcp/ + Discovery/Mcp/AdsToolEngine.cs | Read-only workspace truth for agents; engines pure/tested, host thin + ReadOnly SQLite |
 
 ## CONVENTIONS
 

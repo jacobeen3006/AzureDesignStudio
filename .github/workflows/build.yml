@@ -26,11 +26,12 @@ jobs:
     - name: Build
       # Explicit project set instead of the full solution: the MAUI desktop
       # project targets net10.0-windows and cannot build on ubuntu runners.
-      # Server + WASM + Tests transitively cover Core, AzureResources,
-      # SharedModels and SourceGeneration.
+      # Server + WASM + MCP + Tests transitively cover Core, AzureResources,
+      # SharedModels, SourceGeneration, Workspace and Discovery.
       run: |
         dotnet build src/AzureDesignStudio.Server -c Release
         dotnet build src/AzureDesignStudio -c Release
+        dotnet build src/AzureDesignStudio.Mcp -c Release
         dotnet build src/AzureDesignStudio.Core.Tests -c Release
 
     - name: Test (offline)
