@@ -50,4 +50,20 @@ public class PlanApplyEventModelTests
         Assert.Equal(PlanApplyEventModel.DetailCap, result.Length);
         Assert.EndsWith("…[trunc]", result, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(400, true)]
+    [InlineData(403, true)]
+    [InlineData(404, true)]
+    [InlineData(408, false)]
+    [InlineData(409, true)]
+    [InlineData(429, true)]
+    [InlineData(500, false)]
+    [InlineData(502, false)]
+    [InlineData(503, false)]
+    public void SubmissionRejectionIsProvedOnlyByArmsOwnFourXx(int status, bool expected)
+    {
+        Assert.Equal(expected, PlanApplyEventModel.ProvesSubmissionRejected(status));
+    }
 }

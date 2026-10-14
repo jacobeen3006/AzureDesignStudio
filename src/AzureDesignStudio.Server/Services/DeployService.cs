@@ -489,13 +489,22 @@ namespace AzureDesignStudio.Server.Services
             }
             catch (RequestFailedException ex)
             {
-                // ARM refused the submission; no deployment was started.
+                // Only ARM's own 4xx answer proves the submission was never accepted;
+                // transport failures, 408 and 5xx may still have landed at ARM.
+                var rejected = PlanApplyEventModel.ProvesSubmissionRejected(ex.Status);
+                // The terminal event lands first - the client may already be gone.
+                await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
+                    rejected ? PlanApplyEventModel.Failed : PlanApplyEventModel.OutcomeUnknown,
+                    rejected ? $"submission refused: HTTP {ex.Status}: {ex.ErrorCode}"
+                             : $"submission outcome unconfirmable: HTTP {ex.Status}: {ex.ErrorCode}");
                 response.StatusCode = StatusCodes.Status400BadRequest;
                 response.DeploymentStatus = "failed";
                 response.ErrorMessage = $"HTTP {ex.Status}: {ex.ErrorCode}";
-                await responseStream.WriteAsync(response);
-                await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
-                    PlanApplyEventModel.Failed, $"submission refused: HTTP {ex.Status}: {ex.ErrorCode}");
+                try { await responseStream.WriteAsync(response); }
+                catch (Exception wex)
+                {
+                    _logger.LogWarning(wex, "Deploy submission-failure write failed for apply {ApplyId}; the outcome is already recorded durably", applyId);
+                }
                 return;
             }
             catch (Exception ex)

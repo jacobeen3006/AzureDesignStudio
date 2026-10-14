@@ -42,6 +42,13 @@ public record PlanApplyEventModel
     public static string? Truncate(string? detail) =>
         detail is { Length: <= DetailCap } ? detail : detail is not null ? detail[..(DetailCap - TruncationMarker.Length)] + TruncationMarker : null;
 
+    /// <summary>
+    /// Only ARM's own 4xx answer (except 408 Request Timeout) proves the submission was
+    /// never accepted. Status 0 (transport failure), 408, and 5xx say nothing - the PUT may
+    /// have reached ARM, so the outcome is unknown, not failed.
+    /// </summary>
+    public static bool ProvesSubmissionRejected(int httpStatus) => httpStatus is >= 400 and < 500 and not 408;
+
     public int Id { get; set; }
 
     /// <summary>Correlates all events belonging to one apply.</summary>
