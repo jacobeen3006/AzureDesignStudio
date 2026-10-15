@@ -51,6 +51,7 @@ namespace AzureDesignStudio.Core.Tests
             [AdsConstants.AiSearch, "Microsoft.Search/searchServices", "2023-11-01", "ads-search"],
             [AdsConstants.DataFactory, "Microsoft.DataFactory/factories", "2018-06-01", "ads-adf"],
             [AdsConstants.SignalR, "Microsoft.SignalRService/signalR", "2024-03-01", "ads-signalr"],
+            [AdsConstants.AKSCluster, "Microsoft.ContainerService/managedClusters", "2023-11-01", "ads-aks"],
         ];
 
         [Theory]

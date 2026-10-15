@@ -127,15 +127,15 @@ public class AdoptEngineTests
     }
 
     [Fact]
-    public void TypeTable_ClaimsWiredNetworkStencils_AksStaysHonestUnknown()
+    public void TypeTable_ClaimsWiredNetworkStencilsAndAks()
     {
         // These three were skipped by early probes: their exports only succeed with a
         // throwaway subnet/public-IP wiring, which CreateProbe now fabricates.
         Assert.Equal("app-gateway", AdoptEngine.StencilKeyByArmType["Microsoft.Network/applicationGateways"]);
         Assert.Equal("azure-bastions", AdoptEngine.StencilKeyByArmType["Microsoft.Network/bastionHosts"]);
         Assert.Equal("azure-firewall", AdoptEngine.StencilKeyByArmType["Microsoft.Network/azureFirewalls"]);
-        // aks-cluster ships no ARM model at all: adoption must keep degrading it to an
-        // openable placeholder rather than inventing a stencil.
-        Assert.False(AdoptEngine.StencilKeyByArmType.ContainsKey("Microsoft.ContainerService/managedClusters"));
+        // aks-cluster shipped its ARM model in the follow-up slice: live clusters now adopt
+        // into editable nodes, closing the last placeholder the probe left open.
+        Assert.Equal("aks-cluster", AdoptEngine.StencilKeyByArmType["Microsoft.ContainerService/managedClusters"]);
     }
 }

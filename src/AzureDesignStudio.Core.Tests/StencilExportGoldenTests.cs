@@ -51,6 +51,7 @@ namespace AzureDesignStudio.Core.Tests
             [AdsConstants.LogAnalyticsWorkspace], [AdsConstants.NatGateway],
             [AdsConstants.TrafficManagerProfile], [AdsConstants.ExpressRouteCircuit],
             [AdsConstants.NetworkSecurityGroup],
+            [AdsConstants.AKSCluster],
             [AdsConstants.WebApp], [AdsConstants.FunctionApp],
         ];
 

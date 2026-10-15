@@ -1,5 +1,5 @@
 ﻿using AutoMapper;
-//using AzureDesignStudio.Core.AKS;
+using AzureDesignStudio.Core.AKS;
 using AzureDesignStudio.Core.APIM;
 using AzureDesignStudio.Core.App;
 using AzureDesignStudio.Core.Cache;
@@ -66,7 +66,7 @@ public static partial class DataModelFactory
             AdsConstants.AppServicePlan => new AppServicePlanModel(),
             AdsConstants.FunctionApp => new FunctionAppModel(),
             AdsConstants.WebApp => new WebAppModel(),
-            //AdsConstants.AKSCluster => new AKSModel(),
+            AdsConstants.AKSCluster => new AksClusterModel(),
             AdsConstants.APIM => new APIMModel(),
             AdsConstants.AppGateway => new AppGatewayModel(),
             AdsConstants.LoadBalancer => new LoadBalancerModel(),
@@ -153,6 +153,7 @@ public static partial class DataModelFactory
         [typeof(SqlDatabaseModel)] = AdsConstants.SqlDatabase,
         [typeof(AppServicePlanModel)] = AdsConstants.AppServicePlan,
         [typeof(FunctionAppModel)] = AdsConstants.FunctionApp,
+        [typeof(AksClusterModel)] = AdsConstants.AKSCluster,
         [typeof(WebAppModel)] = AdsConstants.WebApp,
         [typeof(APIMModel)] = AdsConstants.APIM,
         [typeof(AppGatewayModel)] = AdsConstants.AppGateway,
