@@ -8,6 +8,8 @@ using AzureDesignStudio.Core.Models;
 using AzureDesignStudio.Core.Network;
 using AzureDesignStudio.Core.SQL;
 using AzureDesignStudio.Core.Web;
+using Blazor.Diagrams;
+using Blazor.Diagrams.Core.Anchors;
 using Blazor.Diagrams.Core.Geometry;
 using Blazor.Diagrams.Core.Models;
 
@@ -224,7 +226,7 @@ public static class AdoptEngine
             }
             catch
             {
-                continue; // keys needing diagram wiring (gateway/bastion/firewall) stay honest unknowns
+                continue; // keys with no own ARM export (aks-cluster ships no model) stay honest unknowns
             }
 
             if (types.Count > 0)
@@ -262,8 +264,33 @@ public static class AdoptEngine
                     func.HostingPlan = "consumption";
                 model.GetType().GetProperty("RuntimeStack")?.SetValue(model, "dotnet|v6.0");
                 break;
+            // Bastion and firewall export only from their dedicated subnet with a linked
+            // public IP - the same throwaway wiring the golden export suite builds.
+            case AzureFirewallModel or BastionsModel:
+            {
+                var host = new VirtualNetworkModel { Name = "ads-probe" }
+                    .AddSubnet(new SubnetModel
+                    {
+                        Name = model is AzureFirewallModel ? "AzureFirewallSubnet" : "AzureBastionSubnet",
+                        AddressPrefix = "10.0.0.0/26",
+                    });
+                host.AddChild((AzureNodeBase)model);
+                LinkProbePip((AzureNodeBase)model);
+                break;
+            }
+            // App gateway export requires at least one linked public IP on its ports.
+            case AppGatewayModel gateway:
+                LinkProbePip(gateway);
+                break;
         }
         return model;
+    }
+
+    private static void LinkProbePip(AzureNodeBase node)
+    {
+        var pip = new PublicIpModel { Name = "ads-probe-pip" };
+        var diagram = new BlazorDiagram();
+        diagram.Links.Add(new LinkModel(new SinglePortAnchor(pip.Ports[1]), new SinglePortAnchor(node.Ports[0])));
     }
 
     private sealed class ReferenceComparer<T> : IEqualityComparer<T> where T : class
