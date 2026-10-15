@@ -1,6 +1,7 @@
 ﻿@using System.Text
 @using AzureDesignStudio.Models
 @using AzureDesignStudio.Services
+@using AzureDesignStudio.SharedModels.Protos
 @inherits FeedbackComponent<CodeDrawerContent, string>
 @inject IJSRuntime JS
 @inject DeployGrpcService _deployService
@@ -26,9 +27,34 @@
 <Modal Title="Deployment Parameters" Visible="@_showDeployParams" MaskClosable="@false" OnOk="@ParamsFormOk" OnCancel="@ParamsFormCancel">
     <Form Model="_deployParams" @ref="@_paramsForm" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })"
           Loading="@_paramFormLoading" OnFinish="ParamsFormFinish">
-        <FormItem Label="Resource Group">
-            <SimpleSelect DataSource="@_resourceGroupNames" @bind-Value="@context.ResourceGroup" SortByLabel="@SortDirection.Ascending" />
+        <FormItem Label="Deploy target">
+            <Select TItem="string" TItemValue="DeployTarget" @bind-Value="@context.Target">
+                <SelectOptions>
+                    <SelectOption TItem="string" TItemValue="DeployTarget" Value="@DeployTarget.ResourceGroup" Label="Resource group" />
+                    <SelectOption TItem="string" TItemValue="DeployTarget" Value="@DeployTarget.Subscription" Label="Subscription" />
+                    <SelectOption TItem="string" TItemValue="DeployTarget" Value="@DeployTarget.ManagementGroup" Label="Management group" />
+                    <SelectOption TItem="string" TItemValue="DeployTarget" Value="@DeployTarget.Tenant" Label="Tenant root" />
+                </SelectOptions>
+            </Select>
         </FormItem>
+        @if (context.Target == DeployTarget.ResourceGroup)
+        {
+            <FormItem Label="Resource Group">
+                <SimpleSelect DataSource="@_resourceGroupNames" @bind-Value="@context.ResourceGroup" SortByLabel="@SortDirection.Ascending" />
+            </FormItem>
+        }
+        else
+        {
+            @if (context.Target == DeployTarget.ManagementGroup)
+            {
+                <FormItem Label="Management group id">
+                    <Input @bind-Value="@context.ManagementGroupId" Placeholder="e.g. contoso-it" />
+                </FormItem>
+            }
+            <FormItem Label="Deployment location">
+                <Input @bind-Value="@context.Location" Placeholder="e.g. westeurope" />
+            </FormItem>
+        }
         <FormItem Label="Template parameters (JSON)">
             <InputTextArea rows="6" @bind-Value="@context.ParametersJson" />
         </FormItem>
@@ -43,7 +69,7 @@
     }
     @if (_whatIfLoading)
     {
-        <p><Icon Type="loading" Theme="@IconThemeType.Outline" /> Running what-if against @_deployParams.ResourceGroup. This can take a minute...</p>
+        <p><Icon Type="loading" Theme="@IconThemeType.Outline" /> Running what-if against @TargetLabel. This can take a minute...</p>
     }
     else if (_whatIfError is not null)
     {
@@ -109,8 +135,8 @@
         {
             <Divider />
             <div style="display:flex;gap:8px;align-items:center">
-                <Switch @bind-Value="@_deployAsStack" Size="@InputSize.Small" />
-                <span>Deploy as a <strong>deployment stack</strong></span>
+                <Switch @bind-Value="@_deployAsStack" Size="@InputSize.Small" Disabled="@(ScopeTarget != DeployTarget.ResourceGroup)" />
+                <span>Deploy as a <strong>deployment stack</strong>@(ScopeTarget != DeployTarget.ResourceGroup ? " (resource-group target only)" : "")</span>
             </div>
             @if (_deployAsStack)
             {

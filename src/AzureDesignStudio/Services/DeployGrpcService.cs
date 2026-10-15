@@ -45,7 +45,8 @@ namespace AzureDesignStudio.Services
             return response.ResourceGroupName.ToList();
         }
 
-        public async Task<WhatIfResponse?> WhatIfAsync(string subscriptionId, string rgName, string armTemplate, string parameters)
+        public async Task<WhatIfResponse?> WhatIfAsync(string subscriptionId, string rgName, string armTemplate, string parameters,
+            DeployTarget target = DeployTarget.ResourceGroup, string managementGroupId = "", string location = "")
         {
             var request = new DeploymentRequest
             {
@@ -54,8 +55,21 @@ namespace AzureDesignStudio.Services
                 ArmTemplate = armTemplate,
                 Parameters = parameters,
             };
+            ApplyTarget(request, target, managementGroupId, location);
 
             return await _deployClient.WhatIfAsync(request);
+        }
+
+        /// <summary>Fills the v2 11.2 target fields. The subscription id always travels - it names
+        /// the credential even for management-group and tenant targets; scope-irrelevant fields
+        /// stay empty so the server never sees a half-named identity.</summary>
+        private static void ApplyTarget(DeploymentRequest request, DeployTarget target, string managementGroupId, string location)
+        {
+            request.Target = target;
+            if (target == DeployTarget.ManagementGroup)
+                request.ManagementGroupId = managementGroupId;
+            if (target != DeployTarget.ResourceGroup)
+                request.Location = location;
         }
 
         public async Task<PlanApprovalResponse?> ApprovePlanAsync(string planHash)
@@ -102,13 +116,17 @@ namespace AzureDesignStudio.Services
             }
         }
 
-        public async Task<DeploymentOperationsResponse?> GetDeploymentOperationsAsync(string subscriptionId, string rgName)
+        public async Task<DeploymentOperationsResponse?> GetDeploymentOperationsAsync(string subscriptionId, string rgName,
+            DeployTarget target = DeployTarget.ResourceGroup, string managementGroupId = "")
         {
             var request = new DeploymentOperationsRequest
             {
                 SubscriptionId = subscriptionId,
                 ResourceGroupName = rgName,
+                Target = target,
             };
+            if (target == DeployTarget.ManagementGroup)
+                request.ManagementGroupId = managementGroupId;
 
             return await _deployClient.GetDeploymentOperationsAsync(request);
         }
@@ -123,7 +141,8 @@ namespace AzureDesignStudio.Services
 
         public async Task CreateDeployment(string subscriptionId, string rgName, string armTemplate, string parameters,
             string whatIfToken, string planHash,
-            Action<string, string> updateStatus)
+            Action<string, string> updateStatus,
+            DeployTarget target = DeployTarget.ResourceGroup, string managementGroupId = "", string location = "")
         {
             var request = new DeploymentRequest
             {
@@ -134,6 +153,7 @@ namespace AzureDesignStudio.Services
                 WhatIfToken = whatIfToken,
                 PlanHash = planHash,
             };
+            ApplyTarget(request, target, managementGroupId, location);
 
             using var deploymentResponse = _deployClient.CreateDeployment(request);
             var responseStream = deploymentResponse.ResponseStream;

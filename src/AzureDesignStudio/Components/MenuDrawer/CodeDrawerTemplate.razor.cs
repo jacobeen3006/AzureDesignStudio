@@ -157,6 +157,24 @@ namespace AzureDesignStudio.Components.MenuDrawer
         }
         private async Task ParamsFormFinish(EditContext editContext)
         {
+            // Target-aware required-ness, mirroring the server's TryBuildTargetScope: the form
+            // never sends a half-named identity, so a bad combination is a toast, not a round-trip.
+            if (ScopeTarget == DeployTarget.ResourceGroup && string.IsNullOrWhiteSpace(_deployParams.ResourceGroup))
+            {
+                _messageService.Error("Choose a resource group for the resource-group target.");
+                return;
+            }
+            if (ScopeTarget == DeployTarget.ManagementGroup && string.IsNullOrWhiteSpace(_deployParams.ManagementGroupId))
+            {
+                _messageService.Error("A management-group target needs a management group id.");
+                return;
+            }
+            if (ScopeTarget != DeployTarget.ResourceGroup && string.IsNullOrWhiteSpace(_deployParams.Location))
+            {
+                _messageService.Error("A non-resource-group target needs a deployment location (e.g. westeurope).");
+                return;
+            }
+
             _showDeployParams = false;
 
             try
@@ -179,7 +197,8 @@ namespace AzureDesignStudio.Components.MenuDrawer
             try
             {
                 var response = await _deployService.WhatIfAsync(_linkedSubscription!.SubscriptionId,
-                    _deployParams.ResourceGroup, EffectiveTemplate, _deployParams.ParametersJson);
+                    ScopeResourceGroup, EffectiveTemplate, _deployParams.ParametersJson,
+                    ScopeTarget, ScopeManagementGroupId, ScopeLocation);
                 if (response is null || response.StatusCode != 200)
                     _whatIfError = response?.ErrorMessage ?? "What-If is not available right now.";
                 else
@@ -230,7 +249,13 @@ namespace AzureDesignStudio.Components.MenuDrawer
                 _whatIfError = "A deployment stack needs a name.";
                 return;
             }
-
+            // v2 12.3 stacks are resource-group deployments: CreateStack has no target fields, so
+            // a stack approval under another scope would preview one identity and submit another.
+            if (_deployAsStack && ScopeTarget != DeployTarget.ResourceGroup)
+            {
+                _whatIfError = "Deployment stacks deploy at resource-group scope only - switch the target back to Resource group to use stack mode.";
+                return;
+            }
             var result = _whatIfResult;
             var approval = await _deployService.ApprovePlanAsync(result.PlanHash);
             if (approval is null || approval.StatusCode != 200)
@@ -284,7 +309,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
             StartMonitor();
 
             await _deployService.CreateDeployment(_linkedSubscription!.SubscriptionId,
-                _deployParams.ResourceGroup, EffectiveTemplate, _deployParams.ParametersJson,
+                ScopeResourceGroup, EffectiveTemplate, _deployParams.ParametersJson,
                 whatIfToken, planHash,
                 async (deploymentStatus, errorMessage) =>
                 {
@@ -347,6 +372,22 @@ namespace AzureDesignStudio.Components.MenuDrawer
         // subset then runs the ordinary what-if -> approval -> apply gate under its own plan hash.
         private string EffectiveTemplate => _retryTemplate ?? _drawerContent.Content;
 
+        // Sanitized scope fields for the wire (v2 11.2): the server binds identity from the target
+        // kind, so fields irrelevant to the chosen target stay empty; the preview, the plan hash,
+        // the deploy and the monitor all read these same accessors, so the approved scope can
+        // never drift between the steps of one gate.
+        private DeployTarget ScopeTarget => _deployParams?.Target ?? DeployTarget.ResourceGroup;
+        private string ScopeResourceGroup => ScopeTarget == DeployTarget.ResourceGroup ? _deployParams!.ResourceGroup : "";
+        private string ScopeManagementGroupId => ScopeTarget == DeployTarget.ManagementGroup ? _deployParams!.ManagementGroupId.Trim() : "";
+        private string ScopeLocation => ScopeTarget != DeployTarget.ResourceGroup ? _deployParams!.Location.Trim() : "";
+        private string TargetLabel => ScopeTarget switch
+        {
+            DeployTarget.Subscription => $"subscription {_linkedSubscription?.SubscriptionName ?? _linkedSubscription?.SubscriptionId}",
+            DeployTarget.ManagementGroup => $"management group {_deployParams!.ManagementGroupId.Trim()}",
+            DeployTarget.Tenant => "tenant root",
+            _ => $"resource group {_deployParams!.ResourceGroup}",
+        };
+
         private bool HasRetryableFailures => _monitorRows.Any(r => r.State is "Failed" or "Canceled");
 
         // A staged apply can show a failed row from batch 1 while batch 2 still runs: retry only
@@ -381,7 +422,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
             var notes = response.Warnings.Count > 0 ? " " + string.Join(" ", response.Warnings) : "";
             _monitorNotice = $"Retry subset prepared for {response.MatchedKeys.Count} failed resource(s): "
                 + $"{string.Join(", ", response.MatchedKeys)}.{notes} "
-                + "Confirm the resource group and parameters to preview and deploy only this subset.";
+                + "Confirm the target and parameters to preview and deploy only this subset.";
             _stepsStatus = new();
 
             // The monitored deployment's resource group and parameters are kept verbatim: the
@@ -449,7 +490,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
             try
             {
                 var response = await _deployService.GetDeploymentOperationsAsync(_linkedSubscription.SubscriptionId,
-                    _deployParams.ResourceGroup);
+                    ScopeResourceGroup, ScopeTarget, ScopeManagementGroupId);
                 if (response is null || response.StatusCode == 404)
                 {
                     _monitorStatus = "";
