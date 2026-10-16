@@ -1,5 +1,6 @@
 ﻿using AntDesign;
 using AzureDesignStudio.Models;
+using AzureDesignStudio.Services;
 using AzureDesignStudio.SharedModels.Protos;
 using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Web;
@@ -47,6 +48,12 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private Dictionary<string, string> _guardrailFlags = new(StringComparer.OrdinalIgnoreCase);
         private bool _deployAsStack = false;
         private string _stackName = "ads-stack";
+        // v2 12.3 closer: the review-screen stack probe (null = availability unknown), whether a
+        // lookup has run at all for the current name/scope, and the review-gated bypass flag.
+        private StackProbe? _stackProbe;
+        private bool _stackProbed;
+        private bool _stackChecking;
+        private bool _bypassOutOfSync;
         private string? _approverName = null;
         private IReadOnlyList<ResourceOperationRow> _monitorRows = [];
         private string _monitorStatus = "";
@@ -191,6 +198,10 @@ namespace AzureDesignStudio.Components.MenuDrawer
             _whatIfError = null;
             _whatIfChanges = [];
             _guardrailFlags = new(StringComparer.OrdinalIgnoreCase);
+            // A new preview means new bytes and maybe a new scope: the old probe proves nothing.
+            _stackProbe = null;
+            _stackProbed = false;
+            _bypassOutOfSync = false;
             _whatIfLoading = true;
             _showWhatIfReview = true;
 
@@ -218,6 +229,11 @@ namespace AzureDesignStudio.Components.MenuDrawer
             {
                 _whatIfLoading = false;
             }
+
+            // The stack review must speak about the bytes just previewed: re-probe the
+            // managed-vs-planned diff whenever stack mode survives a re-preview.
+            if (_deployAsStack)
+                await ProbeStackAsync();
         }
 
         private static IReadOnlyList<WhatIfChangeRow> ParseWhatIfChanges(string changesJson)
@@ -283,7 +299,8 @@ namespace AzureDesignStudio.Components.MenuDrawer
 
             var response = await _deployService.CreateStackAsync(_linkedSubscription!.SubscriptionId,
                 _deployParams.ResourceGroup, _stackName.Trim(), EffectiveTemplate,
-                _deployParams.ParametersJson, result.WhatIfToken, result.PlanHash);
+                _deployParams.ParametersJson, result.WhatIfToken, result.PlanHash,
+                bypassOutOfSync: _bypassOutOfSync && _stackProbe?.Exists == true);
 
             _stepsStatus = response switch
             {
@@ -300,6 +317,39 @@ namespace AzureDesignStudio.Components.MenuDrawer
             _retryTemplate = null;
             _whatIfResult = null;
             _whatIfError = null;
+        }
+
+        // ---- v2 12.3 closer [61]: stack-mode probe. A null probe means "unknown" and renders
+        // as such - never as "new". The server computes the managed-vs-planned diff so the
+        // shared WASM+desktop drawer stays free of the Discovery engine dependency. ----
+        private async Task OnStackModeChangedAsync()
+        {
+            _stackProbe = null;
+            _stackProbed = false;
+            _bypassOutOfSync = false;
+            await ProbeStackAsync();
+        }
+
+        private async Task OnStackNameChangedAsync()
+        {
+            _stackProbe = null;
+            _stackProbed = false;
+            _bypassOutOfSync = false;
+            await ProbeStackAsync();
+        }
+
+        private async Task ProbeStackAsync()
+        {
+            var name = (_stackName ?? "").Trim();
+            if (!_deployAsStack || ScopeTarget != DeployTarget.ResourceGroup || _linkedSubscription is null
+                || _deployParams is null || name.Length == 0)
+                return;
+            _stackChecking = true;
+            StateHasChanged();
+            _stackProbe = await _deployService.GetStackAsync(_linkedSubscription.SubscriptionId,
+                _deployParams.ResourceGroup, name, EffectiveTemplate);
+            _stackProbed = true;
+            _stackChecking = false;
         }
 
         private async Task RunDeployment(string whatIfToken, string planHash)

@@ -322,4 +322,151 @@ public class DeploymentStackTests
         Assert.True(DeploymentStack.TryParseDenyLock("notdeletion", out var denyLock) && denyLock == StackDenyLock.NotDeletion);
         Assert.False(DeploymentStack.TryParseDenyLock("5", out _));
     }
+
+    // ---- v2 12.3 closer: bypass rides the hashed body; managed lists parse from both
+    // verified shapes; the [61] review compares managed against the planned ids. ----
+
+    [Fact]
+    public void Build_BypassMemberRidesInsideHashedBody_AfterParameters()
+    {
+        var def = DeploymentStack.Build("stack-a", "westeurope", Template, DefaultPolicy);
+        var bypass = DeploymentStack.Build("stack-a", "westeurope", Template, DefaultPolicy, "{}", bypassOutOfSyncError: true);
+        var bypassNoParams = DeploymentStack.Build("stack-a", "westeurope", Template, DefaultPolicy, bypassOutOfSyncError: true);
+
+        // Golden default: the pre-bypass bytes are byte-identical to the pinned shape.
+        Assert.Equal("""{"name":"stack-a","location":"westeurope","type":"Microsoft.Resources/deploymentStacks","apiVersion":"2021-04-01","properties":{"template":{"$schema":"https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#","contentVersion":"1.0.0.0","resources":[]},"policy":{"actionOnUnmanage":{"resourceGroup":"Detach","deployment":"Detach","missing":"Detach"}}}}""", def.Json);
+
+        Assert.Contains("\"parameters\":{},\"bypassStackOutOfSyncError\":true,\"policy\"", bypass.Json);
+        Assert.Contains("\"bypassStackOutOfSyncError\":true,\"policy\"", bypassNoParams.Json);
+        // The member rides inside the hashed body: the sha256: approval binds the bypass too.
+        Assert.NotEqual(def.PlanHash, bypass.PlanHash);
+    }
+
+    [Theory]
+    [InlineData("ads-stack", true)]
+    [InlineData("a.-_()x9", true)]
+    [InlineData("", false)]
+    [InlineData("bad name!", false)]
+    [InlineData(null, false)]
+    public void IsValidStackName_IsTheUrlSafetyGate(string? name, bool expected)
+        => Assert.Equal(expected, DeploymentStack.IsValidStackName(name));
+
+    [Fact]
+    public void ReadManagedResources_AcceptsBothVerifiedShapes_AndDedupesTheUnion()
+    {
+        // The list/get newer shape: {id, status, denyStatus}.
+        var (ids, diags) = DeploymentStack.ReadManagedResources(
+            """{"properties":{"resources":[{"id":"/subs/s/rgs/g/Microsoft.Storage/storageAccounts/sa1","status":"Managed","denyStatus":"NotDefined"}]}}""");
+        Assert.Equal(["/subs/s/rgs/g/Microsoft.Storage/storageAccounts/sa1"], ids);
+        Assert.Empty(diags);
+
+        // Both keys at once: union deduped by trim+lowercase, first-appearance casing kept.
+        (ids, diags) = DeploymentStack.ReadManagedResources(
+            """{"properties":{"managedResources":[{"resourceId":"/Subs/S/resourceGroups/G/stone"},{"resourceId":" /shared "}],"resources":[{"id":"/subs/s/resourcegroups/g/STONE"},{"id":"/other"}]}}""");
+        Assert.Equal(["/Subs/S/resourceGroups/G/stone", "/shared", "/other"], ids);
+        Assert.Empty(diags);
+
+        // Empty array under either key = reported-empty, no diagnostic; neither key = malformed.
+        (ids, diags) = DeploymentStack.ReadManagedResources("""{"properties":{"resources":[]}}""");
+        Assert.Empty(ids);
+        Assert.Empty(diags);
+        (_, diags) = DeploymentStack.ReadManagedResources("""{"properties":{}}""");
+        Assert.Contains("StackManagedResourcesMissing", diags.Select(d => d.Code));
+
+        // Unusable entries are counted per row, never silently dropped.
+        (ids, diags) = DeploymentStack.ReadManagedResources("""{"properties":{"resources":[{"id":42},{"status":"Managed"}]}}""");
+        Assert.Empty(ids);
+        Assert.Equal(2, diags.Count);
+        Assert.All(diags, d => Assert.Equal("StackManagedResourceInvalid", d.Code));
+        Assert.Contains("resources[0]", diags[0].Message);
+    }
+
+    [Fact]
+    public void PlannedManagedResourceIds_TwoLiteralsPlusExpression_YieldsTwoIdsAndOneUnresolved()
+    {
+        var template = """
+            {"resources":[
+              {"type":"Microsoft.Storage/storageAccounts","name":"stoneg1"},
+              {"type":"Microsoft.Network/virtualNetworks/subnets","name":"vnet1/subnet-a"},
+              {"type":"Microsoft.Web/sites","name":"[parameters('n')]"}
+            ]}
+            """;
+        var (ids, diags) = DeploymentStack.PlannedManagedResourceIds(template, "sub-1", "rg1");
+
+        Assert.Equal(
+        [
+            "/subscriptions/sub-1/resourceGroups/rg1/providers/Microsoft.Network/virtualNetworks/vnet1/subnets/subnet-a",
+            "/subscriptions/sub-1/resourceGroups/rg1/providers/Microsoft.Storage/storageAccounts/stoneg1",
+        ], ids);
+        var unresolved = Assert.Single(diags);
+        Assert.Equal("PlannedIdUnresolved", unresolved.Code);
+        Assert.Contains("Microsoft.Web/sites/[parameters('n')]", unresolved.Message);
+    }
+
+    [Fact]
+    public void PlannedManagedResourceIds_FailsClosedOnScopeAndMissingParts_AndSortsOrdinal()
+    {
+        var template = """
+            {"resources":[
+              {"type":"Microsoft.Web/sites","name":"web2","scope":"Microsoft.Network/virtualNetworks/vnet1"},
+              {"type":"Microsoft.Web/sites","name":"web1","scope":"/subscriptions/other-sub/resourceGroups/other-rg"},
+              {"name":"no-type"},
+              {"type":"Microsoft.Storage/storageAccounts","name":"Baker"},
+              {"type":"Microsoft.Storage/storageAccounts","name":"able"}
+            ]}
+            """;
+        var (ids, diags) = DeploymentStack.PlannedManagedResourceIds(template, "sub-1", "rg1");
+
+        Assert.Equal(
+        [
+            "/subscriptions/sub-1/resourceGroups/rg1/providers/Microsoft.Storage/storageAccounts/Baker",
+            "/subscriptions/sub-1/resourceGroups/rg1/providers/Microsoft.Storage/storageAccounts/able",
+            "/subscriptions/sub-1/resourceGroups/rg1/providers/Microsoft.Web/sites/web2",
+        ], ids); // ordinal sort: uppercase sorts before lowercase; template casing kept
+        var off = Assert.Single(diags, d => d.Code == "PlannedIdOffScope");
+        Assert.Contains("Microsoft.Web/sites/web1", off.Message);
+        Assert.Contains(diags, d => d.Code == "PlannedIdUnresolved" && d.Message.Contains("no-type"));
+
+        // A template that is not JSON plans nothing and says so.
+        (_, diags) = DeploymentStack.PlannedManagedResourceIds("{oops", "sub-1", "rg1");
+        Assert.Contains("PlannedIdUnresolved", diags.Select(d => d.Code));
+    }
+
+    [Fact]
+    public void DiffManagedAgainstPlan_CountsCaseInsensitively_AndSortsBothLists()
+    {
+        var diff = DeploymentStack.DiffManagedAgainstPlan(
+            ["/SUBS/s/stone", "/subs/s/keep", "/subs/s/gone"],
+            ["/subs/s/KEEP", "/subs/s/new-one", "/subs/s/new-two"]);
+
+        Assert.Equal(1, diff.AlreadyManagedCount);
+        Assert.Equal(["/subs/s/new-one", "/subs/s/new-two"], diff.TakingOver);
+        Assert.Equal(["/subs/s/gone", "/SUBS/s/stone"], diff.Releasing);
+    }
+
+    [Fact]
+    public void DiffManagedAgainstPlan_IsDeterministicUnderShuffle()
+    {
+        var a = DeploymentStack.DiffManagedAgainstPlan(["/b", "/a", "/c"], ["/c", "/x", "/Y"]);
+        var b = DeploymentStack.DiffManagedAgainstPlan(["/c", "/b", "/a"], ["/Y", "/x", "/c"]);
+
+        Assert.Equal(a.AlreadyManagedCount, b.AlreadyManagedCount);
+        Assert.Equal(a.TakingOver, b.TakingOver);
+        Assert.Equal(a.Releasing, b.Releasing);
+    }
+
+    [Fact]
+    public async Task Client_ListAtSubscription_PinsTheVerifiedUrl_AndReturnsElements()
+    {
+        var handler = new FakeHandler((_, _) => Json("""{"value":[{"name":"s1","id":"/subscriptions/sub-1/resourceGroups/rg1/providers/Microsoft.Resources/deploymentStacks/s1","location":"westeurope","properties":{"resources":[{"id":"/x"}]}}]}"""));
+
+        var elements = await Client(handler).ListAtSubscriptionAsync("sub-1");
+
+        Assert.Equal(
+            "https://management.azure.com/subscriptions/sub-1/providers/Microsoft.Resources/deploymentStacks?api-version=2024-03-01",
+            handler.Uris[0]);
+        Assert.Single(handler.Uris);
+        Assert.Single(elements);
+        Assert.Equal("s1", elements[0].GetProperty("name").GetString());
+    }
 }

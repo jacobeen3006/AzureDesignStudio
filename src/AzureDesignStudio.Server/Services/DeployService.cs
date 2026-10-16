@@ -1040,7 +1040,7 @@ namespace AzureDesignStudio.Server.Services
             // Engine validation before the single-use token burns: refuse-with-diagnostics, never warn.
             var body = DeploymentStack.Build(request.StackName, rg.Data.Location,
                 request.ArmTemplate, new StackPolicy(missingAction, resourceGroupAction, deploymentAction, denySettings),
-                parametersJson);
+                parametersJson, bypassOutOfSyncError: request.BypassOutOfSync);
             if (!body.Success)
             {
                 var errors = string.Join(" ", body.Diagnostics
@@ -1099,10 +1099,19 @@ namespace AzureDesignStudio.Server.Services
                     rejected ? $"stack submission refused: HTTP {ex.StatusCode}: {ex.Code}"
                              : $"stack submission outcome unconfirmable: HTTP {ex.StatusCode}: {ex.Code}",
                     request.StackName);
-                response.StatusCode = rejected ? StatusCodes.Status400BadRequest : StatusCodes.Status502BadGateway;
-                response.ErrorMessage = rejected
-                    ? $"STACK_SUBMISSION_REFUSED: HTTP {ex.StatusCode}: {ex.Code}"
-                    : "STACK_OUTCOME_UNKNOWN: the stack apply could not be confirmed; check the stack in Azure before retrying.";
+                // v2 12.3 [61]: ARM's out-of-sync refusal has a named way forward - redeploy
+                // the same bytes, or re-approve with the reviewed bypass flag. A refusal that
+                // arrives WITH the bypass already sent stays the generic mapping: the bypass
+                // is the last resort, not a retry lever.
+                var outOfSync = ex.StatusCode is >= 400 and < 500
+                    && ex.Code.Contains("StackOutOfSyncError", StringComparison.OrdinalIgnoreCase)
+                    && !request.BypassOutOfSync;
+                response.StatusCode = outOfSync || rejected ? StatusCodes.Status400BadRequest : StatusCodes.Status502BadGateway;
+                response.ErrorMessage = outOfSync
+                    ? @"STACK_OUT_OF_SYNC: ARM refused the stack update - the managed resource list is not synchronized. Redeploy the same template and parameters first; only if that is not possible, tick ""bypass out-of-sync"" in the review modal and re-approve (the bypass binds into the approved plan bytes)."
+                    : rejected
+                        ? $"STACK_SUBMISSION_REFUSED: HTTP {ex.StatusCode}: {ex.Code}"
+                        : "STACK_OUTCOME_UNKNOWN: the stack apply could not be confirmed; check the stack in Azure before retrying.";
                 return response;
             }
             catch (OperationCanceledException)
@@ -1142,6 +1151,110 @@ namespace AzureDesignStudio.Server.Services
                 PlanApplyEventModel.Failed => $"STACK_PROVISIONING_FAILED: ARM reported {state}.",
                 _ => "STACK_OUTCOME_UNKNOWN: ARM returned no readable terminal state; check the stack in Azure before retrying.",
             };
+            return response;
+        }
+
+        /// <summary>
+        /// Read-only stack probe (v2 12.3 closer): does the stack exist, what does it manage,
+        /// and - when a template rides along - how does that managed list compare against what
+        /// the incoming plan would claim ([61] managed-vs-planned review). A missing stack is
+        /// an honest exists=false answer at 200, never an error; refusals carry codes only.
+        /// The engine runs server-side so the shared review drawer never drags the Discovery
+        /// dependency into the trimmed WASM payload.
+        /// </summary>
+        public override async Task<GetStackResponse> GetStack(GetStackRequest request, ServerCallContext context)
+        {
+            var response = new GetStackResponse();
+
+            if (string.IsNullOrWhiteSpace(request.StackName))
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "Stack name is empty.";
+                return response;
+            }
+            // The name interpolates the ARM URL - validate it before anything is built or sent.
+            if (!DeploymentStack.IsValidStackName(request.StackName))
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = @"STACK_NAME_INVALID: stack name must match ^[-\w._()]{1,63}$.";
+                return response;
+            }
+
+            var userIdClaim = ServiceTools.GetUserId(context);
+            if (string.IsNullOrWhiteSpace(userIdClaim))
+            {
+                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                response.StatusCode = StatusCodes.Status401Unauthorized;
+                response.ErrorMessage = "Access denied.";
+                return response;
+            }
+            var userId = new Guid(userIdClaim);
+
+            Guid subscriptionId;
+            try
+            {
+                subscriptionId = new Guid(request.SubscriptionId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Exception occurred.");
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = "Bad request.";
+                return response;
+            }
+
+            var subModel = await GetSubscriptionInfo(userId, subscriptionId);
+            if (subModel == null)
+            {
+                _logger.LogWarning("No subscription is found.");
+                response.StatusCode = StatusCodes.Status404NotFound;
+                response.ErrorMessage = "No subscription is found.";
+                return response;
+            }
+
+            var credential = new ClientSecretCredential(subModel.TenantId.ToString(),
+                subModel.ClientId.ToString(), subModel.ClientSecret);
+            var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), credential, ArmEndpointSet.AzureCloud);
+
+            string stackJson;
+            try
+            {
+                stackJson = await new DeploymentStackClient(transport).GetAsync(
+                    subscriptionId.ToString(), request.ResourceGroupName, request.StackName, context.CancellationToken);
+            }
+            catch (ResourceGraphException ex)
+            {
+                if (ex.StatusCode == StatusCodes.Status404NotFound)
+                {
+                    // A missing stack is the answer the review screen asked for, not a failure.
+                    response.StatusCode = StatusCodes.Status200OK;
+                    response.Exists = false;
+                    return response;
+                }
+                _logger.LogWarning("Stack probe refused: {Status} {Code}", ex.StatusCode, ex.Code);
+                response.StatusCode = ex.StatusCode;
+                response.ErrorMessage = $"STACK_READ_REFUSED: HTTP {ex.StatusCode}: {ex.Code}";
+                return response;
+            }
+
+            var (ids, diags) = DeploymentStack.ReadManagedResources(stackJson);
+            response.StatusCode = StatusCodes.Status200OK;
+            response.Exists = true;
+            response.ManagedResourceIds.AddRange(ids);
+            foreach (var d in diags.Where(d => d.Severity == ArmDiagnosticSeverity.Error))
+                response.Diagnostics.Add(d.Code);
+
+            if (!string.IsNullOrWhiteSpace(request.PlannedTemplateJson))
+            {
+                var (planned, plannedDiags) = DeploymentStack.PlannedManagedResourceIds(
+                    request.PlannedTemplateJson, subscriptionId.ToString(), request.ResourceGroupName);
+                var diff = DeploymentStack.DiffManagedAgainstPlan(ids, planned);
+                response.AlreadyManagedCount = diff.AlreadyManagedCount;
+                response.TakingOver.AddRange(diff.TakingOver);
+                response.Releasing.AddRange(diff.Releasing);
+                foreach (var d in plannedDiags.Where(d => d.Severity == ArmDiagnosticSeverity.Error))
+                    response.PlannedDiagnostics.Add(d.Code);
+            }
             return response;
         }
 

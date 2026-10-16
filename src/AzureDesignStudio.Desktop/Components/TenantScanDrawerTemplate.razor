@@ -6,6 +6,7 @@
 @using AzureDesignStudio.Discovery.Analysis
 @using EmptyMessage = Google.Protobuf.WellKnownTypes.Empty
 @using AzureDesignStudio.Discovery.Arm
+@using AzureDesignStudio.Discovery.ResourceGraph
 @using AzureDesignStudio.Discovery.Inventory
 @using AzureDesignStudio.Discovery.Decommission
 @using AzureDesignStudio.Discovery.Preflight
@@ -14,6 +15,7 @@
 @using AzureDesignStudio.Discovery.Cost
 @using AzureDesignStudio.Discovery.Unmanaged
 @using AzureDesignStudio.Discovery.Mcp
+@using AzureDesignStudio.Discovery.Report
 @using AzureDesignStudio.Discovery.Iac
 @using SubscriptionInfo = AzureDesignStudio.Discovery.Arm.SubscriptionInfo
 @using AzureDesignStudio.Workspace
@@ -31,6 +33,7 @@
 @inject WorkspaceDecomWindows decomWindows
 @inject ChangeFeedService Feed
 @inject ActualSpendClient Spend
+@inject DeploymentStackClient Stacks
 @inject MessageService Message
 @inject ModalService Modal
 
@@ -39,7 +42,7 @@
 
 <div style="padding:0 4px;">
     <div style="display:flex;gap:8px;margin-bottom:12px;">
-        @foreach (var (key, label) in new[] { ("scan", "Scan"), ("browse", "Inventory"), ("topology", "Topology"), ("exposure", "Exposure"), ("changes", "Changes"), ("cost", "Cost"), ("decom", "Decommission"), ("report", "Report") })
+        @foreach (var (key, label) in new[] { ("scan", "Scan"), ("browse", "Inventory"), ("topology", "Topology"), ("exposure", "Exposure"), ("changes", "Changes"), ("cost", "Cost"), ("stacks", "Stacks"), ("decom", "Decommission"), ("report", "Report") })
         {
             <Button Type="@(activeTab == key ? ButtonType.Primary : ButtonType.Default)"
                     Size="ButtonSize.Small" OnClick="@(() => SwitchTabAsync(key))">@label</Button>
@@ -500,6 +503,99 @@
             }
         }
     }
+    else if (activeTab == "stacks")
+    {
+        <div style="font-size:12px;color:#666;margin-bottom:8px;">
+            Read-only view of ARM deployment stacks (v2 12.3): list the stacks of one subscription and compare each stack's managed list against this scan's inventory. This tab issues no mutating call.
+        </div>
+        @if (stacksScanId is null)
+        {
+            @if (completed.Count == 0)
+            {
+                <span>No completed scans yet.</span>
+            }
+            else
+            {
+                <select @bind="stacksScanId" @bind:after="LoadStacksScopeAsync">
+                    @foreach (var scan in completed)
+                    {
+                        <option value="@scan.Id">@(scan.StartedAt.LocalDateTime.ToString("dd.MM HH:mm")) · @scan.Scope · @scan.ResourceCount rows</option>
+                    }
+                </select>
+            }
+        }
+        else
+        {
+            <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap;">
+                <a @onclick="@(() => { stacksScanId = null; stackRows = []; stackSubs = []; stackListedSub = null; })">back</a>
+                <select @bind="stackSubId">
+                    @foreach (var sub in stackSubs)
+                    {
+                        <option value="@sub">@(subscriptions.FirstOrDefault(s => s.SubscriptionId == sub)?.DisplayName ?? sub)</option>
+                    }
+                </select>
+                <Tooltip Title="@(ArmUnavailable ? $"Sign in / reconnect - listing stacks is a live ARM read: {loadError}" : "Microsoft.Resources/deploymentStacks list at subscription scope (Reader); nothing runs until you click")">
+                    <Button Type="ButtonType.Primary" Size="ButtonSize.Small"
+                            Disabled="@(ArmUnavailable || stacksBusy || string.IsNullOrEmpty(stackSubId))"
+                            OnClick="ListStacksAsync">@(stacksBusy ? "Listing…" : "List stacks")</Button>
+                </Tooltip>
+            </div>
+            @if (stacksError is { } sterr)
+            {
+                <Alert Type="@AlertType.Error" ShowIcon="true" Style="margin-bottom:8px" Message="@sterr" />
+            }
+            else if (stackListedSub is not null && !stacksBusy && stackRows.Count == 0)
+            {
+                <span>No deployment stacks in this subscription.</span>
+            }
+            @foreach (var row in stackRows)
+            {
+                <div style="border:1px solid #f0f0f0;border-radius:4px;padding:8px;margin-bottom:8px;">
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <b>@row.Name</b>
+                        <span style="color:#999">@row.ResourceGroup · @row.Location</span>
+                        @if (row.State.Length > 0)
+                        {
+                            <Tag Color="@(row.State.Equals("Succeeded", StringComparison.OrdinalIgnoreCase) ? "green" : "blue")">@row.State</Tag>
+                        }
+                        @if (row.Drift is { } drift)
+                        {
+                            @if (drift.IsOutOfSync)
+                            {
+                                <Tag Color="@("red")">out of sync: @drift.UntrackedCount untracked, @drift.MissingCount missing</Tag>
+                            }
+                            else
+                            {
+                                <Tag Color="@("green")">in sync (@row.ManagedCount managed)</Tag>
+                            }
+                        }
+                        else
+                        {
+                            <Tag Color="@("orange")">managed list unreadable</Tag>
+                        }
+                        <a @onclick="@(() => stacksExpanded = stacksExpanded == row.Name ? null : row.Name)">@(stacksExpanded == row.Name ? "hide rows" : "show rows")</a>
+                    </div>
+                    @foreach (var d in row.Diagnostics)
+                    {
+                        <div style="color:#d48806;font-size:12px;">@d.Code: @d.Message</div>
+                    }
+                    @if (stacksExpanded == row.Name && row.Drift is { } driftRows)
+                    {
+                        <table style="width:100%;font-size:12px;margin-top:6px;">
+                            <tr><th>managed / live id</th><th>state</th></tr>
+                            @foreach (var r in driftRows.Rows)
+                            {
+                                <tr>
+                                    <td>@r.Id</td>
+                                    <td><Tag Color="@DriftKindColor(r.Kind)">@r.Kind</Tag></td>
+                                </tr>
+                            }
+                        </table>
+                    }
+                </div>
+            }
+        }
+    }
     else if (activeTab == "decom")
     {
         <div style="font-size:12px;color:#666;margin-bottom:8px;">
@@ -689,9 +785,10 @@
             retirement data as of <b>@(catalog.DataAsOf.LocalDateTime.ToString("yyyy-MM-dd"))</b>
             <Tag Color="@FreshnessColor(catalog.FreshnessAt(DateTimeOffset.UtcNow))">@catalog.FreshnessAt(DateTimeOffset.UtcNow)</Tag>
         </div>
-        <div style="margin-bottom:8px;">
+        <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <Button Size="ButtonSize.Small" OnClick="SaveReportAsync">Save report (Markdown)</Button>
-            <span style="font-size:12px;color:#999;margin-left:6px;">findings + retirement watch + exposure + unmanaged + changes since the scan, with sources</span>
+            <Button Size="ButtonSize.Small" OnClick="SaveReportBundleAsync">Save report bundle</Button>
+            <span style="font-size:12px;color:#999;">findings + retirement watch + exposure + unmanaged + changes since the scan, with sources; the bundle lands report.html + report.json + controls-audit.csv in a Downloads folder</span>
         </div>
 
         @foreach (var finding in reportFindings)
@@ -775,6 +872,19 @@
     private string? costError;
     private List<string> costSubs = [];
     private List<(string Sub, ActualSpendResult? Result, string? Error)> costResults = [];
+
+    // v2 12.3 scan plane: read-only Stacks tab - lists deployment stacks in one subscription
+    // of a scan and runs CheckDrift against the scan's inventory; issues no mutating verb.
+    private string? stacksScanId;
+    private List<string> stackSubs = [];
+    private string stackSubId = "";
+    private bool stacksBusy;
+    private string? stacksError;
+    private string? stackListedSub;
+    private List<StackCard> stackRows = [];
+    private string? stacksExpanded;
+    private sealed record StackCard(string Name, string ResourceGroup, string Location, string State,
+        int ManagedCount, StackDriftReport? Drift, IReadOnlyList<ArmDiagnostic> Diagnostics);
 
     // 9.3 chips over the Inventory rows; the note names whether protection was judged at all.
     private ManagementAudit? unmanagedAudit;
@@ -1068,6 +1178,78 @@
         costResults = results;
         costBusy = false;
     }
+
+    // v2 12.3 scan plane: read-only stacks listing + drift verdict. The scan's own snapshot
+    // rows are the live side of CheckDrift - the same Inventory source, never a fresh ARM
+    // sweep; the managed side is exactly what the stack GET/list payload reports.
+    private async Task LoadStacksScopeAsync()
+    {
+        stackRows = [];
+        stackListedSub = null;
+        stacksError = null;
+        stackSubs = stacksScanId is null ? [] : await ScanSubscriptionsAsync(stacksScanId);
+        stackSubId = stackSubs.Count > 0 ? stackSubs[0] : "";
+    }
+
+    private async Task ListStacksAsync()
+    {
+        if (stacksScanId is null || stacksBusy || string.IsNullOrEmpty(stackSubId)) return;
+        stacksBusy = true;
+        stacksError = null;
+        stackRows = [];
+        try
+        {
+            var elements = await Stacks.ListAtSubscriptionAsync(stackSubId);
+            var liveIds = (await Session.GetSnapshotsAsync(stacksScanId))
+                .Where(r => string.Equals(r.SubscriptionId, stackSubId, StringComparison.OrdinalIgnoreCase))
+                .Select(r => r.ResourceId).ToList();
+            var cards = new List<StackCard>();
+            foreach (var el in elements)
+            {
+                var id = StackStr(el, "id");
+                var name = StackStr(el, "name");
+                var state = el.TryGetProperty("properties", out var props) && props.ValueKind == JsonValueKind.Object
+                    && props.TryGetProperty("provisioningState", out var ps) && ps.ValueKind == JsonValueKind.String
+                    ? ps.GetString() ?? "" : "";
+                var (ids, diags) = DeploymentStack.ReadManagedResources(el.GetRawText());
+                // An unreadable managed list never gets a drift verdict - the card says why.
+                var drift = diags.Any(d => d.Severity == ArmDiagnosticSeverity.Error)
+                    ? (StackDriftReport?)null
+                    : DeploymentStack.CheckDrift(ids, liveIds);
+                cards.Add(new StackCard(string.IsNullOrEmpty(name) ? id : name, StackGroupFromId(id),
+                    StackStr(el, "location"), state, ids.Count, drift, diags));
+            }
+            stackRows = cards;
+            stackListedSub = stackSubId;
+        }
+        catch (Exception e)
+        {
+            // Errors surface as a row, never as a silently empty list.
+            stacksError = e is ResourceGraphException rex ? $"HTTP {rex.StatusCode}: {rex.Code}" : e.Message;
+        }
+        stacksBusy = false;
+    }
+
+    private static string StackStr(JsonElement el, string name) =>
+        el.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+
+    // /subscriptions/{sub}/resourceGroups/{rg}/... - a stack without a group segment
+    // (subscription/MG scope) honestly shows no group, never a guessed one.
+    private static string StackGroupFromId(string id)
+    {
+        var parts = id.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < parts.Length - 1; i++)
+            if (string.Equals(parts[i], "resourceGroups", StringComparison.OrdinalIgnoreCase))
+                return parts[i + 1];
+        return "";
+    }
+
+    private static string DriftKindColor(StackDriftKind kind) => kind switch
+    {
+        StackDriftKind.Synced => "green",
+        StackDriftKind.Untracked => "red",
+        _ => "orange",
+    };
 
     // Adopt [12.2]: the filtered scan rows become an editable design. Saved in the server
     // design shape (the same DiagramGraph JSON TopMenu.LoadDiagram reads, not the .ads.json
@@ -1658,35 +1840,16 @@
     // protection was judged. No spend section: those figures are live-only on demand.
     private async Task SaveReportAsync()
     {
-        if (reportScan is null)
+        if (reportScan is not { } scan)
             return;
-        var exposure = ExposureAnalyzer.Analyze(reportItems);
-        var policy = GuardrailPolicy.Empty;
-        var policyNote = "guardrail policy not loaded - protection not judged";
-        if (!ArmUnavailable)
-        {
-            try
-            {
-                var response = await DeployClient.GetGuardrailPolicyAsync(new EmptyMessage());
-                if (response.StatusCode == 0 && response.Json.Length > 0)
-                {
-                    policy = GuardrailPolicy.FromJson(response.Json);
-                    policyNote = "guardrail policy: server copy";
-                }
-            }
-            catch (Exception) { /* the empty-policy note above stands */ }
-        }
-        var audit = UnmanagedDetector.Audit(reportItems, policy);
-        var scanSince = reportScan.FinishedAt ?? reportScan.StartedAt;
-        IReadOnlyList<LiveDriftItem> drift = [];
-        var driftError = (string?)null;
-        try { drift = await Feed.DriftSinceScanAsync(reportScan.Id, scanSince); }
-        catch (Exception e) { driftError = e.Message; }
+        var (_, exposure, audit, driftList, policyNote, driftError) = await CollectReportSectionsAsync(scan);
+        var drift = driftList ?? [];
+        var scanSince = scan.FinishedAt ?? scan.StartedAt;
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("# Azure Design Studio - governance report");
         sb.AppendLine();
-        sb.AppendLine($"scan {reportScan.Id} · scope {reportScan.Scope} · {reportItems.Count} resources · taken {scanSince.UtcDateTime:yyyy-MM-dd HH:mm} UTC");
+        sb.AppendLine($"scan {scan.Id} · scope {scan.Scope} · {reportItems.Count} resources · taken {scanSince.UtcDateTime:yyyy-MM-dd HH:mm} UTC");
         sb.AppendLine($"retirement data as of {catalog.DataAsOf:yyyy-MM-dd} ({catalog.FreshnessAt(DateTimeOffset.UtcNow)}); {policyNote}");
         sb.AppendLine();
         sb.AppendLine($"## Findings ({reportFindings.Count})");
@@ -1721,9 +1884,7 @@
         {
             var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
             Directory.CreateDirectory(dir);
-            // Scan ids are GUIDs but not guaranteed - keep any shape intact, only neutralise path-unsafe chars.
-            var safeId = string.Concat(reportScan.Id.Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '-'));
-            var path = Path.Combine(dir, $"ads-report-{safeId}.md");
+            var path = Path.Combine(dir, $"ads-report-{SafeScanId(scan.Id)}.md");
             await File.WriteAllTextAsync(path, sb.ToString());
             try
             {
@@ -1737,6 +1898,93 @@
         }
         catch (Exception e) { Message.Error($"Could not write the report: {e.Message}"); }
     }
+
+    // v2 9.6: the Markdown report and the bundle share one collector - same sources, same
+    // fail-soft notes - so the two artifacts can never disagree about what was measured.
+    private async Task<(IReadOnlyList<InventoryItem> Items, IReadOnlyList<ExposureFinding> Exposure,
+        ManagementAudit Audit, IReadOnlyList<LiveDriftItem>? Drift, string PolicyNote, string? DriftError)>
+        CollectReportSectionsAsync(ScanRecord scan)
+    {
+        var items = reportItems;
+        var exposure = ExposureAnalyzer.Analyze(items);
+        var policy = GuardrailPolicy.Empty;
+        var policyNote = "guardrail policy not loaded - protection not judged";
+        if (!ArmUnavailable)
+        {
+            try
+            {
+                var response = await DeployClient.GetGuardrailPolicyAsync(new EmptyMessage());
+                if (response.StatusCode == 0 && response.Json.Length > 0)
+                {
+                    policy = GuardrailPolicy.FromJson(response.Json);
+                    policyNote = "guardrail policy: server copy";
+                }
+            }
+            catch (Exception) { /* the empty-policy note above stands */ }
+        }
+        var audit = UnmanagedDetector.Audit(items, policy);
+        var scanSince = scan.FinishedAt ?? scan.StartedAt;
+        IReadOnlyList<LiveDriftItem>? drift = null;
+        string? driftError = null;
+        try { drift = await Feed.DriftSinceScanAsync(scan.Id, scanSince); }
+        catch (Exception e) { driftError = e.Message; }
+        return (items, exposure, audit, drift, policyNote, driftError);
+    }
+
+    // v2 9.6 closer: the same governance payload as report.html + report.json +
+    // controls-audit.csv (ReportBundle.Build, deterministic, no clocks inside). Spend rides
+    // along only when the Cost tab actually fetched figures; sections the run did not
+    // produce stay absent - the bundle never lies with empty tables.
+    private async Task SaveReportBundleAsync()
+    {
+        if (reportScan is not { } scan)
+            return;
+        try
+        {
+            var (_, exposure, audit, driftList, _, _) = await CollectReportSectionsAsync(scan);
+            IReadOnlyList<SpendBucket>? spendBuckets = null;
+            SpendProvenance? spendProvenance = null;
+            var spendOk = costResults.Where(c => c.Result is not null).ToList();
+            if (spendOk.Count > 0)
+            {
+                var rows = spendOk.SelectMany(c => c.Result!.Rows).ToList();
+                spendBuckets = CostRollup.By(rows, SpendDimension.ServiceFamily);
+                // One window/currency per scan run in practice; name every sub the rows came from.
+                spendProvenance = spendOk[0].Result!.Provenance with { Scope = string.Join(", ", spendOk.Select(c => c.Sub)) };
+            }
+            var model = new ReportModel(
+                Title: "Azure Design Studio governance report",
+                Scope: scan.Scope,
+                AsOf: DateTimeOffset.UtcNow,
+                Exposure: exposure,
+                Unmanaged: audit,
+                Drift: driftList,
+                SpendByServiceFamily: spendBuckets,
+                SpendProvenance: spendProvenance,
+                TopologySvg: null);
+            var files = ReportBundle.Build(model);
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads",
+                $"ads-report-{SafeScanId(scan.Id)}");
+            Directory.CreateDirectory(dir);
+            foreach (var (name, content) in files)
+                await File.WriteAllTextAsync(Path.Combine(dir, name), content);
+            try
+            {
+                await Launcher.OpenAsync(new OpenFileRequest("Governance report bundle",
+                    new ReadOnlyFile(Path.Combine(dir, ReportBundle.HtmlFile))));
+            }
+            catch (Exception)
+            {
+                // No html handler - the files are still on disk where the message says they are.
+            }
+            Message.Success($"Report bundle (HTML + JSON + CSV) written to {dir}");
+        }
+        catch (Exception e) { Message.Error($"Could not render the report bundle: {e.Message}"); }
+    }
+
+    // Scan ids are GUIDs but not guaranteed - keep any shape intact, only neutralise path-unsafe chars.
+    private static string SafeScanId(string scanId) =>
+        string.Concat(scanId.Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '-'));
 
     private static string ExposureColor(ExposureSeverity s) => s switch
     {

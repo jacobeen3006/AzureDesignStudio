@@ -6,10 +6,12 @@
 @using AzureDesignStudio.Services
 @inject AdsContext adsContext
 @inject MessageService _messageService
+@inject AdsHostFeatures _features
+@inject IServiceProvider Services
 
 <Text style="font-size:16px;">Globally unique names</Text>
 <br />
-<Text>Names of DNS-backed resources (storage, SQL, key vault, web apps, ...) must be globally unique. Describe the workload and pick an environment to get suggestions; the live availability check happens at deploy preflight.</Text>
+<Text>Names of DNS-backed resources (storage, SQL, key vault, web apps, ...) must be globally unique. Describe the workload and pick an environment to get suggestions; @(_features.CheckNameAvailability is not null ? "check the live availability per resource against the chosen subscription." : "the live availability check happens at deploy preflight.")</Text>
 
 <div style="margin-top:12px; display:flex; gap:8px;">
     <div style="flex:1;">
@@ -39,6 +41,29 @@
 }
 else
 {
+        @if (_features.CheckNameAvailability is not null)
+        {
+            <div style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <span style="font-size:12px;color:#888;">live check</span>
+                <div style="width:260px;">
+                    <Select TItem="string" TItemValue="string" @bind-Value="nameCheckSubId">
+                        <SelectOptions>
+                            @foreach (var sub in nameCheckSubs)
+                            {
+                                <SelectOption TItemValue="string" TItem="string" Value="@sub.SubscriptionId" Label="@sub.DisplayName" />
+                            }
+                        </SelectOptions>
+                    </Select>
+                </div>
+                <div style="width:230px;">
+                    <Input @bind-Value="nameCheckRegion" Placeholder="region (only needed for SignalR)" />
+                </div>
+                @if (nameCheckSubs.Count == 0)
+                {
+                    <span style="font-size:12px;color:#888;">no subscription @(nameCheckError is { } ncErr ? $"- {ncErr}" : "")</span>
+                }
+            </div>
+        }
     <div style="margin-top:4px;">
         @foreach (var row in rows)
         {
@@ -52,6 +77,32 @@ else
                 else
                 {
                     <Tag Color="@TagColor.Red">invalid</Tag>
+                }
+                @if (_features.CheckNameAvailability is not null)
+                {
+                    var validName = NamingEngine.IsValid(row.Key, row.Resource.Name);
+                    checks.TryGetValue(row.Resource, out var state);
+                    var current = state.Name == row.Resource.Name;
+                    <Tooltip Title="@(!validName ? "fix the invalid name first" : string.IsNullOrEmpty(nameCheckSubId) ? "pick a subscription for the live check" : "")">
+                        <Button Size="@ButtonSize.Small"
+                                Disabled="@(!validName || string.IsNullOrEmpty(nameCheckSubId) || (state.Checking && current))"
+                                OnClick="() => CheckNameAsync(row)">@(state.Checking && current ? "checking…" : "check")</Button>
+                    </Tooltip>
+                    @if (current && !state.Checking && state.Result is { } checkResult)
+                    {
+                        @if (checkResult.Available == true)
+                        {
+                            <Tag Color="@TagColor.Green">available</Tag>
+                        }
+                        else if (checkResult.Available == false)
+                        {
+                            <Tag Color="@TagColor.Red">unavailable: @checkResult.Detail</Tag>
+                        }
+                        else
+                        {
+                            <Tag Color="@TagColor.Default">not checked live: @checkResult.Detail</Tag>
+                        }
+                    }
                 }
                 @if (row.Suggestion is { } suggestion)
                 {
@@ -92,6 +143,10 @@ else
             }
             rows.Add(new Row(key, resource!, suggestion));
         }
+        // Check results belong to the rows that produced them: dropped rows drop their chips.
+        var live = rows.Select(r => r.Resource).ToHashSet(ReferenceEqualityComparer.Instance);
+        foreach (var stale in checks.Keys.Where(k => !live.Contains(k)).ToList())
+            checks.Remove(stale);
         return rows;
     }
 
@@ -102,6 +157,53 @@ else
         if (row.Resource is Model model)
             model.Refresh();
         _messageService.Info($"Renamed to {suggestion}. Check the links and the validation drawer afterwards.");
+        StateHasChanged();
+    }
+
+    // ---- v2 10.4 online half: live availability through the host seam. The desktop wires
+    // the delegates; the browser host leaves them null, so nothing renders and no request
+    // leaves WASM. Chip state belongs to the row that produced it: a rebuild of the rows
+    // (resource gone) drops the state, and an edited name invalidates its stale answer. ----
+    private IReadOnlyList<(string SubscriptionId, string DisplayName)> nameCheckSubs = [];
+    private string nameCheckSubId = string.Empty;
+    private string nameCheckRegion = string.Empty;
+    private string? nameCheckError;
+    private readonly Dictionary<IAzureResource, (string? Name, bool Checking, AdsHostFeatures.AdsNameCheckResult? Result)> checks = new(ReferenceEqualityComparer.Instance);
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Lazily once per drawer open: the subscription list is a host call, not a render cost.
+        if (_features.ListNameCheckSubscriptions is { } list)
+        {
+            try
+            {
+                nameCheckSubs = await list(Services);
+                nameCheckSubId = nameCheckSubs.Count > 0 ? nameCheckSubs[0].SubscriptionId : string.Empty;
+            }
+            catch (Exception e) { nameCheckError = e.Message; }
+        }
+        await base.OnInitializedAsync();
+    }
+
+    private async Task CheckNameAsync(Row row)
+    {
+        if (_features.CheckNameAvailability is not { } check || string.IsNullOrEmpty(nameCheckSubId)
+            || !NamingEngine.IsValid(row.Key, row.Resource.Name))
+            return;
+        checks[row.Resource] = (row.Resource.Name, true, null);
+        StateHasChanged();
+        AdsHostFeatures.AdsNameCheckResult result;
+        try
+        {
+            result = await check(Services, row.Key, row.Resource.Name.Trim(), nameCheckSubId,
+                string.IsNullOrWhiteSpace(nameCheckRegion) ? null : nameCheckRegion.Trim());
+        }
+        catch (Exception e)
+        {
+            // The seam should never throw, but a throw is still just an unknown - not a verdict.
+            result = new AdsHostFeatures.AdsNameCheckResult(null, e.Message);
+        }
+        checks[row.Resource] = (row.Resource.Name, false, result);
         StateHasChanged();
     }
 }

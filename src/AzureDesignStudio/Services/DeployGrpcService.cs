@@ -91,9 +91,12 @@ namespace AzureDesignStudio.Services
 
         /// <summary>Deploys the reviewed payload as a deployment-stack (v2 12.3): same what-if token
         /// and plan hash the review produced; the unmanage policy stays Detach-flavored - Delete is
-        /// refused server-side until the Phase 13 gates ship.</summary>
+        /// refused server-side until the Phase 13 gates ship. <paramref name="bypassOutOfSync"/> is
+        /// the review-gated out-of-sync override, only ever sent after the review screen showed
+        /// the managed list and the user ticked the box.</summary>
         public async Task<CreateStackResponse?> CreateStackAsync(string subscriptionId, string rgName, string stackName,
-            string armTemplate, string parameters, string whatIfToken, string planHash, string missingAction = "Detach")
+            string armTemplate, string parameters, string whatIfToken, string planHash, string missingAction = "Detach",
+            bool bypassOutOfSync = false)
         {
             try
             {
@@ -107,11 +110,41 @@ namespace AzureDesignStudio.Services
                     WhatIfToken = whatIfToken,
                     PlanHash = planHash,
                     MissingAction = missingAction,
+                    BypassOutOfSync = bypassOutOfSync,
                 });
             }
             catch (Exception ex) when (ex is Grpc.Core.RpcException or InvalidOperationException or HttpRequestException)
             {
                 // A transport break never proves what ARM did: the server audit carries the truth.
+                return null;
+            }
+        }
+
+        /// <summary>Read-only stack probe for the review screen (v2 12.3 closer, [61]): exists,
+        /// managed list, and the server-computed managed-vs-planned diff for the exact template
+        /// about to be approved. Transport break or refusal is null - availability is then
+        /// UNKNOWN and must never be rendered as "new".</summary>
+        public async Task<StackProbe?> GetStackAsync(string subscriptionId, string rgName, string stackName, string plannedTemplateJson)
+        {
+            try
+            {
+                var response = await _deployClient.GetStackAsync(new GetStackRequest
+                {
+                    SubscriptionId = subscriptionId,
+                    ResourceGroupName = rgName,
+                    StackName = stackName,
+                    PlannedTemplateJson = plannedTemplateJson,
+                });
+                if (response.StatusCode != 200)
+                    return null;
+                return new StackProbe(response.Exists,
+                    response.ManagedResourceIds, response.Diagnostics,
+                    response.AlreadyManagedCount, response.TakingOver, response.Releasing,
+                    response.PlannedDiagnostics);
+            }
+            catch (Exception ex) when (ex is Grpc.Core.RpcException or InvalidOperationException or HttpRequestException)
+            {
+                // Same swallow convention as CreateStackAsync: a break proves nothing about ARM.
                 return null;
             }
         }
@@ -178,4 +211,10 @@ namespace AzureDesignStudio.Services
             }
         }
     }
+
+    /// <summary>One stack probe's answer (v2 12.3): null StackProbe from the wrapper means
+    /// "unknown", this record only ever carries a 200 - an honest exists / managed / diff.</summary>
+    public sealed record StackProbe(bool Exists, IReadOnlyList<string> ManagedIds, IReadOnlyList<string> Diagnostics,
+        int AlreadyManagedCount, IReadOnlyList<string> TakingOver, IReadOnlyList<string> Releasing,
+        IReadOnlyList<string> PlannedDiagnostics);
 }

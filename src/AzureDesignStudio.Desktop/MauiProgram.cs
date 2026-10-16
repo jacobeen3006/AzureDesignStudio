@@ -94,6 +94,8 @@ public static class MauiProgram
         builder.Services.AddSingleton<WorkspaceDecomWindows>();
         builder.Services.AddSingleton<ChangeFeedService>();
         builder.Services.AddSingleton<AzureDesignStudio.Discovery.Cost.ActualSpendClient>();
+        builder.Services.AddSingleton<AzureDesignStudio.Discovery.Iac.DeploymentStackClient>();
+        builder.Services.AddSingleton<AzureDesignStudio.Discovery.Naming.NameAvailabilityClient>();
         builder.Services.AddSingleton<WorkspaceScanSink>();
         builder.Services.AddSingleton<AzureDesignStudio.Discovery.Scan.IScanSink>(sp => sp.GetRequiredService<WorkspaceScanSink>());
         builder.Services.AddSingleton<ScanEngine>();
@@ -133,6 +135,25 @@ public static class MauiProgram
                     new AntDesign.DrawerOptions { Title = "Tenant scan", Width = "720" }, string.Empty);
                 drawerRef.OnClose = () => { scanDrawer = null; return Task.CompletedTask; };
                 scanDrawer = drawerRef;
+            },
+            // v2 10.4 online half: the naming drawer's live availability rides the same ARM
+            // plumbing; the browser host leaves these null and the affordance vanishes.
+            ListNameCheckSubscriptions = async circuitServices =>
+            {
+                var subs = await circuitServices.GetRequiredService<TenantScanSession>().GetSubscriptionsAsync();
+                return subs.Select(s => (s.SubscriptionId, s.DisplayName)).ToList();
+            },
+            CheckNameAvailability = async (circuitServices, stencilKey, name, subscriptionId, location) =>
+            {
+                var result = await circuitServices.GetRequiredService<AzureDesignStudio.Discovery.Naming.NameAvailabilityClient>()
+                    .CheckAsync(stencilKey, name, subscriptionId, location);
+                return result.Outcome switch
+                {
+                    AzureDesignStudio.Discovery.Naming.NameCheckOutcome.Available => new AdsHostFeatures.AdsNameCheckResult(true, null),
+                    AzureDesignStudio.Discovery.Naming.NameCheckOutcome.Unavailable => new AdsHostFeatures.AdsNameCheckResult(false, result.Detail),
+                    // NotCheckable / Error: the drawer shows why in gray - never a fake verdict.
+                    _ => new AdsHostFeatures.AdsNameCheckResult(null, result.Detail),
+                };
             },
         });
 

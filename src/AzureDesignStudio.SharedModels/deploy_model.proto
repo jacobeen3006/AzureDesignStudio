@@ -14,6 +14,11 @@ service Deploy {
 	rpc GetDeploymentOperations(DeploymentOperationsRequest) returns(DeploymentOperationsResponse);
 	rpc PrepareRetry(PrepareRetryRequest) returns(PrepareRetryResponse);
 	rpc CreateStack(CreateStackRequest) returns(CreateStackResponse);
+	// v2 plan 12.3 closer: read-only stack probe for the review screen (managed-vs-planned
+	// review [61]) and the desktop Stacks tab. exists=false with 200 is an honest "no such
+	// stack"; refusals carry codes only, never ARM bodies. When the request carries a
+	// template the server runs the [61] diff so the shared drawer stays engine-free.
+	rpc GetStack(GetStackRequest) returns(GetStackResponse);
 	// v2 plan 13.1/[36-final]: the do-not-touch list is server-side truth - enforcement
 	// reads it at review and apply, so a client can never deploy around it by omitting it.
 	rpc SetGuardrailPolicy(GuardrailPolicyRequest) returns(GuardrailPolicyResponse);
@@ -188,6 +193,27 @@ message CreateStackRequest {
 	string deployment_action = 10;
 	bool deny_enabled = 11;
 	repeated string deny_locks = 12;
+	// v2 12.3: explicit review-gated out-of-sync bypass; lands inside the hashed stack body.
+	bool bypass_out_of_sync = 13;
+}
+
+message GetStackRequest {
+	string subscription_id = 1;
+	string resource_group_name = 2;
+	string stack_name = 3;
+	string planned_template_json = 4;
+}
+
+message GetStackResponse {
+	int32 status_code = 1;
+	string error_message = 2;
+	bool exists = 3;
+	repeated string managed_resource_ids = 4;
+	repeated string diagnostics = 5;
+	int32 already_managed_count = 6;
+	repeated string taking_over = 7;
+	repeated string releasing = 8;
+	repeated string planned_diagnostics = 9;
 }
 
 message CreateStackResponse {

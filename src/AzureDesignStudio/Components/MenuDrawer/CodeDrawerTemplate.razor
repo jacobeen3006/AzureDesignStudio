@@ -135,15 +135,56 @@
         {
             <Divider />
             <div style="display:flex;gap:8px;align-items:center">
-                <Switch @bind-Value="@_deployAsStack" Size="@InputSize.Small" Disabled="@(ScopeTarget != DeployTarget.ResourceGroup)" />
+                <Switch @bind-Value="@_deployAsStack" @bind-Value:after="OnStackModeChangedAsync" Size="@InputSize.Small" Disabled="@(ScopeTarget != DeployTarget.ResourceGroup)" />
                 <span>Deploy as a <strong>deployment stack</strong>@(ScopeTarget != DeployTarget.ResourceGroup ? " (resource-group target only)" : "")</span>
             </div>
             @if (_deployAsStack)
             {
                 <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
                     <span>Stack name</span>
-                    <Input @bind-Value="@_stackName" Style="width:240px" />
+                    <Input @bind-Value="@_stackName" @bind-Value:after="OnStackNameChangedAsync" Style="width:240px" />
                 </div>
+                @if (_stackChecking)
+                {
+                    <p style="margin-top:6px"><Icon Type="loading" Theme="@IconThemeType.Outline" /> Looking the stack up in @TargetLabel...</p>
+                }
+                else if (ScopeTarget != DeployTarget.ResourceGroup)
+                {
+                    <p style="margin-top:6px"><em>The stack review needs the resource-group target.</em></p>
+                }
+                else if (!_stackProbed)
+                {
+                    <p style="margin-top:6px"><em>Stack review runs after the lookup - set or re-set the stack name.</em></p>
+                }
+                else if (_stackProbe is null)
+                {
+                    <p style="margin-top:6px"><em>Stack lookup failed - availability of an existing stack is unknown.</em></p>
+                }
+                else if (!_stackProbe.Exists)
+                {
+                    <p style="margin-top:6px"><em>New stack - nothing is managed yet.</em></p>
+                }
+                else
+                {
+                    <p style="margin-top:6px">Stack <b>@_stackName.Trim()</b> today: <b>@_stackProbe.AlreadyManagedCount</b> already managed, <b>+@_stackProbe.TakingOver.Count</b> taken over, <b>-@_stackProbe.Releasing.Count</b> released.</p>
+                    @if (_stackProbe.Releasing.Count > 0)
+                    {
+                        <ul style="margin:0 0 6px 18px">
+                            @foreach (var releasedId in _stackProbe.Releasing)
+                            {
+                                <li><span style="color:#d46b08">@releasedId</span> - left behind: detached under the stack policy, never deleted.</li>
+                            }
+                        </ul>
+                    }
+                    @foreach (var stackDiagnostic in _stackProbe.Diagnostics.Concat(_stackProbe.PlannedDiagnostics))
+                    {
+                        <div style="color:#d48806">@stackDiagnostic</div>
+                    }
+                    <label style="display:flex;gap:6px;align-items:center;margin-top:6px">
+                        <input type="checkbox" @bind="_bypassOutOfSync" />
+                        <span>bypass out-of-sync (redeploy the same template first per ARM guidance)</span>
+                    </label>
+                }
                 <p style="margin-top:6px"><em>Resources the stack later stops managing are detached, never deleted. The plan hash, approval and audit trail are identical to a plain deploy.</em></p>
             }
         }

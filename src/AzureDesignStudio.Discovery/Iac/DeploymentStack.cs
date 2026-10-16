@@ -64,6 +64,14 @@ public sealed record StackDriftReport(IReadOnlyList<StackDriftRow> Rows)
 }
 
 /// <summary>
+/// Managed-vs-planned review ([61]): what the stack manages today compared with the ids the
+/// incoming template will claim. Distinct from <see cref="CheckDrift"/> (managed-vs-live):
+/// this table is shown before approval so the user sees exactly what this update adopts
+/// (+) and what it leaves behind (-) under the detach policy.
+/// </summary>
+public sealed record StackManagementDiff(int AlreadyManagedCount, IReadOnlyList<string> TakingOver, IReadOnlyList<string> Releasing);
+
+/// <summary>
 /// Deployment-stack manager core (v2 plan 12.3/[60][61]): builds the ARM
 /// <c>Microsoft.Resources/deploymentStacks</c> PUT body - inline template plus the
 /// actionOnUnmanage + denySettings policy - with a canonical-JSON identity hash so the
@@ -84,13 +92,17 @@ public static class DeploymentStack
     /// Builds the PUT body for one stack. The template must be a JSON object; parameters are
     /// optional. Policy members are emitted in a fixed order and the hash covers the canonical
     /// form, so the same inputs always produce byte-identical bodies and the same hash.
+    /// <paramref name="bypassOutOfSyncError"/> lands ARM's explicit out-of-sync override - the
+    /// member rides inside the hashed body, so a sha256: approval binds the bypass exactly as
+    /// it binds the template. Default <c>false</c> emits nothing new (byte-identical bodies).
     /// </summary>
     public static DeploymentStackBody Build(
         string stackName,
         string location,
         string templateJson,
         StackPolicy policy,
-        string? parametersJson = null)
+        string? parametersJson = null,
+        bool bypassOutOfSyncError = false)
     {
         var diagnostics = new List<ArmDiagnostic>();
 
@@ -158,7 +170,7 @@ public static class DeploymentStack
             }
         }
 
-        var json = BuildBody(stackName, location, template, templateOk, parameters, parametersOk, policy);
+        var json = BuildBody(stackName, location, template, templateOk, parameters, parametersOk, policy, bypassOutOfSyncError);
         var hash = Hash(Canonicalize(JsonDocument.Parse(json).RootElement));
         return new DeploymentStackBody(json, hash, diagnostics);
     }
@@ -175,6 +187,10 @@ public static class DeploymentStack
         return true;
     }
 
+    // Enum names never start with a digit: a numeric wire value is someone's guess at the
+    // protocol, not a protocol statement - refuse it rather than let "1" smuggle in Delete.
+    private static bool IsNamedWire(string? value) => !string.IsNullOrWhiteSpace(value) && !char.IsDigit(value[0]);
+
     /// <summary>Wire form of a deny lock level, case-insensitive; blank, numeric or unknown values are refused.</summary>
     public static bool TryParseDenyLock(string? value, out StackDenyLock denyLock)
     {
@@ -185,14 +201,18 @@ public static class DeploymentStack
         return true;
     }
 
-    // Enum names never start with a digit: a numeric wire value is someone's guess at the
-    // protocol, not a policy statement - refuse it rather than let "1" smuggle in Delete.
-    private static bool IsNamedWire(string? value) => !string.IsNullOrWhiteSpace(value) && !char.IsDigit(value[0]);
+    /// <summary>The name rule ARM enforces on stacks; the name interpolates the ARM URL, so
+    /// every caller validates through this gate before any HTTP call or URL build.</summary>
+    public static bool IsValidStackName(string? name) =>
+        !string.IsNullOrEmpty(name) && StackNamePattern.IsMatch(name);
 
     /// <summary>
-    /// Reads the managed resource ids a stack GET reports. A stack with no managed list is a
-    /// malformed payload (Error), an empty list is legitimate (a stack that detached everything);
-    /// entries without a usable resourceId are counted, never silently dropped.
+    /// Reads the managed resource ids a stack GET/list payload reports. Two verified shapes
+    /// are accepted: the get-era <c>properties.managedResources[].resourceId</c> and the
+    /// list/get-era <c>properties.resources[].id</c> (<c>{id, status, denyStatus}</c> entries);
+    /// the union is deduped on the same trim+lowercase key the drift guard uses. A payload
+    /// carrying neither key is malformed (Error); an empty array under either key is a
+    /// legitimate reported-empty. Entries without a usable id are counted, never dropped.
     /// </summary>
     public static (IReadOnlyList<string> Ids, IReadOnlyList<ArmDiagnostic> Diagnostics) ReadManagedResources(string stackGetJson)
     {
@@ -212,29 +232,40 @@ public static class DeploymentStack
         {
             if (doc.RootElement.ValueKind != JsonValueKind.Object
                 || !doc.RootElement.TryGetProperty("properties", out var properties)
-                || properties.ValueKind != JsonValueKind.Object
-                || !properties.TryGetProperty("managedResources", out var managed)
-                || managed.ValueKind != JsonValueKind.Array)
+                || properties.ValueKind != JsonValueKind.Object)
             {
                 diagnostics.Add(Error("StackManagedResourcesMissing",
-                    "The stack payload carries no properties.managedResources array."));
+                    "The stack payload carries no properties.managedResources or properties.resources array."));
                 return (ids, diagnostics);
             }
 
-            var index = 0;
-            foreach (var entry in managed.EnumerateArray())
+            var reported = false;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var (key, idMember) in new[] { ("managedResources", "resourceId"), ("resources", "id") })
             {
-                var id = entry.ValueKind == JsonValueKind.Object
-                    && entry.TryGetProperty("resourceId", out var rid)
-                    && rid.ValueKind == JsonValueKind.String
-                    ? rid.GetString()?.Trim()
-                    : null;
-                if (string.IsNullOrEmpty(id))
-                    diagnostics.Add(Error("StackManagedResourceInvalid",
-                        $"managedResources[{index}] carries no resourceId."));
-                else
-                    ids.Add(id);
-                index++;
+                if (!properties.TryGetProperty(key, out var list) || list.ValueKind != JsonValueKind.Array)
+                    continue;
+                reported = true;
+                var index = 0;
+                foreach (var entry in list.EnumerateArray())
+                {
+                    var id = entry.ValueKind == JsonValueKind.Object
+                        && entry.TryGetProperty(idMember, out var rid)
+                        && rid.ValueKind == JsonValueKind.String
+                        ? rid.GetString()?.Trim()
+                        : null;
+                    if (string.IsNullOrEmpty(id))
+                        diagnostics.Add(Error("StackManagedResourceInvalid",
+                            $"{key}[{index}] carries no {idMember}."));
+                    else if (seen.Add(id.ToLowerInvariant()))
+                        ids.Add(id);
+                    index++;
+                }
+            }
+            if (!reported)
+            {
+                diagnostics.Add(Error("StackManagedResourcesMissing",
+                    "The stack payload carries no properties.managedResources or properties.resources array."));
             }
         }
 
@@ -284,6 +315,149 @@ public static class DeploymentStack
         return new StackDriftReport(rows);
     }
 
+    /// <summary>
+    /// Builds the ARM ids the template's <c>resources[]</c> will manage if deployed to this
+    /// scope: <c>/subscriptions/{sub}/resourceGroups/{rg}/providers/{type}/{name}</c>, with
+    /// child types spliced as <c>.../virtualNetworks/vnet1/subnets/subnet1</c> (standard ARM
+    /// id form; name segments fill type segments in order). Fail-closed, never guessed: a
+    /// missing or expression (<c>[...]</c>) name/type reports <c>PlannedIdUnresolved</c>, a
+    /// literal absolute <c>scope</c> outside the target resource group reports
+    /// <c>PlannedIdOffScope</c>. Ids keep template casing; output is ordinal-sorted.
+    /// </summary>
+    public static (IReadOnlyList<string> Ids, IReadOnlyList<ArmDiagnostic> Diagnostics) PlannedManagedResourceIds(
+        string templateJson, string subscriptionId, string resourceGroup)
+    {
+        var diagnostics = new List<ArmDiagnostic>();
+        var ids = new List<string>();
+        JsonDocument doc;
+        try
+        {
+            doc = JsonDocument.Parse(templateJson ?? string.Empty);
+        }
+        catch (JsonException)
+        {
+            return (ids, [Error("PlannedIdUnresolved", "The stack template is not valid JSON; nothing can be planned.")]);
+        }
+
+        using (doc)
+        {
+            // A template without a resources array manages nothing - an honest empty, not an error.
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("resources", out var resources)
+                || resources.ValueKind != JsonValueKind.Array)
+                return (ids, diagnostics);
+
+            foreach (var entry in resources.EnumerateArray())
+            {
+                if (entry.ValueKind != JsonValueKind.Object)
+                {
+                    diagnostics.Add(Error("PlannedIdUnresolved", "A resources[] entry is not an object."));
+                    continue;
+                }
+                var type = GetString(entry, "type");
+                var name = GetString(entry, "name");
+                var label = $"{(type is { Length: > 0 } t ? t : "?")}/{(name is { Length: > 0 } n ? n : "?")}";
+                if (string.IsNullOrWhiteSpace(type) || string.IsNullOrWhiteSpace(name) || name![0] == '[')
+                {
+                    diagnostics.Add(Error("PlannedIdUnresolved",
+                        $"{label} cannot be resolved to an ARM id before deployment."));
+                    continue;
+                }
+
+                // A literal absolute scope is the template's own statement of where the resource
+                // lands; if it names anything outside this stack's resource group the id below
+                // would be a lie - report instead of guessing. Relative scopes ("parent/child")
+                // stay in the target group and need no check.
+                var scope = GetString(entry, "scope");
+                if (scope is { Length: > 0 } && scope[0] == '/' && !ScopeMatchesTarget(scope, subscriptionId, resourceGroup))
+                {
+                    diagnostics.Add(Error("PlannedIdOffScope",
+                        $"{label} carries a literal scope ({scope}) outside the stack's resource group."));
+                    continue;
+                }
+
+                ids.Add(BuildArmId(subscriptionId, resourceGroup, type!, name!));
+            }
+        }
+
+        ids.Sort(StringComparer.Ordinal);
+        return (ids, diagnostics);
+    }
+
+    /// <summary>
+    /// Compares a stack's managed ids against the ids an incoming template plans to manage
+    /// ([61] managed-vs-planned review). Case-insensitive like <see cref="CheckDrift"/>:
+    /// trim + lowercase comparison, first-appearance casing in output, ordinal-sorted lists.
+    /// </summary>
+    public static StackManagementDiff DiffManagedAgainstPlan(IEnumerable<string> stackManagedIds, IEnumerable<string> plannedIds)
+    {
+        var managed = FirstByKey(stackManagedIds);
+        var planned = FirstByKey(plannedIds);
+
+        var already = 0;
+        var takingOver = new List<string>();
+        foreach (var (key, display) in planned)
+        {
+            if (managed.ContainsKey(key)) already++;
+            else takingOver.Add(display);
+        }
+        var releasing = new List<string>();
+        foreach (var (key, display) in managed)
+        {
+            if (!planned.ContainsKey(key)) releasing.Add(display);
+        }
+
+        takingOver.Sort((a, b) => string.Compare(a.ToLowerInvariant(), b.ToLowerInvariant(), StringComparison.Ordinal));
+        releasing.Sort((a, b) => string.Compare(a.ToLowerInvariant(), b.ToLowerInvariant(), StringComparison.Ordinal));
+        return new StackManagementDiff(already, takingOver, releasing);
+    }
+
+    private static Dictionary<string, string> FirstByKey(IEnumerable<string>? ids)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var id in ids ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(id)) continue;
+            map.TryAdd(id.Trim().ToLowerInvariant(), id.Trim());
+        }
+        return map;
+    }
+
+    private static bool ScopeMatchesTarget(string absoluteScope, string subscriptionId, string resourceGroup)
+    {
+        var segments = absoluteScope.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        // /subscriptions/{sub}/resourceGroups/{rg}[/...] - ARM ids are case-insensitive.
+        return segments.Length >= 4
+            && string.Equals(segments[0], "subscriptions", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(segments[1], subscriptionId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(segments[2], "resourceGroups", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(segments[3], resourceGroup, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? GetString(JsonElement entry, string property) =>
+        entry.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static string BuildArmId(string subscriptionId, string resourceGroup, string type, string name)
+    {
+        var typeParts = type.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var nameParts = name.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var sb = new StringBuilder();
+        sb.Append("/subscriptions/").Append(subscriptionId)
+            .Append("/resourceGroups/").Append(resourceGroup)
+            .Append("/providers/").Append(typeParts[0]);
+        for (var i = 1; i < typeParts.Length; i++)
+        {
+            sb.Append('/').Append(typeParts[i]);
+            if (i - 1 < nameParts.Length) sb.Append('/').Append(nameParts[i - 1]);
+        }
+        // More name than type segments: the extra segments ride at the end rather than vanish.
+        for (var i = typeParts.Length - 1; i < nameParts.Length; i++)
+            sb.Append('/').Append(nameParts[i]);
+        return sb.ToString();
+    }
+
     private static string BuildBody(
         string stackName,
         string location,
@@ -291,7 +465,8 @@ public static class DeploymentStack
         bool templateOk,
         JsonElement parameters,
         bool parametersOk,
-        StackPolicy? policy)
+        StackPolicy? policy,
+        bool bypassOutOfSyncError)
     {
         var sb = new StringBuilder();
         sb.Append('{');
@@ -311,6 +486,14 @@ public static class DeploymentStack
         {
             if (!firstProperty) sb.Append(',');
             sb.Append("\"parameters\":").Append(parameters.GetRawText());
+            firstProperty = false;
+        }
+        if (bypassOutOfSyncError)
+        {
+            // ARM guidance: redeploying the same template is the fix for an out-of-sync stack;
+            // this explicit override is the reviewed last resort, and the hash binds it.
+            if (!firstProperty) sb.Append(',');
+            sb.Append("\"bypassStackOutOfSyncError\":true");
             firstProperty = false;
         }
         if (policy is not null)
