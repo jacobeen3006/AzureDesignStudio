@@ -42,7 +42,7 @@
 
 <div style="padding:0 4px;">
     <div style="display:flex;gap:8px;margin-bottom:12px;">
-        @foreach (var (key, label) in new[] { ("scan", "Scan"), ("browse", "Inventory"), ("topology", "Topology"), ("exposure", "Exposure"), ("changes", "Changes"), ("cost", "Cost"), ("stacks", "Stacks"), ("decom", "Decommission"), ("report", "Report") })
+        @foreach (var (key, label) in new[] { ("scan", "Scan"), ("browse", "Inventory"), ("topology", "Topology"), ("exposure", "Exposure"), ("reach", "Reach"), ("changes", "Changes"), ("cost", "Cost"), ("stacks", "Stacks"), ("decom", "Decommission"), ("report", "Report") })
         {
             <Button Type="@(activeTab == key ? ButtonType.Primary : ButtonType.Default)"
                     Size="ButtonSize.Small" OnClick="@(() => SwitchTabAsync(key))">@label</Button>
@@ -377,6 +377,82 @@
             @foreach (var cav in AdsToolEngine.ExposureCaveats)
             {
                 <div style="font-size:12px;color:#999;">@cav</div>
+            }
+        }
+    }
+    else if (activeTab == "reach")
+    {
+        @if (reachScanId is null)
+        {
+            @if (completed.Count == 0)
+            {
+                <span>No completed scans yet.</span>
+            }
+            else
+            {
+                <select @bind="reachScanId" @bind:after="LoadReachScanAsync">
+                    @foreach (var scan in completed)
+                    {
+                        <option value="@scan.Id">@(scan.StartedAt.LocalDateTime.ToString("dd.MM HH:mm")) · @scan.Scope · @scan.ResourceCount rows</option>
+                    }
+                </select>
+            }
+        }
+        else
+        {
+            <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+                <a @onclick="@(() => { reachScanId = null; reachAnswer = null; })">back</a>
+                <select @bind="reachTargetId" @bind:after="RunReachAsync">
+                    <option value="">choose a resource…</option>
+                    @foreach (var i in reachItems)
+                    {
+                        <option value="@i.Id">@i.Name · @i.Type</option>
+                    }
+                </select>
+            </div>
+            @if (reachAnswer is null)
+            {
+                <span style="color:#999;">&quot;What can reach this resource?&quot; answered from the snapshot alone: only proven paths, plus what the scan cannot see.</span>
+            }
+            else
+            {
+                <div style="margin-bottom:8px;">
+                    @if (reachAnswer.InternetReachable)
+                    {
+                        <Tag Color="@("red")">internet path proven</Tag>
+                    }
+                    else
+                    {
+                        <Tag Color="@("default")">no internet path proven in this scan</Tag>
+                    }
+                    @foreach (var d in reachAnswer.Diagnostics)
+                    {
+                        <div style="font-size:12px;color:#cf1322;margin-top:4px;">@d.Message</div>
+                    }
+                </div>
+                @foreach (var p in reachAnswer.Paths)
+                {
+                    <div style="border-bottom:1px solid #fafafa;padding:4px 0;font-size:13px;">
+                        @{ var last = p.Hops.Count > 0 ? p.Hops[^1] : NameOf(p.Via); }
+                        <Tag Color="@ReachOriginColor(p.Origin)">@ReachOriginLabel(p.Origin)</Tag>
+                        <b>@last</b>
+                        <div style="color:#666;">Internet → @string.Join(" → ", p.Hops)</div>
+                        @foreach (var ev in p.Evidence)
+                        {
+                            <div style="color:#999;font-size:12px;">@ev</div>
+                        }
+                    </div>
+                }
+                @if (reachAnswer.Principals.Count > 0)
+                {
+                    <div style="margin-top:8px;font-size:13px;"><b>principals (exact-scope assignments):</b> @string.Join(", ", reachAnswer.Principals)</div>
+                }
+                <div style="margin-top:8px;">
+                    @foreach (var cav in reachAnswer.Caveats)
+                    {
+                        <div style="font-size:12px;color:#999;">@cav</div>
+                    }
+                </div>
             }
         }
     }
@@ -870,6 +946,45 @@
     private string? exposureScanId;
     private IReadOnlyList<ExposureFinding> exposureFindings = [];
 
+    // v2 [16]: reachability answers over one stored snapshot; no ARM call, the same facts the
+    // Exposure tab shows, walked backwards to the target.
+    private string? reachScanId;
+    private List<InventoryItem> reachItems = [];
+    private string reachTargetId = "";
+    private ReachAnswer? reachAnswer;
+
+    private async Task LoadReachScanAsync()
+    {
+        reachItems = [];
+        reachTargetId = "";
+        reachAnswer = null;
+        if (reachScanId is null) return;
+        var rows = await Session.GetSnapshotsAsync(reachScanId);
+        reachItems = rows.Select(ToItem)
+            .GroupBy(i => i.Id, StringComparer.OrdinalIgnoreCase).Select(g => g.First())
+            .OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(i => i.Id, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private void RunReachAsync() =>
+        reachAnswer = reachTargetId.Length == 0 ? null : ReachabilityEngine.Analyze(reachTargetId, reachItems);
+
+    private static string ReachOriginColor(ReachOrigin o) => o switch
+    {
+        ReachOrigin.Internet => "red",
+        ReachOrigin.PrivateEndpoint => "blue",
+        ReachOrigin.PeerVnet => "gold",
+        _ => "cyan",
+    };
+
+    private static string ReachOriginLabel(ReachOrigin o) => o switch
+    {
+        ReachOrigin.Internet => "INTERNET",
+        ReachOrigin.PrivateEndpoint => "PRIVATE LINK",
+        ReachOrigin.PeerVnet => "PEER VNET",
+        _ => "SAME SUBNET",
+    };
+
     private string? changesScanId;
     private bool changesBusy;
     private string? changesError;
@@ -1000,6 +1115,11 @@
         {
             exposureScanId = completed.FirstOrDefault()?.Id;
             await LoadExposureAsync();
+        }
+        if (key == "reach" && reachScanId is null)
+        {
+            reachScanId = completed.FirstOrDefault()?.Id;
+            await LoadReachScanAsync();
         }
         if (key == "changes" && changesScanId is null)
         {

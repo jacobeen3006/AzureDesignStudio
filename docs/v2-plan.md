@@ -189,6 +189,8 @@ The gate also caught a **bad E2E seed**, not a product gap. The seeded link carr
 
 **Status (2026-10-16) update 35:** the [58] verbs passed their **desktop E2E gate** (server down, seeded scan, WebView2 CDP). Seeded scan `verbs-e2e` (2 rows) → browse → *Adopt 2 as design* wrote through the offline store and opened the canvas; the scan rows were then mutated out-of-band (rename A, delete B, add C) and re-browsed: the banner answered `0 in design / 1 drift / 1 new / 1 design-only`, the drift row carried a *refresh* button and the design-only row a *detach* button. Clicking refresh toasted, flipped the chip to *in design* and the persisted design JSON carried the live name with `ArmId` intact; clicking detach toasted, the tile stayed on the canvas with its canvas GUID while `ArmId` cleared in the saved JSON, and the design-only note disappeared. Cleanup: seed rows and the temp WebView profile removed; workspace counts verified back to baseline.
 
+**Status (2026-10-16) update 36:** **[16] reachability queries delivered** (early - the Phase-8 graph it waited on is proven and shipped). `ReachabilityEngine.Analyze(target, snapshot)` answers "what can reach this resource?" purely from stored scan facts: it walks the proven 8.1 edge derivation (`TopologyDeriver`) plus the Exposure tab's own findings (`ExposureAnalyzer`) backwards to the target. Proven paths only: internet via attached public IP, public PaaS endpoint (suppressed behind its private endpoint), public LB/app-gateway frontend into the backend, internet-open NSG on the target's subnet; plus private-endpoint, peer-vnet (with the peer's in-scan resources or an honest `peer-vnet-outside-scan`) and same-subnet neighbour paths. `InternetReachable` is true **only while a path is proven** - the answer never claims closure (`internet-path-not-proven … NOT proof of closure`), and every layer a snapshot cannot answer (publicNetworkAccess flags, NSG deny precedence, UDRs/NAT/firewall/WAF, RBAC without supplied assignments) rides the caveat list. Principals come only from exactly-scoped assignments passed in - the scan plane carries none yet, so the drawer shows the caveat instead of a verdict. Surfaced as the tenant drawer's **Reach** tab: scan picker → resource picker → provenance per path (origin tag, hop chain, evidence strings) + caveats. 11 offline tests (each rule, both negatives, ordering/determinism, caveat honesty); offline suite 681/681.
+
 ## Phase 13 — Decommissioning (last, carefully)
 
 - 13.1 **[36-final]** Guardrails enforced on every destructive path (blocks listed in 100-list §3).
@@ -208,7 +210,6 @@ The gate also caught a **bad E2E seed**, not a product gap. The seeded link carr
 |---|---|
 | **[92]** 10k-node virtualized rendering | tenants > ~2k visible nodes in practice |
 | **[94]** Signed auto-update | external users before trust via store |
-| **[16]** reachability queries | Phase 8 graph proven |
 | **[54][55]** policy/capacity preflight | Phase 11 needs |
 | **[22][24][42][44–47][49][59][70][72][75–79][81–88][95][96]** | backlog, attach to nearest phase |
 
