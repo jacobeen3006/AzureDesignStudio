@@ -213,6 +213,11 @@
                     <Button Size="ButtonSize.Small" Disabled="@(browseItems.Count == 0)"
                             OnClick="SaveTerraformAsync">Save Terraform (.tf)</Button>
                 </Tooltip>
+                <Tooltip Title="@(browseItems.Count == 0 ? "no resources in this scan to export"
+                                : "The whole inventory as one deterministic JSON document with a sha256 content hash - commit it to git; identical tenant state renders identical bytes")">
+                    <Button Size="ButtonSize.Small" Disabled="@(browseItems.Count == 0)"
+                            OnClick="SaveBomAsync">Save bill of materials (JSON)</Button>
+                </Tooltip>
             </div>
 
             @if (facets is { } f)
@@ -2212,6 +2217,25 @@
             Message.Success($"Chargeback digest written to {path} - {honest}");
         }
         catch (Exception e) { Message.Error($"Could not write the chargeback digest: {e.Message}"); }
+    }
+
+    // [32] Bill of materials: canonical tenant-state document for git evidence. No clock inside,
+    // so the only bytes that ever move in a PR diff are real state changes.
+    private async Task SaveBomAsync()
+    {
+        if (browseScanId is null)
+            return;
+        try
+        {
+            var scope = completed.FirstOrDefault(s => s.Id == browseScanId)?.Scope ?? browseScanId;
+            var bom = BillOfMaterials.Render(browseItems, scope);
+            var hash = JsonDocument.Parse(bom).RootElement.GetProperty("contentHash").GetString();
+            var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads",
+                $"ads-bom-{SafeScanId(browseScanId)}.json");
+            await File.WriteAllTextAsync(path, bom);
+            Message.Success($"Bill of materials written to {path} - {browseItems.Count} resources, {hash}; identical tenant state always renders identical bytes");
+        }
+        catch (Exception e) { Message.Error($"Could not write the bill of materials: {e.Message}"); }
     }
 
     // Scan ids are GUIDs but not guaranteed - keep any shape intact, only neutralise path-unsafe chars.

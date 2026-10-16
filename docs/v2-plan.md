@@ -197,6 +197,8 @@ The gate also caught a **bad E2E seed**, not a product gap. The seeded link carr
 
 **Status (2026-10-16) update 39:** backlog **[77] chargeback digest** lands (the per-owner half of [74]). `ChargebackDigest` (Discovery/Cost) piles the Cost tab's already-fetched spend by owner tag (`owner > cost-center > costcenter > team`), with `untagged` and `unmatched-spend` kept as named piles and shares strictly inside each currency; `chargeback.csv` lands in Downloads with its own provenance footer. The Cost tab's *Save chargeback digest (CSV)* button runs entirely on workspace + fetched figures - no new Azure call - and the toast names the leftover piles. 6 offline tests (joins, precedence/trim, buckets, currency isolation, zero-window, csv determinism + provenance); offline suite 695/695.
 
+**Status (2026-10-16) update 40:** backlog **[32] bill of materials** lands. `BillOfMaterials` (Discovery/Report) renders a scan's inventory as one canonical git-evidence document - id-sorted resources, ordinal-sorted tag and property keys at every depth (provider order stripped), resumed-scan duplicates collapsed, no clock inside - plus a self-describing `sha256:` over the resources section, so a PR diff moves bytes only when tenant state moves. The Inventory tab's *Save bill of materials (JSON)* writes `ads-bom-<scan>.json` to Downloads and toasts the hash. Real scan rows prove the byte-stability both ways (same inventory in any insertion order → identical document); 5 offline tests (stability incl. property reorder, hash binds content / ignores scope rename, dedupe, empty document, no clock); offline suite 700/700.
+
 ## Phase 13 — Decommissioning (last, carefully)
 
 - 13.1 **[36-final]** Guardrails enforced on every destructive path (blocks listed in 100-list §3).
