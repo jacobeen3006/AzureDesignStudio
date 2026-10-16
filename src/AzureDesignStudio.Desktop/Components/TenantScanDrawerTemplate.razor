@@ -250,13 +250,23 @@
                 </div>
                 @if (rec.CountIn(DesignState.Drifted) > 0)
                 {
-                    <div style="margin-bottom:8px;font-size:12px;color:#faad14;">drift = the canvas still says an old name/location; "Refresh live plane" adopts the live truth</div>
+                    <div style="margin-bottom:8px;font-size:12px;color:#faad14;">drift = the canvas still says an old name/location; <i>refresh</i> a row to take its live truth, or run "Refresh live plane" for every row at once</div>
                 }
                 @if (rec.DesignOnly.Count > 0)
                 {
                     <div style="margin-bottom:8px;font-size:12px;color:#999;">
-                        on the canvas but not in this scan: @string.Join(", ", rec.DesignOnly.Select(id => id.Split('/')[^1]).Take(8))@(rec.DesignOnly.Count > 8 ? " …" : "")
-                        - kept; deploy/detach verbs land behind the decommissioning safeguards
+                        on the canvas but not in this scan — kept; deploy is the gated path, <i>detach</i> drops only the live link:
+                        @foreach (var id in rec.DesignOnly.Take(8))
+                        {
+                            <span style="margin-right:10px;white-space:nowrap;">
+                                @id.Split('/')[^1]<Button Size="ButtonSize.Small" Type="@ButtonType.Link" Disabled="@adoptBusy"
+                                                          @onclick="@(() => DetachDesignOnlyAsync(id))">detach</Button>
+                            </span>
+                        }
+                        @if (rec.DesignOnly.Count > 8)
+                        {
+                            <span>… @rec.DesignOnly.Count total</span>
+                        }
                     </div>
                 }
             }
@@ -275,6 +285,10 @@
                         else if (st == DesignState.Drifted)
                         {
                             <Tag Color="@("orange")">drift</Tag>
+                            <span @onclick:stopPropagation="true">
+                                <Button Size="ButtonSize.Small" Type="@ButtonType.Link" Disabled="@adoptBusy"
+                                        @onclick="@(() => RefreshRowAsync(item))">refresh</Button>
+                            </span>
                         }
                         else
                         {
@@ -1448,6 +1462,72 @@
                 + ".");
             if (FeedbackRef as DrawerRef<string> is { } dr)
                 await dr.CloseAsync(string.Empty);
+        }
+        finally
+        {
+            adoptBusy = false;
+        }
+    }
+
+    // Reconcile verbs [58] for single rows: design-side edits only, saved through the ordinary
+    // design contract - neither issues an Azure call; the live truth is the browsed scan snapshot.
+    // The canvas reload resets undo (same contract as the plane merge); the drawer stays open so
+    // the chips visibly follow the new truth.
+    private async Task RefreshRowAsync(InventoryItem item)
+    {
+        var designName = adsContext.CurrentDesignName;
+        if (string.IsNullOrEmpty(designName) || adoptBusy || browseScanId is null)
+            return;
+        adoptBusy = true;
+        try
+        {
+            var intent = await DataModelFactory.SaveDiagramToDto(adsContext.Diagram, mapper);
+            var (graph, changed) = ReconcileEngine.RefreshFromLive(intent, ToAdoptable(item));
+            if (!changed)
+            {
+                await RecomputeReconcileAsync();
+                return;
+            }
+            var status = await designService.SaveDesign(designName, JsonSerializer.Serialize(graph));
+            if (status != 200)
+            {
+                Message.Error("The refreshed design could not be saved; the canvas is unchanged.");
+                return;
+            }
+            ReloadCanvas(graph);
+            await RecomputeReconcileAsync();
+            Message.Success($"'{item.Name}' took its live name/location into '{designName}'.");
+        }
+        finally
+        {
+            adoptBusy = false;
+        }
+    }
+
+    private async Task DetachDesignOnlyAsync(string id)
+    {
+        var designName = adsContext.CurrentDesignName;
+        if (string.IsNullOrEmpty(designName) || adoptBusy || browseScanId is null)
+            return;
+        adoptBusy = true;
+        try
+        {
+            var intent = await DataModelFactory.SaveDiagramToDto(adsContext.Diagram, mapper);
+            var (graph, detached) = ReconcileEngine.Detach(intent, new[] { id });
+            if (detached.Count == 0)
+            {
+                await RecomputeReconcileAsync();
+                return;
+            }
+            var status = await designService.SaveDesign(designName, JsonSerializer.Serialize(graph));
+            if (status != 200)
+            {
+                Message.Error("The detached design could not be saved; the canvas is unchanged.");
+                return;
+            }
+            ReloadCanvas(graph);
+            await RecomputeReconcileAsync();
+            Message.Success($"Detached in '{designName}': the tile stays as intent, nothing in Azure was touched.");
         }
         finally
         {

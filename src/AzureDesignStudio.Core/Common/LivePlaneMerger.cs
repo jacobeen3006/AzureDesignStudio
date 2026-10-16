@@ -167,7 +167,7 @@ public static class LivePlaneMerger
         return best;
     }
 
-    private static DiagramGraph Clone(DiagramGraph source) => new()
+    internal static DiagramGraph Clone(DiagramGraph source) => new()
     {
         Nodes = source.Nodes.Select(o => o is AzureNodeDto d ? Clone(d) : o).ToList(),
         Links = source.Links.ToList(),

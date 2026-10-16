@@ -137,4 +137,132 @@ public class ReconcileEngineTests
         Assert.Empty(report.DesignOnly);
         Assert.Equal(0, report.UntrackedDesignNodes);
     }
+
+    // ---- [58] per-resource verbs: refresh takes live truth; detach drops identity only. ----
+
+    private static AzureNodeDto ArmNode(string id, string armId, string name = "", string location = "")
+    {
+        var n = Node(id, name, location);
+        n.ArmId = armId;
+        return n;
+    }
+
+    private static LinkModelDto Link(string sourceId, string targetId) => new()
+    {
+        SourcePortParentId = sourceId,
+        TargetPortParentId = targetId,
+    };
+
+    [Fact]
+    public void RefreshFromLive_MatchedNodeTakesLiveNameAndLocation_OtherNodesAndInputUntouched()
+    {
+        var intent = new DiagramGraph();
+        intent.Nodes.Add(ArmNode("canvas-guid-1", StorageId, "old-name", "eastus"));
+        var other = ArmNode("canvas-guid-2", "subscriptions/SUB-1/resourceGroups/rg-a/providers/Microsoft.Web/sites/keep", "keep", "westeurope");
+        intent.Nodes.Add(other);
+
+        var (graph, changed) = ReconcileEngine.RefreshFromLive(intent, Storage);
+
+        Assert.True(changed);
+        var refreshed = (AzureNodeDto)graph.Nodes[0];
+        Assert.Equal("stprod1a2b", refreshed.Name);
+        Assert.Equal("westeurope", refreshed.Location);
+        Assert.Equal("canvas-guid-1", refreshed.Id);                                         // identity is intent - never rewritten
+        Assert.Equal("keep", ((AzureNodeDto)graph.Nodes[1]).Name);                            // siblings untouched
+        Assert.Equal("old-name", ((AzureNodeDto)intent.Nodes[0]).Name);                       // input graph never mutated
+    }
+
+    [Fact]
+    public void RefreshFromLive_BlankLiveLocationKeepsDesignLocation_AndAgreeingPairIsNoChange()
+    {
+        var intent = new DiagramGraph();
+        intent.Nodes.Add(ArmNode("g1", StorageId, "stprod1a2b", "northeurope"));
+        var live = new AdoptableResource(StorageId, "Microsoft.Storage/storageAccounts", "stprod1a2b", null);
+
+        var (graph, changed) = ReconcileEngine.RefreshFromLive(intent, live);
+
+        Assert.False(changed);
+        Assert.Equal("northeurope", ((AzureNodeDto)graph.Nodes[0]).Location);                 // never blanks out a known location
+    }
+
+    [Fact]
+    public void RefreshFromLive_LegacyIdentityInId_StillMatches()
+    {
+        var intent = new DiagramGraph();
+        intent.Nodes.Add(Node(StorageId, "old-name"));                                        // pre-ArmId design: Id carries the ARM id
+
+        var (graph, changed) = ReconcileEngine.RefreshFromLive(intent, Storage);
+
+        Assert.True(changed);
+        Assert.Equal("stprod1a2b", ((AzureNodeDto)graph.Nodes[0]).Name);
+    }
+
+    [Fact]
+    public void Detach_ArmIdNode_LosesIdentityAndReconcilesAsUntrackedIntent()
+    {
+        var intent = new DiagramGraph();
+        intent.Nodes.Add(ArmNode("canvas-guid-1", StorageId, "stprod1a2b"));
+        intent.Links.Add(Link("canvas-guid-1", "canvas-guid-2"));
+
+        var (graph, detached) = ReconcileEngine.Detach(intent, new[] { StorageId });
+
+        Assert.Equal(new[] { StorageId }, detached);
+        var node = (AzureNodeDto)graph.Nodes[0];
+        Assert.Equal(string.Empty, node.ArmId);
+        Assert.Equal("canvas-guid-1", node.Id);                                               // canvas id is intent - kept
+        Assert.Equal("canvas-guid-1", graph.Links[0].SourcePortParentId);                     // nothing to remap when the id stays
+        var after = ReconcileEngine.Reconcile(graph, new[] { Storage });
+        Assert.Equal(StorageId, after.Rows.Single().Id);                                      // live row still shows...
+        Assert.Equal(DesignState.InLiveNotDesign, after.Rows.Single().State);                 // ...but as unmanaged by the design
+        Assert.Contains("canvas-guid-1", after.DesignOnly);                                // the tile stays design-side as pure intent
+        Assert.Equal(0, after.UntrackedDesignNodes);                                       // untracked counts only id-less nodes
+        Assert.Equal(StorageId, ((AzureNodeDto)intent.Nodes[0]).ArmId);                       // input never mutated
+    }
+
+    [Fact]
+    public void Detach_LegacyIdentityInId_RewritesIdAndRemapsLinksAndFrameMembership()
+    {
+        var intent = new DiagramGraph();
+        var frame = Node(StorageId, "old-frame");                                             // legacy frame: ARM id in Id, no ArmId member
+        intent.Nodes.Add(frame);
+        intent.Nodes.Add(new AzureNodeDto
+        {
+            Id = "child-guid", TypeKey = "storage-account", Name = "child", GroupId = StorageId,
+        });
+        intent.Links.Add(Link(StorageId, "child-guid"));
+
+        var (graph, detached) = ReconcileEngine.Detach(intent, new[] { StorageId });
+
+        Assert.Equal(new[] { StorageId }, detached);
+        var detachedFrame = (AzureNodeDto)graph.Nodes[0];
+        Assert.Equal("detached-1", detachedFrame.Id);
+        Assert.Equal("detached-1", ((AzureNodeDto)graph.Nodes[1]).GroupId);                   // child still frames inside
+        Assert.Equal("detached-1", graph.Links[0].SourcePortParentId);                        // link follows the node
+        Assert.Equal(StorageId, ((AzureNodeDto)intent.Nodes[0]).Id);                          // input never mutated
+    }
+
+    [Fact]
+    public void Detach_SecondTarget_GetsNextDeterministicId_AndUnknownIdIsHonestNoOp()
+    {
+        var intent = new DiagramGraph();
+        intent.Nodes.Add(Node("subscriptions/SUB-1/resourceGroups/rg-a/providers/Microsoft.Web/sites/gone-app", "gone-app"));
+        intent.Nodes.Add(Node("subscriptions/SUB-1/resourceGroups/rg-a/providers/Microsoft.Web/sites/dead-app", "dead-app"));
+
+        var (graph, detached) = ReconcileEngine.Detach(intent, new[]
+        {
+            "subscriptions/SUB-1/resourceGroups/rg-a/providers/Microsoft.Web/sites/gone-app",
+            "/subscriptions/SUB-1/resourceGroups/rg-a/providers/Microsoft.Web/sites/dead-app/",
+            "subscriptions/SUB-1/resourceGroups/rg-a/providers/Microsoft.Web/sites/never-was",
+        });
+
+        Assert.Equal(2, detached.Count);                                                      // unknown id honestly absent
+        Assert.Equal("detached-1", ((AzureNodeDto)graph.Nodes[0]).Id);
+        Assert.Equal("detached-2", ((AzureNodeDto)graph.Nodes[1]).Id);
+        var again = ReconcileEngine.Detach(intent, new[]
+        {
+            "subscriptions/SUB-1/resourceGroups/rg-a/providers/Microsoft.Web/sites/gone-app",
+            "subscriptions/SUB-1/resourceGroups/rg-a/providers/Microsoft.Web/sites/dead-app",
+        });
+        Assert.Equal("detached-1", ((AzureNodeDto)again.Graph.Nodes[0]).Id);                  // same input, same ids
+    }
 }
