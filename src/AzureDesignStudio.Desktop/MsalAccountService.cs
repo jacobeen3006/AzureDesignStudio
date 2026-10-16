@@ -62,9 +62,24 @@ public sealed class MsalAccountService
 
     public bool IsConfigured => _pca != null;
 
-    /// <summary>The cached account used for silent token acquisition, if signed in.</summary>
+    /// <summary>The cached account used for silent token acquisition, if signed in; null also when the broker itself is unhealthy.</summary>
     public async Task<IAccount?> GetCurrentAccountAsync()
-        => IsConfigured ? (await _pca.GetAccountsAsync()).FirstOrDefault() : null;
+    {
+        if (!IsConfigured)
+            return null;
+        try
+        {
+            return (await _pca.GetAccountsAsync()).FirstOrDefault();
+        }
+        catch (Exception e) when (IsBrokerOrMsalFailure(e))
+        {
+            // A broken Windows broker must not take the process down: the app keeps
+            // running anonymous (exactly like WASM unauthenticated) and sign-in can
+            // still succeed through the device-code fallback.
+            _logger.LogWarning(e, "Account enumeration failed (broker unhealthy); continuing anonymous");
+            return null;
+        }
+    }
 
     /// <summary>Access token for the server API from cache; null when anonymous or interactive consent required.</summary>
     public async Task<string?> GetTokenSilentAsync()
@@ -84,7 +99,7 @@ public sealed class MsalAccountService
         {
             return null; // token can't refresh silently; UI shows sign-in prompt as in WASM
         }
-        catch (MsalException e)
+        catch (Exception e) when (IsBrokerOrMsalFailure(e))
         {
             _logger.LogWarning(e, "Silent token acquisition failed");
             return null;
@@ -105,9 +120,9 @@ public sealed class MsalAccountService
                 .ExecuteAsync();
             return result.AccessToken;
         }
-        catch (MsalException)
+        catch (Exception e) when (IsBrokerOrMsalFailure(e))
         {
-            return null; // cache miss / consent required; the broker chain moves on
+            return null; // cache miss / consent required / broker down; the chain moves on
         }
     }
 
@@ -133,7 +148,7 @@ public sealed class MsalAccountService
             _logger.LogInformation("Interactive ARM consent canceled by user");
             return null;
         }
-        catch (MsalException e)
+        catch (Exception e) when (IsBrokerOrMsalFailure(e))
         {
             _logger.LogWarning(e, "Interactive ARM acquisition failed, falling back to device code flow");
             try
@@ -162,11 +177,12 @@ public sealed class MsalAccountService
             return false;
         }
 
-        var accounts = await _pca.GetAccountsAsync();
         AuthenticationResult? result = null;
+
 
         try
         {
+            var accounts = await _pca.GetAccountsAsync();
             var interactive = _pca.AcquireTokenInteractive(_scopes)
                 .WithAccount(accounts.FirstOrDefault())
                 .WithPrompt(Prompt.SelectAccount)
@@ -178,7 +194,7 @@ public sealed class MsalAccountService
             _logger.LogInformation("Interactive sign-in canceled by user");
             return false;
         }
-        catch (MsalException e)
+        catch (Exception e) when (IsBrokerOrMsalFailure(e))
         {
             // Broker/embedded UI unavailable or broken - fall back to device code.
             _logger.LogWarning(e, "Interactive sign-in failed, falling back to device code flow");
@@ -202,8 +218,17 @@ public sealed class MsalAccountService
     {
         if (!IsConfigured)
             return;
-        foreach (var account in await _pca.GetAccountsAsync())
-            await _pca.RemoveAsync(account);
+        try
+        {
+            foreach (var account in await _pca.GetAccountsAsync())
+                await _pca.RemoveAsync(account);
+        }
+        catch (Exception e) when (IsBrokerOrMsalFailure(e))
+        {
+            // Best-effort: a broker that cannot enumerate must still end the local
+            // session - the UI state below is the authority for the running app.
+            _logger.LogWarning(e, "Sign-out cache clear failed (broker unhealthy)");
+        }
         if (AuthStateChanged != null)
             await AuthStateChanged(null);
     }
@@ -232,10 +257,11 @@ public sealed class MsalAccountService
         return new ClaimsPrincipal(identity);
     }
 
-    private void ReportSignInFailure(MsalException e)
+    private void ReportSignInFailure(Exception e)
     {
         _logger.LogError(e, "Sign-in failed");
-        SetWindowTitle($"Sign-in failed: {e.ErrorCode} - {Truncate(e.Message)}");
+        var code = e is MsalException m ? m.ErrorCode : e.GetType().Name;
+        SetWindowTitle($"Sign-in failed: {code} - {Truncate(e.Message)}");
     }
 
     // Device-code prompt: the WebView has no place to render it, so surface the
@@ -272,4 +298,10 @@ public sealed class MsalAccountService
     }
 
     private static string Truncate(string s) => s.Length <= 120 ? s : s[..120] + "...";
+
+    // The WAM broker's native interop rethrows as an internal MSALErrorException that
+    // derives from neither MsalException nor any other public type - name match is the
+    // only way to keep it from escaping as an unhandled task failure.
+    private static bool IsBrokerInteropFailure(Exception e) => e.GetType().Name == "MSALErrorException";
+    private static bool IsBrokerOrMsalFailure(Exception e) => e is MsalException || IsBrokerInteropFailure(e);
 }
