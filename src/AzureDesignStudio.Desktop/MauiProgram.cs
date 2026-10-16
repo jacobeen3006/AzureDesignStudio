@@ -96,6 +96,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<AzureDesignStudio.Discovery.Cost.ActualSpendClient>();
         builder.Services.AddSingleton<AzureDesignStudio.Discovery.Iac.DeploymentStackClient>();
         builder.Services.AddSingleton<AzureDesignStudio.Discovery.Naming.NameAvailabilityClient>();
+        builder.Services.AddSingleton<AzureDesignStudio.Discovery.Security.ResourceLockClient>();
         builder.Services.AddSingleton<WorkspaceScanSink>();
         builder.Services.AddSingleton<AzureDesignStudio.Discovery.Scan.IScanSink>(sp => sp.GetRequiredService<WorkspaceScanSink>());
         builder.Services.AddSingleton<ScanEngine>();

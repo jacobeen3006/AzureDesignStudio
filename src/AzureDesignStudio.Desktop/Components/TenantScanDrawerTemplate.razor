@@ -16,6 +16,7 @@
 @using AzureDesignStudio.Discovery.Unmanaged
 @using AzureDesignStudio.Discovery.Mcp
 @using AzureDesignStudio.Discovery.Report
+@using AzureDesignStudio.Discovery.Security
 @using AzureDesignStudio.Discovery.Iac
 @using SubscriptionInfo = AzureDesignStudio.Discovery.Arm.SubscriptionInfo
 @using AzureDesignStudio.Workspace
@@ -33,6 +34,7 @@
 @inject WorkspaceDecomWindows decomWindows
 @inject ChangeFeedService Feed
 @inject ActualSpendClient Spend
+@inject ResourceLockClient Locks
 @inject DeploymentStackClient Stacks
 @inject MessageService Message
 @inject ModalService Modal
@@ -218,6 +220,8 @@
                     <Button Size="ButtonSize.Small" Disabled="@(browseItems.Count == 0)"
                             OnClick="SaveBomAsync">Save bill of materials (JSON)</Button>
                 </Tooltip>
+                <Button Size="ButtonSize.Small" Disabled="@lockBusy" title="Fetch management locks live from ARM; every lock bound to the resource or any of its scopes is enforced"
+                        OnClick="LoadLocksAsync">@(lockBusy ? "Checking locks..." : "Check locks (live)")</Button>
             </div>
 
             @if (facets is { } f)
@@ -236,6 +240,14 @@
                     @if (unmanagedAudit is { } au)
                     {
                         <span> · <a @onclick="@(() => unmanagedOnly = !unmanagedOnly)">@(unmanagedOnly ? "showing unmanaged only (clear)" : $"{au.Unmanaged.Count} unmanaged")</a> · @au.ProtectedResources.Count protected · <span style="color:#999">@unmanagedPolicyNote</span></span>
+                    }
+                    @if (dataAudit is { Rows.Count: > 0 } da)
+                    {
+                        <span> · <b>@da.Rows.Count</b> data-holding · cmk @EvidenceTally(da, r => r.CmkEncryption) · private-only @EvidenceTally(da, r => r.PrivateOnly) · soft-delete @EvidenceTally(da, r => r.SoftDelete) <span style="color:#999">(yes/no/unknown - keys and blob soft-delete live on child resources the scan never pages)</span></span>
+                    }
+                    @if (lockMap is { } lm)
+                    {
+                        <span> · <b>@lm.PlacedCount</b> live locks · @LockTally · @BoundCount bound <span style="color:#999">(locks bind scopes, not just resources - all applicable levels enforced)@lockNote</span></span>
                     }
                 </div>
             }
@@ -307,6 +319,31 @@
                     else if (protectedIds.Contains(item.Id))
                     {
                         <Tag Color="@("blue")">protected</Tag>
+                    }
+                    @if (dataRows is not null && dataRows.TryGetValue(item.Id, out var dh))
+                    {
+                        <span @onclick:stopPropagation="true" style="white-space:nowrap;"
+                              title="@($"cmk: {dh.CmkDetail} · private-only: {dh.PrivateDetail} · soft-delete: {dh.SoftDeleteDetail}")">
+                            @if (dh.CmkEncryption != DataEvidence.NotApplicable)
+                            {
+                                <Tag Color="@EvidenceColor(dh.CmkEncryption)">cmk: @(dh.CmkEncryption.ToString().ToLowerInvariant())</Tag>
+                            }
+                            @if (dh.PrivateOnly != DataEvidence.NotApplicable)
+                            {
+                                <Tag Color="@EvidenceColor(dh.PrivateOnly)">private: @(dh.PrivateOnly.ToString().ToLowerInvariant())</Tag>
+                            }
+                            @if (dh.SoftDelete != DataEvidence.NotApplicable)
+                            {
+                                <Tag Color="@EvidenceColor(dh.SoftDelete)">softdel: @(dh.SoftDelete.ToString().ToLowerInvariant())</Tag>
+                            }
+                        </span>
+                    }
+                    @if (lockMap is { } lmap && lmap.For(item.Id) is { } lockEff)
+                    {
+                        <span @onclick:stopPropagation="true" style="white-space:nowrap;"
+                              title="@($"lock scope: {lockEff.ScopeId} · {(string.IsNullOrWhiteSpace(lockEff.Notes) ? "no notes" : lockEff.Notes)}")">
+                            <Tag Color="@(lockEff.CanNotDelete ? "red" : "orange")">locked: @lockEff.Label</Tag>
+                        </span>
                     }
                     @if (expandedId == item.Id)
                     {
@@ -1026,6 +1063,80 @@
 
     // 9.3 chips over the Inventory rows; the note names whether protection was judged at all.
     private ManagementAudit? unmanagedAudit;
+    // [88] Data-holding answers ride the same browse load - pure, offline, honest unknowns.
+    private DataHoldingsAudit? dataAudit;
+    private Dictionary<string, DataHoldingRow>? dataRows;
+
+    private static string EvidenceColor(DataEvidence e) => e switch
+    {
+        DataEvidence.Yes => "green",
+        DataEvidence.No => "red",
+        _ => "orange",
+    };
+
+    // yes/no/unknown per flag at a glance - the unknowns are the point, never hidden in a green bar.
+    private static string EvidenceTally(DataHoldingsAudit a, Func<DataHoldingRow, DataEvidence> flag)
+    {
+        var yes = a.Rows.Count(r => flag(r) == DataEvidence.Yes);
+        var no = a.Rows.Count(r => flag(r) == DataEvidence.No);
+        var unknown = a.Rows.Count(r => flag(r) == DataEvidence.Unknown);
+        return $"{yes}/{no}/{unknown}";
+    }
+    // v2 plan 80: live management locks - the only online call on this tab. The LockMap
+    // decides which lock bites which resource (deepest locked scope wins, ARM ids case-insensitive).
+    private LockMap? lockMap;
+    private bool lockBusy;
+    private string lockNote = "";
+
+    private string LockTally => lockMap is not { } lm
+        ? "none"
+        : string.Join(" / ", lm.Placed
+            .GroupBy(l => l.Level.Length == 0 ? "NotSpecified" : l.Level, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => $"{g.Key} {g.Count()}"));
+
+    private int BoundCount => lockMap is not { } lm2
+        ? 0
+        : browseItems.Count(i => lm2.For(i.Id) is not null);
+
+    private async Task LoadLocksAsync()
+    {
+        if (browseItems.Count == 0)
+        {
+            Message.Info("Load the browse inventory first - locks are matched against it.");
+            return;
+        }
+        lockBusy = true;
+        try
+        {
+            var subs = browseItems.Select(i => i.SubscriptionId)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var rows = new List<LockRow>();
+            var failures = new List<string>();
+            foreach (var sub in subs)
+            {
+                try
+                {
+                    foreach (var r in await Locks.ListAtSubscriptionAsync(sub)) rows.Add(r);
+                }
+                catch (Exception e)
+                {
+                    failures.Add($"{sub}: {e.Message}");
+                }
+            }
+            lockMap = new LockMap(rows);
+            lockNote = failures.Count > 0 ? $"; {failures.Count} subscription(s) refused: {string.Join("; ", failures)}" : "";
+            var bound = BoundCount;
+            Message.Info(rows.Count == 0
+                ? $"No management locks in {subs.Count} subscription(s){lockNote}."
+                : $"{rows.Count} lock(s) fetched; {bound} scanned resource(s) bound{lockNote}.");
+        }
+        finally
+        {
+            lockBusy = false;
+        }
+    }
     private IReadOnlySet<string> protectedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private string unmanagedPolicyNote = "";
     private bool unmanagedOnly;
@@ -1178,6 +1289,9 @@
         var rows = await Session.GetSnapshotsAsync(browseScanId);
         browseItems = rows.Select(ToItem).ToList();
         facets = InventoryFacets.From(browseItems);
+        dataAudit = DataHoldings.Analyze(browseItems);
+        dataRows = dataAudit.Rows.Count == 0 ? null
+            : dataAudit.Rows.ToDictionary(r => r.Id, StringComparer.OrdinalIgnoreCase);
         browseOwner = null;
         expandedId = null;
         await RecomputeReconcileAsync();
