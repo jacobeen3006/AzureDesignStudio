@@ -549,6 +549,10 @@
                             Disabled="@(ArmUnavailable || costBusy || costSubs.Count == 0)"
                             OnClick="QuerySpendAsync">@(costBusy ? "Querying…" : $"Query spend ({costSubs.Count} sub(s))")</Button>
                 </Tooltip>
+                <Tooltip Title="digest of the queried spend by owner tag - one pile per owner; untagged and unmatched spend stay named as their own piles. CSV to Downloads, no new Azure call">
+                    <Button Size="ButtonSize.Small" Disabled="@(costResults.All(c => c.Result is null))"
+                            OnClick="SaveChargebackAsync">Save chargeback digest (CSV)</Button>
+                </Tooltip>
             </div>
             <div style="font-size:12px;color:#666;margin-bottom:6px;">
                 figures are Azure's own Cost Management numbers for the chosen window - every scope below prints its source, currency and as-of. Not cached, not estimated.
@@ -2180,6 +2184,34 @@
             Message.Success($"Report bundle (HTML + JSON + CSV) written to {dir}");
         }
         catch (Exception e) { Message.Error($"Could not render the report bundle: {e.Message}"); }
+    }
+
+    // [77] Chargeback digest: the queried spend joined to the scan's own owner tags. Same
+    // fetched figures the table shows - no new Azure call; the workspace snapshot carries tags.
+    private async Task SaveChargebackAsync()
+    {
+        if (costScanId is null)
+            return;
+        var ok = costResults.Where(c => c.Result is not null).ToList();
+        if (ok.Count == 0)
+            return;
+        try
+        {
+            var items = (await Session.GetSnapshotsAsync(costScanId)).Select(ToItem).ToList();
+            var rows = ok.SelectMany(c => c.Result!.Rows).ToList();
+            var piles = ChargebackDigest.Build(rows, items);
+            var provenance = ok[0].Result!.Provenance with { Scope = string.Join(", ", ok.Select(c => c.Sub)) };
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads",
+                $"ads-chargeback-{SafeScanId(costScanId)}");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "chargeback.csv");
+            await File.WriteAllTextAsync(path, ChargebackDigest.Csv(piles, provenance));
+            var left = piles.Where(p => p.Owner is ChargebackDigest.UntaggedOwner or ChargebackDigest.UnmatchedOwner).ToList();
+            var honest = left.Count == 0 ? "every pile carries an owner tag"
+                : "leftover piles: " + string.Join(", ", left.Select(p => $"{p.Owner} {p.Currency} {p.Cost:0.00} ({p.Share:P0})"));
+            Message.Success($"Chargeback digest written to {path} - {honest}");
+        }
+        catch (Exception e) { Message.Error($"Could not write the chargeback digest: {e.Message}"); }
     }
 
     // Scan ids are GUIDs but not guaranteed - keep any shape intact, only neutralise path-unsafe chars.

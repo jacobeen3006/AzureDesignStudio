@@ -195,6 +195,8 @@ The gate also caught a **bad E2E seed**, not a product gap. The seeded link carr
 
 **Status (2026-10-16) update 38:** the 9.6 closer's open half lands - the report bundle now carries the **topology picture**. `TopologySvgWriter` (Discovery/Analysis) renders the scan's derived graph through the deterministic `TopologyLayout` into a self-contained static SVG (nested frames, typed edges, external lane, edge-kind legend); the drawer's *Save report bundle* embeds it in `report.html` and ships `topology.svg` beside it - same scan, same bytes, hostile names HTML-encoded at the source, empty scan keeps the section absent. The palette the interactive Topology tab drew with is lifted into `TopologyLayout` (`EdgeColor`/`KindWord`/`FrameFill`/`FrameStroke`/`IsLane`) so report and UI can never drift apart. 4 offline tests (draw/bytes-stability/encoding-gate/bundle embed-omit); offline suite 689/689.
 
+**Status (2026-10-16) update 39:** backlog **[77] chargeback digest** lands (the per-owner half of [74]). `ChargebackDigest` (Discovery/Cost) piles the Cost tab's already-fetched spend by owner tag (`owner > cost-center > costcenter > team`), with `untagged` and `unmatched-spend` kept as named piles and shares strictly inside each currency; `chargeback.csv` lands in Downloads with its own provenance footer. The Cost tab's *Save chargeback digest (CSV)* button runs entirely on workspace + fetched figures - no new Azure call - and the toast names the leftover piles. 6 offline tests (joins, precedence/trim, buckets, currency isolation, zero-window, csv determinism + provenance); offline suite 695/695.
+
 ## Phase 13 — Decommissioning (last, carefully)
 
 - 13.1 **[36-final]** Guardrails enforced on every destructive path (blocks listed in 100-list §3).
