@@ -205,6 +205,8 @@ The gate also caught a **bad E2E seed**, not a product gap. The seeded link carr
 
 **Status (2026-10-16) update 43:** backlog **[86] first cut** lands as the **expiry watch**. `ExpiryWatch` (Discovery/Security) harvests recognized provider expiry date keys (`expireDate`, `expirationDate`, `expiresOn`, `expires`, `notAfter`, `sslExpirationDate`) at any JSON depth of the scan's own properties, earliest-per-resource, injected clock, evidence path per row; `expired/critical(≤30d)/warning(≤90d)` chips on Inventory rows, KV data-plane blind spot stated always. Pure offline, 9 tests; offline suite 726/726. Remaining [86] scope (KV content expiry via data plane, cert-binding inventory) stays open - it needs Vault-level permissions beyond Reader.
 
+**Status (2026-10-16) update 44:** backlog **[7] structural half** lands. `OrphanDetector` (Discovery/Security) flags unattached disks (`managedBy`/`diskState`), unassociated IPs (`ipConfiguration` empty/absent, prefix members excepted), VM-less NICs, and NSGs unreferenced by any scanned vnet subnet or NIC - case-insensitive ARM-id reference matching, contradictions resolved toward attached, evidence per row, three permanent caveats (PE-NICs, out-of-scope references, metrics-level idleness). Inventory chips `orphan?` + summary. 11 offline tests; verified on seeded scan rows (pip-vm9 + nic-vm9 fired with exact evidence, referenced NSG stayed clean); offline suite 737/737. [7]'s metrics half (idle VMs/unread disks/silent IPs) stays open - needs activity data above Reader.
+
 ## Phase 13 — Decommissioning (last, carefully)
 
 - 13.1 **[36-final]** Guardrails enforced on every destructive path (blocks listed in 100-list §3).

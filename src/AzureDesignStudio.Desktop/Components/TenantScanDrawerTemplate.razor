@@ -253,6 +253,10 @@
                     {
                         <span> · <b>@ex.Rows.Count</b> dated soon (@ex.DatedResources dated in total): @ex.Rows.Count(r => r.Status == ExpiryStatus.Expired) expired / @ex.Rows.Count(r => r.Status == ExpiryStatus.Critical) &le;30d / @ex.Rows.Count(r => r.Status == ExpiryStatus.Warning) &le;90d <span style="color:#999">(watched: expiry date keys ARM reports; Key Vault content expiries are data-plane, invisible to Reader)</span></span>
                     }
+                    @if (orphanAudit is { Rows.Count: > 0 } or)
+                    {
+                        <span> · <b>@or.Rows.Count</b> orphan candidates <span style="color:#999">(disks still billing unattached, IPs attached to nothing, NICs without VMs, unreferenced NSGs - structural evidence only; verify before deleting, see row tooltips)</span></span>
+                    }
                 </div>
             }
 
@@ -354,6 +358,12 @@
                         <span @onclick:stopPropagation="true" style="white-space:nowrap;"
                               title="@($"expires {exr.ExpiresAt:u} · evidence: {exr.PropertyPath}")">
                             <Tag Color="@(exr.Status == ExpiryStatus.Expired ? "red" : exr.Status == ExpiryStatus.Critical ? "orange" : "gold")">@(exr.DaysRemaining <= 0 ? $"expired {-exr.DaysRemaining}d ago" : $"expires in {exr.DaysRemaining}d")</Tag>
+                        </span>
+                    }
+                    @if (orphanRows is not null && orphanRows.TryGetValue(item.Id, out var orr))
+                    {
+                        <span @onclick:stopPropagation="true" style="white-space:nowrap;" title="@($"{orr.Kind}: {orr.Evidence}")">
+                            <Tag Color="@("orange")">orphan?</Tag>
                         </span>
                     }
                     @if (expandedId == item.Id)
@@ -1101,6 +1111,9 @@
     // v2 86 first cut: expiry dates the scan already carries - pure, offline, evidence-pathed.
     private ExpiryAudit? expiryAudit;
     private Dictionary<string, ExpiryRow>? expiryRows;
+    // v2 7 (structural half): orphan candidates from attachment facts the scan already carries.
+    private OrphanAudit? orphanAudit;
+    private Dictionary<string, OrphanRow>? orphanRows;
 
     private string LockTally => lockMap is not { } lm
         ? "none"
@@ -1309,6 +1322,9 @@
         expiryAudit = ExpiryWatch.Analyze(browseItems, DateTimeOffset.UtcNow);
         expiryRows = expiryAudit.Rows.Count == 0 ? null
             : expiryAudit.Rows.ToDictionary(r => r.Id, StringComparer.OrdinalIgnoreCase);
+        orphanAudit = OrphanDetector.Analyze(browseItems);
+        orphanRows = orphanAudit.Rows.Count == 0 ? null
+            : orphanAudit.Rows.ToDictionary(r => r.Id, StringComparer.OrdinalIgnoreCase);
         browseOwner = null;
         expandedId = null;
         await RecomputeReconcileAsync();
