@@ -285,4 +285,55 @@ public static class TopologyLayout
             ? parts[1]
             : "unknown";
     }
+
+    // ---- shared presentation constants (v2 9.6 closer): one palette for the interactive
+    // TopologyView and the static report SVG, so the report can never drift from what the
+    // user sees on screen.
+
+    public static bool IsLane(string containerId) => containerId == ExternalLane;
+
+    public static string FrameFill(string id) => id switch
+    {
+        ExternalLane => "#fafafa",
+        _ when id.StartsWith("sub:", StringComparison.Ordinal) => "#f0f5ff",
+        _ when id.StartsWith("rg:", StringComparison.Ordinal) => "#fff7e6",
+        _ => "#f6ffed",
+    };
+
+    public static string FrameStroke(string id) => id switch
+    {
+        ExternalLane => "#bfbfbf",
+        _ when id.StartsWith("sub:", StringComparison.Ordinal) => "#adc6ff",
+        _ when id.StartsWith("rg:", StringComparison.Ordinal) => "#ffd591",
+        _ => "#b7eb8f",
+    };
+
+    public static string EdgeColor(TopologyEdgeKind kind) => kind switch
+    {
+        TopologyEdgeKind.PeersWith => "#1677ff",
+        TopologyEdgeKind.InSubnet => "#52c41a",
+        TopologyEdgeKind.ProtectedBy => "#eb2f96",
+        TopologyEdgeKind.LoadBalances => "#fa8c16",
+        TopologyEdgeKind.ConnectsTo => "#722ed1",
+        TopologyEdgeKind.HostedIn => "#13c2c2",
+        TopologyEdgeKind.RoutesVia => "#a0d911",
+        TopologyEdgeKind.DiagnosticsTo => "#8c8c8c",
+        TopologyEdgeKind.AttachedTo => "#faad14",
+        _ => "#595959",
+    };
+
+    public static string KindWord(TopologyEdgeKind kind) => kind switch
+    {
+        TopologyEdgeKind.Uses => "uses",
+        TopologyEdgeKind.AttachedTo => "attached to",
+        TopologyEdgeKind.InSubnet => "in subnet",
+        TopologyEdgeKind.ProtectedBy => "guarded by",
+        TopologyEdgeKind.PeersWith => "peers with",
+        TopologyEdgeKind.LoadBalances => "balanced by",
+        TopologyEdgeKind.ConnectsTo => "private endpoint",
+        TopologyEdgeKind.HostedIn => "hosted in",
+        TopologyEdgeKind.RoutesVia => "routes via",
+        TopologyEdgeKind.DiagnosticsTo => "diagnostics to",
+        _ => kind.ToString(),
+    };
 }

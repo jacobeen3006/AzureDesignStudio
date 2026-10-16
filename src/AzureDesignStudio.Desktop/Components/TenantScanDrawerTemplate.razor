@@ -2141,7 +2141,7 @@
             return;
         try
         {
-            var (_, exposure, audit, driftList, _, _) = await CollectReportSectionsAsync(scan);
+            var (items, exposure, audit, driftList, _, _) = await CollectReportSectionsAsync(scan);
             IReadOnlyList<SpendBucket>? spendBuckets = null;
             SpendProvenance? spendProvenance = null;
             var spendOk = costResults.Where(c => c.Result is not null).ToList();
@@ -2161,7 +2161,7 @@
                 Drift: driftList,
                 SpendByServiceFamily: spendBuckets,
                 SpendProvenance: spendProvenance,
-                TopologySvg: null);
+                TopologySvg: TopologySvgWriter.Render(items));
             var files = ReportBundle.Build(model);
             var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads",
                 $"ads-report-{SafeScanId(scan.Id)}");

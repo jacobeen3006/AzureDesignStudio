@@ -54,8 +54,8 @@ else
                     @foreach (var c in layout.Containers)
                     {
                         <rect x="@c.X" y="@c.Y" width="@c.W" height="@c.H" rx="10"
-                              fill="@FrameFill(c.Id)" stroke="@FrameStroke(c.Id)" stroke-width="1.5"
-                              stroke-dasharray="@(IsLane(c.Id) ? "6 4" : null)" opacity="0.9" />
+                              fill="@TopologyLayout.FrameFill(c.Id)" stroke="@TopologyLayout.FrameStroke(c.Id)" stroke-width="1.5"
+                              stroke-dasharray="@(TopologyLayout.IsLane(c.Id) ? "6 4" : null)" opacity="0.9" />
                         @((MarkupString)$"<text x=\"{c.X + 10:0.#}\" y=\"{c.Y + 20:0.#}\" font-size=\"13\" font-weight=\"600\" fill=\"#555\">{Enc(Short(c.Label, 46))}</text>")
                     }
                     @foreach (var e in graph!.Edges)
@@ -65,7 +65,7 @@ else
                             continue;
                         }
                         <line x1="@(a.X + NodeW / 2)" y1="@(a.Y + NodeH / 2)" x2="@(b.X + NodeW / 2)" y2="@(b.Y + NodeH / 2)"
-                              stroke="@EdgeColor(e.Kind)" stroke-width="1.4" opacity="0.75" />
+                              stroke="@TopologyLayout.EdgeColor(e.Kind)" stroke-width="1.4" opacity="0.75" />
                     }
                     @foreach (var n in layout.Nodes)
                     {
@@ -90,7 +90,7 @@ else
             <div style="font-size:11px;color:#aaa;margin-top:4px;">
                 links: @foreach (var k in Enum.GetValues<TopologyEdgeKind>())
                 {
-                    <span style="margin-right:10px;"><span style="color:@EdgeColor(k)">■</span> @k</span>
+                    <span style="margin-right:10px;"><span style="color:@TopologyLayout.EdgeColor(k)">■</span> @k</span>
                 }
             </div>
         </div>
@@ -136,8 +136,8 @@ else
                 {
                     var other = e.From == node.Id ? e.To : e.From;
                     <div style="font-size:12px;border-bottom:1px solid #fafafa;padding:2px 0;">
-                        <span style="color:@EdgeColor(e.Kind)">■</span>
-                        <b>@KindWord(e.Kind)</b> @NameOf(other)
+                        <span style="color:@TopologyLayout.EdgeColor(e.Kind)">■</span>
+                        <b>@TopologyLayout.KindWord(e.Kind)</b> @NameOf(other)
                         @if (e.Detail is { Length: > 0 } d)
                         {
                             <span style="color:#999;"> · @d</span>
@@ -301,53 +301,6 @@ else
 
     private string Outline(string id) =>
         ChangedIds?.Contains(id) == true ? "#fa8c16" : "#d9d9d9";
-
-    private static bool IsLane(string containerId) => containerId == TopologyLayout.ExternalLane;
-
-    private static string FrameFill(string id) => id switch
-    {
-        TopologyLayout.ExternalLane => "#fafafa",
-        _ when id.StartsWith("sub:", StringComparison.Ordinal) => "#f0f5ff",
-        _ when id.StartsWith("rg:", StringComparison.Ordinal) => "#fff7e6",
-        _ => "#f6ffed",
-    };
-
-    private static string FrameStroke(string id) => id switch
-    {
-        TopologyLayout.ExternalLane => "#bfbfbf",
-        _ when id.StartsWith("sub:", StringComparison.Ordinal) => "#adc6ff",
-        _ when id.StartsWith("rg:", StringComparison.Ordinal) => "#ffd591",
-        _ => "#b7eb8f",
-    };
-
-    private static string EdgeColor(TopologyEdgeKind kind) => kind switch
-    {
-        TopologyEdgeKind.PeersWith => "#1677ff",
-        TopologyEdgeKind.InSubnet => "#52c41a",
-        TopologyEdgeKind.ProtectedBy => "#eb2f96",
-        TopologyEdgeKind.LoadBalances => "#fa8c16",
-        TopologyEdgeKind.ConnectsTo => "#722ed1",
-        TopologyEdgeKind.HostedIn => "#13c2c2",
-        TopologyEdgeKind.RoutesVia => "#a0d911",
-        TopologyEdgeKind.DiagnosticsTo => "#8c8c8c",
-        TopologyEdgeKind.AttachedTo => "#faad14",
-        _ => "#595959",
-    };
-
-    private static string KindWord(TopologyEdgeKind kind) => kind switch
-    {
-        TopologyEdgeKind.Uses => "uses",
-        TopologyEdgeKind.AttachedTo => "attached to",
-        TopologyEdgeKind.InSubnet => "in subnet",
-        TopologyEdgeKind.ProtectedBy => "guarded by",
-        TopologyEdgeKind.PeersWith => "peers with",
-        TopologyEdgeKind.LoadBalances => "balanced by",
-        TopologyEdgeKind.ConnectsTo => "private endpoint",
-        TopologyEdgeKind.HostedIn => "hosted in",
-        TopologyEdgeKind.RoutesVia => "routes via",
-        TopologyEdgeKind.DiagnosticsTo => "diagnostics to",
-        _ => kind.ToString(),
-    };
 
     private static string IconOf(string type)
     {
