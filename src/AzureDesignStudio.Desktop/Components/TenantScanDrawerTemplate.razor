@@ -249,6 +249,10 @@
                     {
                         <span> · <b>@lm.PlacedCount</b> live locks · @LockTally · @BoundCount bound <span style="color:#999">(locks bind scopes, not just resources - all applicable levels enforced)@lockNote</span></span>
                     }
+                    @if (expiryAudit is { Rows.Count: > 0 } ex)
+                    {
+                        <span> · <b>@ex.Rows.Count</b> dated soon (@ex.DatedResources dated in total): @ex.Rows.Count(r => r.Status == ExpiryStatus.Expired) expired / @ex.Rows.Count(r => r.Status == ExpiryStatus.Critical) &le;30d / @ex.Rows.Count(r => r.Status == ExpiryStatus.Warning) &le;90d <span style="color:#999">(watched: expiry date keys ARM reports; Key Vault content expiries are data-plane, invisible to Reader)</span></span>
+                    }
                 </div>
             }
 
@@ -343,6 +347,13 @@
                         <span @onclick:stopPropagation="true" style="white-space:nowrap;"
                               title="@($"lock scope: {lockEff.ScopeId} · {(string.IsNullOrWhiteSpace(lockEff.Notes) ? "no notes" : lockEff.Notes)}")">
                             <Tag Color="@(lockEff.CanNotDelete ? "red" : "orange")">locked: @lockEff.Label</Tag>
+                        </span>
+                    }
+                    @if (expiryRows is not null && expiryRows.TryGetValue(item.Id, out var exr))
+                    {
+                        <span @onclick:stopPropagation="true" style="white-space:nowrap;"
+                              title="@($"expires {exr.ExpiresAt:u} · evidence: {exr.PropertyPath}")">
+                            <Tag Color="@(exr.Status == ExpiryStatus.Expired ? "red" : exr.Status == ExpiryStatus.Critical ? "orange" : "gold")">@(exr.DaysRemaining <= 0 ? $"expired {-exr.DaysRemaining}d ago" : $"expires in {exr.DaysRemaining}d")</Tag>
                         </span>
                     }
                     @if (expandedId == item.Id)
@@ -1087,6 +1098,9 @@
     private LockMap? lockMap;
     private bool lockBusy;
     private string lockNote = "";
+    // v2 86 first cut: expiry dates the scan already carries - pure, offline, evidence-pathed.
+    private ExpiryAudit? expiryAudit;
+    private Dictionary<string, ExpiryRow>? expiryRows;
 
     private string LockTally => lockMap is not { } lm
         ? "none"
@@ -1292,6 +1306,9 @@
         dataAudit = DataHoldings.Analyze(browseItems);
         dataRows = dataAudit.Rows.Count == 0 ? null
             : dataAudit.Rows.ToDictionary(r => r.Id, StringComparer.OrdinalIgnoreCase);
+        expiryAudit = ExpiryWatch.Analyze(browseItems, DateTimeOffset.UtcNow);
+        expiryRows = expiryAudit.Rows.Count == 0 ? null
+            : expiryAudit.Rows.ToDictionary(r => r.Id, StringComparer.OrdinalIgnoreCase);
         browseOwner = null;
         expandedId = null;
         await RecomputeReconcileAsync();
