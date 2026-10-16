@@ -38,7 +38,7 @@ AzureDesignStudio/
 │   ├── AzureDesignStudio.Core.Tests/   # xUnit tests (offline + live-Azure categories)
 │   ├── AzureDesignStudio.Workspace/    # SQLite workspace (EF Core): designs/scans/snapshots/cost cache/plans/audit
 │   ├── AzureDesignStudio.Discovery/    # Tenant analysis engines: scans/drift, exposure, guardrails, decommission planner/runbook, MCP tool engine
-│   ├── AzureDesignStudio.Mcp/          # Stdio MCP server: 12 read-only tools over the workspace (plan-only decom; never mutates)
+│   ├── AzureDesignStudio.Mcp/          # Stdio MCP server: 13 read-only tools over the workspace (plan-only decom; never mutates)
 │   └── AzureDesignStudio.Desktop/      # MAUI BlazorWebView host (reuses App.razor; EnableTelemetry=false)
 ├── .github/workflows/                  # CI: build + CodeQL
 └── assets/ docs/                       # Screenshots, documentation

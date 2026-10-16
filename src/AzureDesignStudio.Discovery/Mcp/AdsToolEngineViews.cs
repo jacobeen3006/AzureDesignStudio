@@ -112,3 +112,30 @@ public sealed record DecomReport(
     string? WindowId,
     DateTimeOffset? PurgeNotBefore,
     IReadOnlyList<string> Caveats);
+
+/// <summary>One proven reach path (v2 [16]); <see cref="Origin"/> is the ReachOrigin enum name,
+/// <see cref="Via"/> the resource that makes the path exist, <see cref="Evidence"/> the positive
+/// snapshot facts the claim is built from.</summary>
+public sealed record ReachPathView(
+    string Origin,
+    string Via,
+    IReadOnlyList<string> Hops,
+    IReadOnlyList<string> Evidence);
+
+/// <summary>One reach diagnostic; <see cref="Severity"/> is the ArmDiagnosticSeverity enum name.</summary>
+public sealed record ReachDiagnosticView(string Severity, string Code, string Message);
+
+/// <summary>
+/// Reachability answer over one snapshot (v2 [93]/[16]). <see cref="InternetReachable"/> is true
+/// only while a path is PROVEN - a false is not proof of closure; the caveats carry what the
+/// snapshot never answers (publicNetworkAccess flags, NSG deny precedence, UDRs/firewall/WAF,
+/// RBAC without supplied assignments), and a target outside the scan answers with a diagnostic
+/// instead of a verdict.
+/// </summary>
+public sealed record ReachReport(
+    string TargetId,
+    bool InternetReachable,
+    IReadOnlyList<ReachPathView> Paths,
+    IReadOnlyList<string> Principals,
+    IReadOnlyList<string> Caveats,
+    IReadOnlyList<ReachDiagnosticView> Diagnostics);

@@ -1,3 +1,4 @@
+using AzureDesignStudio.Discovery.Analysis;
 using AzureDesignStudio.Discovery.Decommission;
 using AzureDesignStudio.Discovery.Drift;
 using AzureDesignStudio.Discovery.Exposure;
@@ -108,6 +109,23 @@ public static class AdsToolEngine
             audit.ProtectedResources.Select(f => new ProtectedRow(f.Id, f.Type, f.Reason)).ToList(),
             items.Count - audit.Unmanaged.Count - audit.ProtectedResources.Count,
             UnmanagedCaveats);
+    }
+
+    /// <summary>
+    /// [16] "what can reach this resource?" over one snapshot: the engine's answer verbatim -
+    /// proven paths, never a closure claim. No RBAC evidence exists in the scan plane, so the
+    /// principals answer stays caveated, not guessed.
+    /// </summary>
+    public static ReachReport Reach(IReadOnlyList<InventoryItem> items, string targetId)
+    {
+        var answer = ReachabilityEngine.Analyze(targetId, items);
+        return new ReachReport(
+            answer.TargetId,
+            answer.InternetReachable,
+            answer.Paths.Select(p => new ReachPathView(p.Origin.ToString(), p.Via, p.Hops, p.Evidence)).ToList(),
+            answer.Principals,
+            answer.Caveats,
+            answer.Diagnostics.Select(d => new ReachDiagnosticView(d.Severity.ToString(), d.Code, d.Message)).ToList());
     }
 
     public static DecomReport DecomPlan(IReadOnlyList<InventoryItem> items, IReadOnlyList<string> candidates, GuardrailPolicy policy, DateTimeOffset now, TimeSpan purgeDelay)

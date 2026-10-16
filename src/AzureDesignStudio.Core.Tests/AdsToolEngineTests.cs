@@ -357,4 +357,53 @@ public class AdsToolEngineTests
         Assert.Equal(first.PurgeNotBefore, second.PurgeNotBefore);
         Assert.Equal(first.Stages.SelectMany(s => s), second.Stages.SelectMany(s => s));
     }
+
+    // --- [16] reachability tool: proven paths, honest non-answers ---
+
+    private static InventoryItem PipItem() => Item(Pip, "microsoft.network/publicIPAddresses",
+        """{"ipAddress":"20.30.40.50"}""");
+
+    [Fact]
+    public void Reach_ProvenPublicIpPath_IsAnsweredWithEvidenceChain()
+    {
+        var report = AdsToolEngine.Reach([VmItem(), NicItem(), VnetItem(), PipItem()], Vm);
+
+        Assert.True(report.InternetReachable);
+        var via = Assert.Single(report.Paths, p => p.Origin == "Internet" && p.Via == Pip);
+        Assert.Equal("vm1", via.Hops[^1]);
+        Assert.Contains(via.Evidence, e => e.StartsWith("attached public IP", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Reach_TargetOutsideScan_AnswersDiagnosticNotVerdict()
+    {
+        var report = AdsToolEngine.Reach([VmItem(), NicItem(), VnetItem()], Web);
+
+        Assert.False(report.InternetReachable);
+        Assert.Contains(report.Diagnostics, d => d.Code == "ReachTargetNotInScan" && d.Severity == "Error");
+        Assert.Contains(report.Caveats, c => c.StartsWith("internet-path-not-proven", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Reach_QuietInventory_NeverClaimsClosureOrPrincipals()
+    {
+        var report = AdsToolEngine.Reach([VnetItem(), DiskItem()], Disk);
+
+        Assert.False(report.InternetReachable);
+        Assert.Empty(report.Principals);
+        Assert.Contains(report.Caveats, c => c.Contains("NOT proof of closure", StringComparison.Ordinal));
+        Assert.Contains(report.Caveats, c => c.StartsWith("role-assignments-not-supplied", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Reach_IsDeterministic_AcrossInputOrder()
+    {
+        InventoryItem[] items = [VmItem(), NicItem(), VnetItem(), PipItem()];
+        var first = AdsToolEngine.Reach(items, Vm);
+        var second = AdsToolEngine.Reach(items.Reverse().ToArray(), Vm);
+
+        string Serialize(ReachReport r) => string.Join("|", r.Paths.Select(p =>
+            p.Origin + ";" + p.Via + ";" + string.Join(",", p.Hops) + ";" + string.Join(",", p.Evidence)));
+        Assert.Equal(Serialize(first), Serialize(second));
+    }
 }

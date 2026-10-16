@@ -13,11 +13,11 @@ using ModelContextProtocol.Server;
 namespace AzureDesignStudio.Mcp;
 
 /// <summary>
-/// The 12 read-only tools of the local MCP server (v2 [93]): workspace truth (scans,
-/// inventory, diffs, changes, cost cache, designs, exposure, unmanaged, decommission
-/// planning, windows) over the desktop workspace database. No tool here mutates the
-/// workspace or calls ARM; the decommission tool is PLAN-ONLY - the purge never runs
-/// from here.
+/// The 13 read-only tools of the local MCP server (v2 [93]): workspace truth (scans,
+/// inventory, diffs, changes, cost cache, designs, exposure, reachability, unmanaged,
+/// decommission planning, windows) over the desktop workspace database. No tool here
+/// mutates the workspace or calls ARM; the decommission tool is PLAN-ONLY - the purge
+/// never runs from here.
 /// </summary>
 [McpServerToolType]
 public sealed class AdsMcpTools(AdsWorkspace workspace, ILogger<AdsMcpTools> logger)
@@ -192,6 +192,20 @@ public sealed class AdsMcpTools(AdsWorkspace workspace, ILogger<AdsMcpTools> log
         var scan = await RequireScanAsync(scanId);
         var items = ToItems(await workspace.GetSnapshotsAsync(scan.Id), out _);
         return AdsToolEngine.Exposure(items);
+    }
+
+    [McpServerTool(Name = "ads_reach", ReadOnly = true)]
+    [Description("Reachability query over a scan (v2 [16]): which paths reach a resource - proven from the snapshot only (attached public IPs, public PaaS endpoints, public LB frontends into backends, internet-open NSGs, private endpoints, peer vnets, same-subnet neighbours). A proven path is positive evidence; no path is NOT proof of closure, and un-inspected layers (publicNetworkAccess flags, NSG deny precedence, UDRs/firewall/WAF, RBAC) ride the caveats. A target outside the scan answers with a diagnostic, never a verdict. Read-only.")]
+    public async Task<ReachReport> AdsReach(
+        [Description("The stored scan id (exact).")] string scanId,
+        [Description("Target resource id (case-insensitive ARM id as scanned).")] string targetId)
+    {
+        var scan = await RequireScanAsync(scanId);
+        var items = ToItems(await workspace.GetSnapshotsAsync(scan.Id), out var malformed);
+        var answer = AdsToolEngine.Reach(items, targetId);
+        return malformed == 0
+            ? answer
+            : answer with { Caveats = [.. answer.Caveats, .. MalformedCaveats(malformed)] };
     }
 
     [McpServerTool(Name = "ads_unmanaged", ReadOnly = true)]
