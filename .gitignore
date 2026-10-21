@@ -353,3 +353,9 @@ MigrationBackup/
 .ionide/
 /src/AzureDesignStudio.Server/appsettings.Development.json
 /src/AzureDesignStudio.Server/appsettings.Production.json
+
+# GSD graphify derived artifacts (regenerate with: graphify update .)
+graphify-out/
+.planning/graphs/graph.json
+.planning/graphs/graph.html
+.planning/graphs/.last-build-snapshot.json
