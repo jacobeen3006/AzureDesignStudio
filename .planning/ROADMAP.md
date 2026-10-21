@@ -12,7 +12,7 @@ This is a brownfield trust-and-delivery milestone, not a feature milestone. Elev
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Land and Stabilize** - Commit the working slice in reviewable chunks, remove tracked blobs and scratch, fix the stale pointer zone, correct docs, decide the publisher
+- [x] **Phase 1: Land and Stabilize** - Commit the working slice in reviewable chunks, remove tracked blobs and scratch, fix the stale pointer zone, correct docs, decide the publisher (completed 2026-10-21)
 - [ ] **Phase 2: Reproducible Build and CI Baseline** - Pin the SDK, centralize and lock packages, gate Desktop on PRs, block vulnerable packages
 - [ ] **Phase 3: Server Foundation and Integration Harness** - Config-selected providers, a reachable `Program`, and a real hosted-server test channel
 - [ ] **Phase 4: Database Durability** - Baseline migrations, WAL, integrity check, backup/restore, and read-only MCP over one workspace
@@ -38,7 +38,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Dropping a stencil by pointer still reaches the canvas after the drawer remounts, with no console error.
   5. README and AGENTS report 11 projects and Entra ID work+personal auth (not B2C), and the publisher legal name plus signing path (Azure Artifact Signing, OV certificate, or controlled-pilot PFX) is recorded in PROJECT.md Key Decisions.
 
-**Plans**: 7/8 plans executed
+**Plans**: 8/8 plans complete
 **Wave 1**
 - [x] 01-01-PLAN.md — Core topic: domain slice plus its tests, `.gitignore` hygiene, five tracked artefacts removed, proved in a worktree at 753
 
@@ -61,7 +61,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 01-07-PLAN.md — Fresh-clone audit against `BUNDLE_SHA`, final suite run, SC#4 human verification and phase evidence
 
 **Wave 8** *(blocked on Wave 7 completion)*
-- [ ] 01-08-PLAN.md — Convergence after the last metadata commit: closing push, bundle re-cut at `CONVERGE_SHA`, gate command, bundle deletion
+- [x] 01-08-PLAN.md — Convergence after the last metadata commit: closing push, bundle re-cut at `CONVERGE_SHA`, gate command, bundle deletion
 
 **Implementation note**: `src/AzureDesignStudio/wwwroot/js/ads.js` — move the init guard onto the zone element (`zone.__adsPointerInit`) and re-resolve the zone inside `inZone`/overlay updates instead of closing over the first node. Of the two known lifetime defects, only the pointer zone is fixed here; the command registry's owner lifetime is SHELL-02 in Phase 7. Untrack `.omo/`/`.swarm/` but retain `.planning/`; ignore only generated scratch and root `*.dll`.
 
@@ -225,7 +225,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Land and Stabilize | 7/8 | In Progress | - |
+| 1. Land and Stabilize | 8/8 | Complete    | 2026-10-21 |
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
 | 3. Server Foundation and Integration Harness | 0/TBD | Not started | - |
 | 4. Database Durability | 0/TBD | Not started | - |
