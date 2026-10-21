@@ -26,15 +26,25 @@ namespace AzureDesignStudio.Core.Network
         public override (bool result, string message) IsDrappable(GroupModel overlappedGroup)
         {
             if (overlappedGroup is not SubnetModel subnet || !subnet.Name.Equals("AzureBastionSubnet"))
-                return (false, "Azure Bastion needs a dedicat subnet: AzureBastionSubnet.");
+                return (false, "Azure Bastion needs a dedicated subnet named AzureBastionSubnet. Add a Subnet to a Virtual Network and set its name to AzureBastionSubnet.");
 
             if (subnet.Children.Count > 0)
                 return (false, "The subnet is not empty.");
 
             return (true, string.Empty);
         }
+        /// <summary>Public IP linked from either end of a connection (canvas links are direction-agnostic).</summary>
+        private IEnumerable<PublicIpModel> LinkedPublicIps =>
+            Ports.SelectMany(p => p.Links)
+                .SelectMany(l => new[] { (l.Source.Model as PortModel)?.Parent, (l.Target.Model as PortModel)?.Parent })
+                .OfType<PublicIpModel>()
+                .Distinct();
+
+        public bool HasPublicIp => LinkedPublicIps.Any();
+
         public override bool IsValid => 
-            Group is SubnetModel subnet && subnet.Children.Count == 1 && subnet.Name.Equals("AzureBastionSubnet");
+            Group is SubnetModel subnet && subnet.Children.Count == 1
+                && subnet.Name.Equals("AzureBastionSubnet") && HasPublicIp;
         
         //[Required, DisplayName("Tier")]
         //public string Sku { get; set; } = "Standard";
@@ -56,16 +66,8 @@ namespace AzureDesignStudio.Core.Network
             if (s.Group is not VirtualNetworkModel vnet)
                 throw new Exception($"Subnet must be in a vnet.");
 
-            PublicIpModel? publicIp = null;
-            foreach (var port in Ports)
-            {
-                var pipLink = port.Links.FirstOrDefault(l => l.Source.Model is PortModel { Parent: PublicIpModel });
-                publicIp = pipLink?.Source.Model is PortModel sp ? (PublicIpModel)sp.Parent : null;
-                if (publicIp != null)
-                    break;
-            }
-            if (publicIp == null)
-                throw new Exception($"Bastion has no public IP address.");
+            var publicIp = LinkedPublicIps.FirstOrDefault()
+                ?? throw new Exception($"Bastion has no public IP address.");
 
             BastionHostIPConfiguration ipConfig = new()
             {

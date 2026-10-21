@@ -6,6 +6,9 @@ using AzureDesignStudio.Core.Common;
 using AzureDesignStudio.Core.DTO;
 using AzureDesignStudio.Core.Models;
 using Blazor.Diagrams.Core.Models;
+using System.Buffers.Binary;
+using System.Net;
+using System.Net.Sockets;
 
 namespace AzureDesignStudio.Core.Network
 {
@@ -53,6 +56,54 @@ namespace AzureDesignStudio.Core.Network
 
             AddChild(subnet);
             return subnet;
+        }
+
+        /// <summary>First unused /24 inside the first IPv4 address space, so auto-created
+        /// subnets never overlap one the user already defined.</summary>
+        public string NextFreeSubnetPrefix()
+        {
+            const int prefixLength = 24;
+            var space = IpSpace.FirstOrDefault()?.AddressPrefix;
+            if (space is null || !TryParseCidr(space, out var baseAddress, out var spacePrefix))
+                return "10.0.0.0/24";
+
+            var used = Subnets
+                .Select(s => s.AddressPrefix.Trim())
+                .Where(p => p.Length > 0)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (spacePrefix >= prefixLength)
+                return FormatPrefix(baseAddress, prefixLength);
+
+            var blockSize = 1u << (32 - prefixLength);
+            var blocks = 1u << (prefixLength - spacePrefix);
+            for (uint i = 0; i < blocks; i++)
+            {
+                var candidate = FormatPrefix(baseAddress + i * blockSize, prefixLength);
+                if (!used.Contains(candidate))
+                    return candidate;
+            }
+
+            return FormatPrefix(baseAddress, prefixLength);
+
+            static bool TryParseCidr(string cidr, out uint address, out int prefix)
+            {
+                address = 0;
+                prefix = 0;
+                var parts = cidr.Split('/');
+                if (parts.Length != 2
+                    || !IPAddress.TryParse(parts[0], out var ip)
+                    || ip.AddressFamily != AddressFamily.InterNetwork
+                    || !int.TryParse(parts[1], out prefix)
+                    || prefix is < 0 or > 32)
+                    return false;
+
+                address = BinaryPrimitives.ReadUInt32BigEndian(ip.GetAddressBytes());
+                return true;
+            }
+
+            static string FormatPrefix(uint value, int prefix) =>
+                $"{value >> 24}.{(value >> 16) & 0xff}.{(value >> 8) & 0xff}.{value & 0xff}/{prefix}";
         }
 
         public override IList<ResourceBase> GetArmResources()

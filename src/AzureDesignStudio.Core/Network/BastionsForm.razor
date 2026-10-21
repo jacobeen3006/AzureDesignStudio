@@ -5,6 +5,20 @@
 
 <Form Model="@bastion" LabelCol="@(new ColLayoutParam { Span = 6 })" WrapperCol="@(new ColLayoutParam { Span = 18 })" Size="@FormSize.Small">
     <NameAndLocation Node="@context" />
+    @if (context.Group is not SubnetModel subnet || !subnet.Name.Equals("AzureBastionSubnet"))
+    {
+        <FormItem>
+            <Alert Type="@AlertType.Warning" ShowIcon
+                   Message="Place this bastion inside an AzureBastionSubnet. Drop it directly on a Virtual Network to create the subnet automatically." />
+        </FormItem>
+    }
+    @if (!context.HasPublicIp)
+    {
+        <FormItem>
+            <Alert Type="@AlertType.Warning" ShowIcon
+                   Message="Link a Public IP to the bastion before exporting." />
+        </FormItem>
+    }
 @*    <FormItem>
         <RadioGroup @bind-Value="@context.Sku" ButtonStyle="@RadioButtonStyle.Solid" Size="small">
             <Radio RadioButton Value="@("Basic")">Basic</Radio>

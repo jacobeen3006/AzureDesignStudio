@@ -126,18 +126,37 @@ public static partial class DataModelFactory
         var link = new LinkModel(new SinglePortAnchor(sourcePort), targetAnchor)
         {
             TargetMarker = LinkMarker.Arrow,
-            Width = 1,
+            Width = 3,
         };
 
-        if (sourcePort is VirtualNetworkPort)
-        {
-            // VNet peering link.
-            link.Color = "#0078d7";
-            link.SourceMarker = LinkMarker.Arrow;
-        }
+        // The drag behavior starts with a PositionAnchor and swaps in the real port
+        // on pointer-up/snap; re-derive the label then so an interactive link gets
+        // the same type as one reloaded from a saved design.
+        link.TargetChanged += (changed, _, _) => ApplySemantics((LinkModel)changed);
+        link.SourceChanged += (changed, _, _) => ApplySemantics((LinkModel)changed);
+        ApplySemantics(link);
 
         return link;
     }
+
+    private static void ApplySemantics(LinkModel link)
+    {
+        var semantics = LinkTypeClassifier.Classify(ParentOf(link.Source), ParentOf(link.Target));
+        link.Color = semantics.Color;
+        link.SourceMarker = semantics.Bidirectional ? LinkMarker.Arrow : null;
+        link.TargetMarker = LinkMarker.Arrow;
+
+        if (link.Labels.Count == 0)
+            link.AddLabel(semantics.Label, 0.5);
+        else
+            link.Labels[0].Content = semantics.Label;
+    }
+
+    private static NodeModel? ParentOf(Anchor anchor) => anchor switch
+    {
+        SinglePortAnchor portAnchor => portAnchor.Port.Parent,
+        _ => anchor.Model as NodeModel,
+    };
     public static partial Type? GetDtoTypeFromKey(string key);
 
     private static readonly Dictionary<Type, string> StencilKeyByType = new()

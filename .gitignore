@@ -359,3 +359,9 @@ graphify-out/
 .planning/graphs/graph.json
 .planning/graphs/graph.html
 .planning/graphs/.last-build-snapshot.json
+
+# Repository hygiene: root build leftovers and agent scratch (never tracked)
+/*.dll
+.omo/
+.swarm/
+.planning/.omp-ui-state.json

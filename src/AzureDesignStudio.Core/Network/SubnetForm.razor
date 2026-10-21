@@ -1,0 +1,32 @@
+@using AzureDesignStudio.Core.Common
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@subnet" LabelCol="@(new ColLayoutParam { Span = 7 })" WrapperCol="@(new ColLayoutParam { Span = 17 })" Size="@FormSize.Small">
+    <FormItem Label="Name">
+        <Input Placeholder="subnet name" TValue="string" Size="@InputSize.Small" @bind-Value="@subnet.Name" />
+    </FormItem>
+    <FormItem Label="Address prefix">
+        <Input Placeholder="10.0.0.0/24" TValue="string" Size="@InputSize.Small" @bind-Value="@subnet.AddressPrefix" />
+    </FormItem>
+    <FormItem Label="Delegation">
+        <SimpleSelect @bind-Value="subnet.Delegation" Size="@InputSize.Small">
+            <SelectOptions>
+                <SimpleSelectOption Label="No delegation" Value="@("")" />
+                <SimpleSelectOption Label="Microsoft.App/environments" Value="@("Microsoft.App/environments")" />
+                <SimpleSelectOption Label="Microsoft.Web/serverfarms" Value="@("Microsoft.Web/serverfarms")" />
+                <SimpleSelectOption Label="Microsoft.Database/custom" Value="@("Microsoft.Database/custom")" />
+            </SelectOptions>
+        </SimpleSelect>
+    </FormItem>
+    <FormItem WrapperCol="@(new ColLayoutParam { Span = 24 })">
+        <Alert Type="@AlertType.Info" ShowIcon
+               Message="Azure Firewall needs a subnet named AzureFirewallSubnet. Azure Bastion needs AzureBastionSubnet." />
+    </FormItem>
+</Form>
+
+@code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+
+    private SubnetModel subnet => (SubnetModel)Node;
+}

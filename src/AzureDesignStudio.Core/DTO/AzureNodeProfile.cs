@@ -30,7 +30,11 @@ namespace AzureDesignStudio.Core.DTO
             CreateAzureNodeMaps();
         }
         private partial void CreateAzureNodeMaps();
-        private static string GetAnchorParentId(Anchor anchor) => anchor.Model is NodeModel n ? n.Id : string.Empty;
+        private static string GetAnchorParentId(Anchor anchor) => anchor switch
+        {
+            SinglePortAnchor portAnchor => portAnchor.Port.Parent.Id,
+            _ => anchor.Model is NodeModel n ? n.Id : string.Empty,
+        };
         private static PortAlignment GetAnchorAlignment(Anchor anchor) => (anchor as SinglePortAnchor)?.Port.Alignment ?? PortAlignment.Bottom;
     }
 }

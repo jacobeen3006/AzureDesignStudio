@@ -17,7 +17,7 @@ namespace AzureDesignStudio.Core.Network
     public class SubnetModel : AzureGroupBase
     {
         public override string ServiceName => "Subnet";
-        public override Type? DataFormType => null;
+        public override Type? DataFormType => typeof(SubnetForm);
         public override GroupStyle GroupStyle
         {
             get => new()
@@ -44,6 +44,14 @@ namespace AzureDesignStudio.Core.Network
 
                 return $"[resourceId('{_subnet.Type}', '{vnet.Name}','{Name}')]";
             }
+        }
+
+        public override (bool result, string message) IsDrappable(GroupModel overlappedGroup)
+        {
+            if (overlappedGroup is not VirtualNetworkModel)
+                return (false, "A subnet must be placed inside a virtual network.");
+
+            return (true, string.Empty);
         }
 
         [MapToDto]
