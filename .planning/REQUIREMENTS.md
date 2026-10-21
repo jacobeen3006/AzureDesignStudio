@@ -131,73 +131,76 @@ Explicitly excluded. Documented to prevent scope creep.
 
 ## Traceability
 
-Updated during roadmap creation.
+Updated 2026-10-21 during roadmap creation. Every v1 requirement maps to exactly one phase.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| IDA-01 | TBD | Pending |
-| IDA-02 | TBD | Pending |
-| IDA-03 | TBD | Pending |
-| IDA-04 | TBD | Pending |
-| IDA-05 | TBD | Pending |
-| IDA-06 | TBD | Pending |
-| CRED-01 | TBD | Pending |
-| CRED-02 | TBD | Pending |
-| CRED-03 | TBD | Pending |
-| CRED-04 | TBD | Pending |
-| CRED-05 | TBD | Pending |
-| BOUND-01 | TBD | Pending |
-| BOUND-02 | TBD | Pending |
-| BOUND-03 | TBD | Pending |
-| BOUND-04 | TBD | Pending |
-| BOUND-05 | TBD | Pending |
-| BOUND-06 | TBD | Pending |
-| BOUND-07 | TBD | Pending |
-| DATA-01 | TBD | Pending |
-| DATA-02 | TBD | Pending |
-| DATA-03 | TBD | Pending |
-| DATA-04 | TBD | Pending |
-| DATA-05 | TBD | Pending |
-| DATA-06 | TBD | Pending |
-| DATA-07 | TBD | Pending |
-| DATA-08 | TBD | Pending |
-| BUILD-01 | TBD | Pending |
-| BUILD-02 | TBD | Pending |
-| BUILD-03 | TBD | Pending |
-| BUILD-04 | TBD | Pending |
-| BUILD-05 | TBD | Pending |
-| TEST-01 | TBD | Pending |
-| TEST-02 | TBD | Pending |
-| TEST-03 | TBD | Pending |
-| TEST-04 | TBD | Pending |
-| TEST-05 | TBD | Pending |
-| TEST-06 | TBD | Pending |
-| DIAG-01 | TBD | Pending |
-| DIAG-02 | TBD | Pending |
-| DIAG-03 | TBD | Pending |
-| SIGN-01 | TBD | Pending |
-| SIGN-02 | TBD | Pending |
-| SIGN-03 | TBD | Pending |
-| SIGN-04 | TBD | Pending |
-| SIGN-05 | TBD | Pending |
-| SHELL-01 | TBD | Pending |
-| SHELL-02 | TBD | Pending |
-| SHELL-03 | TBD | Pending |
-| SHELL-04 | TBD | Pending |
-| SHELL-05 | TBD | Pending |
-| SHELL-06 | TBD | Pending |
-| SHELL-07 | TBD | Pending |
-| POST-01 | TBD | Pending |
-| POST-02 | TBD | Pending |
-| POST-03 | TBD | Pending |
-| POST-04 | TBD | Pending |
-| POST-05 | TBD | Pending |
+| IDA-01 | Phase 5 | Pending |
+| IDA-02 | Phase 5 | Pending |
+| IDA-03 | Phase 5 | Pending |
+| IDA-04 | Phase 5 | Pending |
+| IDA-05 | Phase 5 | Pending |
+| IDA-06 | Phase 5 | Pending |
+| CRED-01 | Phase 5 | Pending |
+| CRED-02 | Phase 5 | Pending |
+| CRED-03 | Phase 9 | Pending |
+| CRED-04 | Phase 9 | Pending |
+| CRED-05 | Phase 9 | Pending |
+| BOUND-01 | Phase 6 | Pending |
+| BOUND-02 | Phase 6 | Pending |
+| BOUND-03 | Phase 6 | Pending |
+| BOUND-04 | Phase 6 | Pending |
+| BOUND-05 | Phase 6 | Pending |
+| BOUND-06 | Phase 6 | Pending |
+| BOUND-07 | Phase 6 | Pending |
+| DATA-01 | Phase 4 | Pending |
+| DATA-02 | Phase 4 | Pending |
+| DATA-03 | Phase 4 | Pending |
+| DATA-04 | Phase 4 | Pending |
+| DATA-05 | Phase 4 | Pending |
+| DATA-06 | Phase 4 | Pending |
+| DATA-07 | Phase 11 | Pending |
+| DATA-08 | Phase 4 | Pending |
+| BUILD-01 | Phase 2 | Pending |
+| BUILD-02 | Phase 2 | Pending |
+| BUILD-03 | Phase 2 | Pending |
+| BUILD-04 | Phase 2 | Pending |
+| BUILD-05 | Phase 2 | Pending |
+| TEST-01 | Phase 3 | Pending |
+| TEST-02 | Phase 8 | Pending |
+| TEST-03 | Phase 8 | Pending |
+| TEST-04 | Phase 8 | Pending |
+| TEST-05 | Phase 8 | Pending |
+| TEST-06 | Phase 8 | Pending |
+| DIAG-01 | Phase 8 | Pending |
+| DIAG-02 | Phase 8 | Pending |
+| DIAG-03 | Phase 8 | Pending |
+| SIGN-01 | Phase 11 | Pending |
+| SIGN-02 | Phase 11 | Pending |
+| SIGN-03 | Phase 11 | Pending |
+| SIGN-04 | Phase 11 | Pending |
+| SIGN-05 | Phase 11 | Pending |
+| SHELL-01 | Phase 7 | Pending |
+| SHELL-02 | Phase 7 | Pending |
+| SHELL-03 | Phase 7 | Pending |
+| SHELL-04 | Phase 7 | Pending |
+| SHELL-05 | Phase 7 | Pending |
+| SHELL-06 | Phase 7 | Pending |
+| SHELL-07 | Phase 7 | Pending |
+| POST-01 | Phase 10 | Pending |
+| POST-02 | Phase 10 | Pending |
+| POST-03 | Phase 10 | Pending |
+| POST-04 | Phase 10 | Pending |
+| POST-05 | Phase 10 | Pending |
 
 **Coverage:**
 - v1 requirements: 57 total
-- Mapped to phases: 0 (roadmap pending)
-- Unmapped: 57 ⚠️
+- Mapped to phases: 57
+- Unmapped: 0
+- Mapped to more than one phase: 0
+
+Phase 1 (Land and Stabilize) is an enabling gate with no mapped v1 requirement; it protects the baseline every mapped phase depends on.
 
 ---
 *Requirements defined: 2026-10-21*
-*Last updated: 2026-10-21 after initial definition*
+*Last updated: 2026-10-21 after roadmap creation*
