@@ -447,7 +447,7 @@ Ordering constraints that are **hard**, not stylistic:
 
 Soft/parallelisable: SC#5 docs edits can be prepared while worktree builds run, since the docs commit does not affect the build.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 **Q1 — Does any in-app action actually recreate `.ads-diagram-wrapper`?**
 What we know: one mount point (`Index.razor:34`), no `@key`, both routes on `Index.razor`, collapse toggles a sibling `Sider` (HIGH). What is unclear: whether Blazor/AntDesign's `Content` re-render can replace the wrapper element in practice (MEDIUM). Recommendation: two-minute probe before planning the browser step — in DevTools console `window.__probe = document.querySelector('.ads-diagram-wrapper')`, collapse and expand the rail, then `document.querySelector('.ads-diagram-wrapper') === window.__probe`. `true` → the documented trigger is wrong and the harness is the only reachable proof; `false` → D-14 part 1 works as written. Either outcome is acceptable; only the *claim* changes.
@@ -463,6 +463,14 @@ No in-repo evidence of protection (no CODEOWNERS, no PR template, no required ch
 
 **Q5 — Does the harness's synthetic `PointerEvent` reproduce WebView2/Chrome behaviour faithfully enough?**
 Synthetic events exercise the listener logic and node resolution (which is the defect), but not real hit-testing or pointer capture (MEDIUM). Acceptable for this phase because TEST-04 owns the real-browser regression; state the limitation in the phase summary.
+
+### Resolution dispositions
+
+- **Q1 → plan 01-07 Task 3.** The probe is a required task step; the summary must record `Remount probe:` as `true`, `false`, or `blocked`, and the automated check refuses `SC#4 primary proof: in-app` unless the probe returned `false`. The claim, not the fix, is what varies.
+- **Q2 → plan 01-04 Task 2** (banner-only edits to `docs/v1-plan.md` and `docs/azure-refresh-plan.md`) **and plan 01-04 `<objective>`**, which states the chosen reading: correct statements asserted as current truth, mark dated records as historical. Plan 01-05 Task 3 proves both banners and that no other line moved.
+- **Q3 → plan 01-07 Task 3.** The blocked case is first-class: `Real-app drop: blocked` plus the placeholder-`ClientId` reason, with the plan 01-02 harness transcript named as the primary proof. The harness-only path is chosen; the browser smoke is a human check, never an automated one.
+- **Q4 → plan 01-06 Task 1 and plan 01-08 Task 1.** No fallback branch strategy is introduced: both pushes run `git merge-base --is-ancestor` first and stop on any rejection, reporting the remote message (D-12). Nothing rebases, and no force/lease refspec exists anywhere in the plan set.
+- **Q5 → plan 01-02 Task 2 and plan 01-07 Task 3.** The synthetic-event limitation is stated in both summaries; the harness asserts method name, stencil key and node identity rather than pixel values, and Phase 8's TEST-04 keeps the real-browser regression.
 
 ## Validation Architecture
 
