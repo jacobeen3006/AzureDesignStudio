@@ -38,24 +38,24 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Dropping a stencil by pointer still reaches the canvas after the drawer remounts, with no console error.
   5. README and AGENTS report 11 projects and Entra ID work+personal auth (not B2C), and the publisher legal name plus signing path (Azure Artifact Signing, OV certificate, or controlled-pilot PFX) is recorded in PROJECT.md Key Decisions.
 
-**Plans**: 1/8 plans executed
+**Plans**: 6/8 plans executed
 **Wave 1**
 - [x] 01-01-PLAN.md — Core topic: domain slice plus its tests, `.gitignore` hygiene, five tracked artefacts removed, proved in a worktree at 753
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 01-02-PLAN.md — Remount-safe pointer zone with a throwaway headless harness BEFORE/AFTER transcript
+- [x] 01-02-PLAN.md — Remount-safe pointer zone with a throwaway headless harness BEFORE/AFTER transcript
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 01-03-PLAN.md — Shell topic: shell components, stencil catalog, restored fallback icon, Desktop host, proved at 755
+- [x] 01-03-PLAN.md — Shell topic: shell components, stencil catalog, restored fallback icon, Desktop host, proved at 755
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 01-04-PLAN.md — Docs truth: counts, auth, architecture tree, historical banners, publisher decision recorded
+- [x] 01-04-PLAN.md — Docs truth: counts, auth, architecture tree, historical banners, publisher decision recorded
 
 **Wave 5** *(blocked on Wave 4 completion)*
-- [ ] 01-05-PLAN.md — Docs topic commit with worktree proof and the SC#5 audit
+- [x] 01-05-PLAN.md — Docs topic commit with worktree proof and the SC#5 audit
 
 **Wave 6** *(blocked on Wave 5 completion)*
-- [ ] 01-06-PLAN.md — Two pushes (pre-land tip by refspec, then head), the recovery bundle, and the recorded `BUNDLE_SHA`
+- [x] 01-06-PLAN.md — Two pushes (pre-land tip by refspec, then head), the recovery bundle, and the recorded `BUNDLE_SHA`
 
 **Wave 7** *(blocked on Wave 6 completion)*
 - [ ] 01-07-PLAN.md — Fresh-clone audit against `BUNDLE_SHA`, final suite run, SC#4 human verification and phase evidence
@@ -225,7 +225,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Land and Stabilize | 1/8 | In Progress | - |
+| 1. Land and Stabilize | 6/8 | In Progress | - |
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
 | 3. Server Foundation and Integration Harness | 0/TBD | Not started | - |
 | 4. Database Durability | 0/TBD | Not started | - |
