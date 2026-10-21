@@ -21,6 +21,13 @@
     "category": 0
   },
   {
+    "key": "subnet",
+    "name": "subnet",
+    "iconPath": "assets/azure/subnet.svg",
+    "label": "Subnet",
+    "category": 0
+  },
+  {
     "key": "virtual-machine",
     "name": "vm",
     "iconPath": "assets/azure/virtual-machine.svg",
@@ -88,14 +95,14 @@
     "name": "cluster1",
     "iconPath": "assets/azure/aks.svg",
     "label": "AKS",
-    "category": 1
+    "category": 6
   },
   {
     "key": "apim",
     "name": "api-management",
     "iconPath": "assets/azure/apim.svg",
     "label": "API Management",
-    "category": 1
+    "category": 7
   },
   {
     "key": "app-gateway",
@@ -155,21 +162,21 @@
     "name": "cae",
     "iconPath": "assets/azure/container-apps-environment.svg",
     "label": "Container Apps Environment",
-    "category": 1
+    "category": 6
   },
   {
     "key": "container-app",
     "name": "ca",
     "iconPath": "assets/azure/container-app.svg",
     "label": "Container App",
-    "category": 1
+    "category": 6
   },
   {
     "key": "container-apps-job",
     "name": "caj",
     "iconPath": "assets/azure/container-apps-job.svg",
     "label": "Container Apps Job",
-    "category": 1
+    "category": 6
   },
   {
     "key": "availability-set",
@@ -190,49 +197,49 @@
     "name": "acr",
     "iconPath": "assets/azure/container-registry.svg",
     "label": "Container Registry",
-    "category": 3
+    "category": 6
   },
   {
     "key": "service-bus",
     "name": "sb",
     "iconPath": "assets/azure/service-bus.svg",
     "label": "Service Bus",
-    "category": 4
+    "category": 7
   },
   {
     "key": "event-hubs",
     "name": "eh",
     "iconPath": "assets/azure/event-hubs.svg",
     "label": "Event Hubs",
-    "category": 4
+    "category": 7
   },
   {
     "key": "event-grid",
     "name": "eg",
     "iconPath": "assets/azure/event-grid.svg",
     "label": "Event Grid",
-    "category": 4
+    "category": 7
   },
   {
     "key": "key-vault",
     "name": "kv",
     "iconPath": "assets/azure/key-vault.svg",
     "label": "Key Vault",
-    "category": 4
+    "category": 8
   },
   {
     "key": "azure-openai",
     "name": "openai",
     "iconPath": "assets/azure/azure-openai.svg",
     "label": "Azure OpenAI",
-    "category": 4
+    "category": 9
   },
   {
     "key": "fabric-capacity",
     "name": "fabric",
     "iconPath": "assets/azure/fabric-capacity.svg",
     "label": "Fabric Capacity",
-    "category": 4
+    "category": 9
   },
   {
     "key": "nat-gateway",
@@ -267,7 +274,7 @@
     "name": "aci",
     "iconPath": "assets/azure/azure-container-instance.svg",
     "label": "Container Instance",
-    "category": 1
+    "category": 6
   },
   {
     "key": "virtual-machine-scale-set",
@@ -288,62 +295,62 @@
     "name": "aisearch",
     "iconPath": "assets/azure/ai-search.svg",
     "label": "Azure AI Search",
-    "category": 2
+    "category": 9
   },
   {
     "key": "data-factory",
     "name": "adf",
     "iconPath": "assets/azure/data-factory.svg",
     "label": "Data Factory",
-    "category": 2
+    "category": 7
   },
   {
     "key": "recovery-services-vault",
     "name": "rsv",
     "iconPath": "assets/azure/recovery-services-vault.svg",
     "label": "Recovery Services Vault",
-    "category": 4
+    "category": 8
   },
   {
     "key": "log-analytics-workspace",
     "name": "law",
     "iconPath": "assets/azure/log-analytics-workspace.svg",
     "label": "Log Analytics Workspace",
-    "category": 4
+    "category": 8
   },
   {
     "key": "logic-apps",
     "name": "logic",
     "iconPath": "assets/azure/logic-apps.svg",
     "label": "Logic App",
-    "category": 4
+    "category": 1
   },
   {
     "key": "static-web-app",
     "name": "swa",
     "iconPath": "assets/azure/static-web-app.svg",
     "label": "Static Web App",
-    "category": 4
+    "category": 1
   },
   {
     "key": "application-insights",
     "name": "appi",
     "iconPath": "assets/azure/application-insights.svg",
     "label": "Application Insights",
-    "category": 4
+    "category": 8
   },
   {
     "key": "app-configuration",
     "name": "appconf",
     "iconPath": "assets/azure/app-configuration.svg",
     "label": "App Configuration",
-    "category": 4
+    "category": 7
   },
   {
     "key": "signalr",
     "name": "signalr",
     "iconPath": "assets/azure/signalr.svg",
     "label": "SignalR",
-    "category": 4
+    "category": 7
   }
 ]

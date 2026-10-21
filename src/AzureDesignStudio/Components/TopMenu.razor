@@ -12,9 +12,10 @@
 @inject IAdsBicepDecompiler _adsBicepDecompiler
 @inject AdsHostFeatures features
 @inject IServiceProvider Services
+@inject AzureDesignStudio.Services.AdsCommandService commandService
 
 <div>
-    <Menu @ref="@topMenu" Mode="@MenuMode.Horizontal" OnMenuItemClicked="HandleMenuItemClicked">        
+    <Menu @ref="@topMenu" Class="ads-top-menu" Mode="@MenuMode.Horizontal" OnMenuItemClicked="HandleMenuItemClicked">
         <div title="User account">
             <AuthorizeView>
                 <NotAuthorized>

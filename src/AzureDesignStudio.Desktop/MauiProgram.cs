@@ -115,6 +115,7 @@ public static class MauiProgram
         builder.Services.AddAntDesign();
         builder.Services.AddBlazorApplicationInsights();
         builder.Services.AddSingleton<AdsContext>();
+        builder.Services.AddSingleton<AzureDesignStudio.Services.AdsCommandService>();
         builder.Services.AddAutoMapper(typeof(AzureNodeProfile));
         builder.Services.AddAdsBicepDecompiler();
         builder.Services.AddSingleton<TenantScanSession>();

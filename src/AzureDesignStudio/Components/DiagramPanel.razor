@@ -10,6 +10,9 @@
 @inject IJSRuntime JS
 
 <div class="ads-diagram-wrapper" ondragover="event.preventDefault();" ondrop="event.preventDefault();">
+    <div class="ads-drop-overlay" aria-hidden="true">
+        <span>Drop to place the resource</span>
+    </div>
     <CascadingValue Value="@diagram">
         <div class="ads-diagram-container">
             <DiagramCanvas Class="ads-diagram-canvas"></DiagramCanvas>

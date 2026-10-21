@@ -1,15 +1,13 @@
-﻿.ads-toggle-sider-button {
+.ads-toggle-sider-button {
     height: 44px;
-    float: right;
+    flex: 0 0 44px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--ads-border);
 }
 
-    .ads-toggle-sider-button > div {
-        border: 1px solid transparent;
-        padding: 5px 8px;
-        font-size: 24px;
-        line-height: 32px;
+    .ads-toggle-sider-button .ads-rail-icon-btn:hover {
+        color: var(--ads-accent);
     }
-
-        .ads-toggle-sider-button > div:hover {
-            color: #1c92fe;
-        }

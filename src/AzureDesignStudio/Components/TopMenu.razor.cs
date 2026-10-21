@@ -18,6 +18,31 @@ namespace AzureDesignStudio.Components
         private DrawerRef<string>? drawerRef;
         private string openedDrawer = string.Empty;
         private string? imgUrl = null;
+
+        protected override void OnInitialized()
+        {
+            var commands = new List<AdsCommand>
+            {
+                new("save", "Save / load design", "Open the save and load drawer", "Design", "▣", OpenSaveDrawer),
+                new("export", "Export the design", "ARM, Bicep, image, or .ads.json", "Design", "⇪", OpenExportDrawer),
+                new("validate", "Validate the design", "Check rules and blocked resources", "Design", "✓", OpenValidationDrawer),
+                new("cost", "Estimate monthly cost", "Price the nodes on the canvas", "FinOps", "$", OpenCostDrawer),
+                new("compare", "Compare saved designs", "Side-by-side design diff", "Analyze", "⇄", OpenCompareDrawer),
+                new("import", "Import a text design", "Paste and validate .ads.json", "Design", "↧", OpenImportDrawer),
+                new("names", "Suggest globally unique names", "Naming for DNS-backed types", "Design", "#", OpenNamingDrawer),
+                new("guardrails", "Do-not-touch guardrails", "Protected scopes, tags, and types", "Safety", "⛨", OpenGuardrailsDrawer),
+                new("user", "Account", "Sign-in and identity", "Account", "◉", OpenUserDrawer),
+            };
+
+            if (features.TenantScanLabel is { } label && features.OpenTenantScan is { } openScan)
+            {
+                commands.Add(new AdsCommand("scan", label, "Scan a tenant and browse inventory",
+                    "Analyze", "◈", () => openScan(Services!)));
+            }
+
+            commandService.RegisterRange(commands);
+        }
+
         private async Task HandleMenuItemClicked(MenuItem menuItem)
         {
             switch (menuItem.Key)

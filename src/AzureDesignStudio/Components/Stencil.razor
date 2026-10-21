@@ -3,8 +3,8 @@
 @inject IConfiguration configuration
 
 <div title="@Model.Label" style="display: inline-block;">
-    <div class="ads-stencil" draggable="true" data-stencil-key="@Model.Key">
-        <img src="@(configuration["ResourceRoot"] + Model.IconPath)" alt=@Model.Label />
+    <div class="ads-stencil" draggable="false" data-stencil-key="@Model.Key">
+        <img src="@(configuration["ResourceRoot"] + Model.IconPath)" alt=@Model.Label draggable="false" />
         <div class="ads-stencil-label">@Model.Label</div>
     </div>
 </div>

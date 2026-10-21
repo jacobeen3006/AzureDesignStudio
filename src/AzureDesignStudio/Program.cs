@@ -69,6 +69,7 @@ builder.Services.AddGrpcClient<Cost.CostClient>("CostClient", o =>
 
 builder.Services.AddAntDesign();
 builder.Services.AddSingleton<AdsContext>();
+builder.Services.AddSingleton<AzureDesignStudio.Services.AdsCommandService>();
 // Server redirect sign-in flow (AddMsalAuthentication + /authentication endpoints);
 // no host overrides needed on WASM.
 builder.Services.AddSingleton<AdsHostAuth>();

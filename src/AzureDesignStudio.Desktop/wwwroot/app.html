@@ -3,19 +3,29 @@
 
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Azure Design Studio</title>
     <base href="/" />
-    <link href="_content/AntDesign/css/ant-design-blazor.css" rel="stylesheet" />
+    <script>
+        (function () {
+            try {
+                var mode = localStorage.getItem('ads.theme') || 'system';
+                var dark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                document.documentElement.setAttribute('data-ads-theme', dark ? 'dark' : 'light');
+            } catch (e) { }
+        })();
+    </script>
+    <link id="antd-theme" href="_content/AntDesign/css/ant-design-blazor.css" rel="stylesheet" />
     <link href="_content/Z.Blazor.Diagrams/style.css" rel="stylesheet" />
     <link href="_content/Z.Blazor.Diagrams/default.styles.css" rel="stylesheet" />
     <link href="css/prism.css?v=1.28.0" rel="stylesheet" />
     <link href="css/app.css" rel="stylesheet" />
     <link href="AzureDesignStudio.styles.css" rel="stylesheet" />
     <link href="AzureDesignStudio.Desktop.styles.css" rel="stylesheet" />
+    <link href="css/ads-tokens.css" rel="stylesheet" />
 </head>
 
-<body style="background-image:linear-gradient(to top left, #36A4FF, #FFFFFF);">
+<body>
     <div id="app">
         <div style="display: flex; justify-content: center; align-items: center; flex-direction: column; min-height: 420px; height: 100%;">
             <div style="padding:100px 0;height:128px;"></div>

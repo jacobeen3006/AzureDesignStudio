@@ -2,6 +2,7 @@
 using AzureDesignStudio.Core;
 using AzureDesignStudio.Core.DTO;
 using AzureDesignStudio.Core.Models;
+using AzureDesignStudio.Core.Network;
 using AzureDesignStudio.Services;
 using Blazor.Diagrams.Core;
 using Blazor.Diagrams.Core.Events;
@@ -45,6 +46,7 @@ namespace AzureDesignStudio.Components
             {
                 dropRef = DotNetObjectReference.Create(this);
                 await JS.InvokeVoidAsync("AdsDropZone.init", dropRef, ".ads-diagram-wrapper");
+                await JS.InvokeVoidAsync("AdsStencilDrag.init", ".ads-diagram-wrapper");
             }
         }
 
@@ -87,6 +89,15 @@ namespace AzureDesignStudio.Components
 
             diagram.History.EndGesture();
         }
+        /// <summary>Azure presets whose subnet an appliance owns. Dropping the appliance
+        /// directly on a VNet provisions the missing subnet instead of failing the drop.</summary>
+        private static string? DedicatedSubnetName(NodeModel node) => node switch
+        {
+            AzureFirewallModel => "AzureFirewallSubnet",
+            BastionsModel => "AzureBastionSubnet",
+            _ => null,
+        };
+
         /// <summary>
         /// Add a node to a group based on the position of the node.
         /// </summary>
@@ -141,15 +152,48 @@ namespace AzureDesignStudio.Components
                     }
                     node.SetPosition(position.X, position.Y);
                     var overlappedGroup = GetOverlappedGroup(node);
+                    SubnetModel? provisionedSubnet = null;
+                    VirtualNetworkModel? provisionedVnet = null;
+                    if (overlappedGroup is VirtualNetworkModel vnet
+                        && DedicatedSubnetName(node) is { } dedicatedName)
+                    {
+                        var existing = vnet.Subnets.FirstOrDefault(
+                            s => s.Name.Equals(dedicatedName, StringComparison.OrdinalIgnoreCase));
+                        if (existing is not null)
+                        {
+                            overlappedGroup = existing;
+                        }
+                        else
+                        {
+                            provisionedVnet = vnet;
+                            provisionedSubnet = new SubnetModel
+                            {
+                                Name = dedicatedName,
+                                AddressPrefix = vnet.NextFreeSubnetPrefix(),
+                            };
+                            overlappedGroup = provisionedSubnet;
+                        }
+                    }
 
                     var (result, message) = ((IAzureNode)node).IsDrappable(overlappedGroup!);
                     if (!result)
                     {
-                        messageService.Error(message);
+                        messageService.Error(new MessageConfig
+                        {
+                            Content = message,
+                            Key = "ads-drop-error",
+                            Duration = 5
+                        });
                         return;
                     }
                     diagram.History.Capture(() => diagram.Batch(() =>
                     {
+                        if (provisionedSubnet is not null && provisionedVnet is not null)
+                        {
+                            provisionedVnet.AddSubnet(provisionedSubnet);
+                            diagram.Groups.Add(provisionedSubnet);
+                            diagram.History.RecordChildMembership(provisionedVnet, provisionedSubnet, added: true);
+                        }
                         if (node is GroupModel g)
                         {
                             diagram.Groups.Add(g);
@@ -163,8 +207,12 @@ namespace AzureDesignStudio.Components
                         {
                             diagram.History.RecordChildMembership(overlappedGroup!, node, added: true, previousPosition);
                         }
-                        RefreshGroup(overlappedGroup);
+                        RefreshGroup(provisionedSubnet?.Group ?? overlappedGroup);
                     }));
+                    if (provisionedSubnet is not null)
+                    {
+                        messageService.Info($"{provisionedSubnet.Name} was created automatically in {provisionedVnet!.Name}.");
+                    }
                 }
                 else
                 {

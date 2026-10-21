@@ -1,0 +1,80 @@
+@implements IDisposable
+@using AzureDesignStudio.Services
+@using Blazor.Diagrams.Core.Extensions
+@using Blazor.Diagrams.Core.Models
+@using Blazor.Diagrams.Core.Models.Base
+@inject AdsContext adsContext
+
+<div class="ads-statusbar">
+    <span class="ads-status-dot" aria-hidden="true"></span>
+    <span class="ads-status-strong">@DesignName</span>
+    <span class="ads-status-sep" aria-hidden="true"></span>
+    <span>@diagram.Nodes.Count resources</span>
+    <span>@diagram.Links.Count links</span>
+    <span>@diagram.Groups.Count frames</span>
+    <span class="ads-status-sep" aria-hidden="true"></span>
+    <span>@selectedCount selected</span>
+    <span class="ads-status-spacer"></span>
+    <span class="ads-status-muted">Local workspace</span>
+    <span class="ads-status-sep" aria-hidden="true"></span>
+    <span class="ads-status-zoom">@ZoomPercent%</span>
+</div>
+
+@code {
+    private AzureDesignStudio.Services.AdsDiagram diagram = null!;
+    private int selectedCount;
+
+    private string DesignName => string.IsNullOrWhiteSpace(adsContext.CurrentDesignName)
+        ? "Untitled design"
+        : adsContext.CurrentDesignName;
+
+    private int ZoomPercent => (int)Math.Round(diagram.Zoom * 100);
+
+    protected override void OnInitialized()
+    {
+        diagram = adsContext.Diagram;
+        diagram.Nodes.Added += OnNodeChanged;
+        diagram.Nodes.Removed += OnNodeChanged;
+        diagram.Links.Added += OnLinkChanged;
+        diagram.Links.Removed += OnLinkChanged;
+        diagram.Groups.Added += OnGroupChanged;
+        diagram.Groups.Removed += OnGroupChanged;
+        diagram.SelectionChanged += OnSelectionChanged;
+        diagram.ZoomChanged += OnZoomChanged;
+        RefreshSelection();
+    }
+
+    private void OnNodeChanged(NodeModel _) => Refresh();
+    private void OnLinkChanged(BaseLinkModel _) => Refresh();
+    private void OnGroupChanged(GroupModel _) => Refresh();
+    private void OnZoomChanged() => Refresh();
+
+    private void OnSelectionChanged(SelectableModel model)
+    {
+        RefreshSelection();
+        Refresh();
+    }
+
+    private void RefreshSelection() => selectedCount = diagram.GetSelectedModels().Count();
+
+    private void Refresh()
+    {
+        _ = InvokeAsync(() =>
+        {
+            RefreshSelection();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        diagram.Nodes.Added -= OnNodeChanged;
+        diagram.Nodes.Removed -= OnNodeChanged;
+        diagram.Links.Added -= OnLinkChanged;
+        diagram.Links.Removed -= OnLinkChanged;
+        diagram.Groups.Added -= OnGroupChanged;
+        diagram.Groups.Removed -= OnGroupChanged;
+        diagram.SelectionChanged -= OnSelectionChanged;
+        diagram.ZoomChanged -= OnZoomChanged;
+    }
+}

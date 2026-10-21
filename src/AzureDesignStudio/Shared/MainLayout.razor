@@ -1,21 +1,43 @@
-﻿@using AzureDesignStudio.Components
+@using AzureDesignStudio.Components
+@using AzureDesignStudio.Services
 @inherits LayoutComponentBase
+@inject AdsCommandService Commands
 
 <Message />
-<Layout>
-    <Header Class="ads-header">
-        <Row>
-            <Col Span="8">
-                <div class="ads-logo"><img src="icon-192.png" /></div>
+
+<div class="ads-shell">
+    <header class="ads-header">
+        <div class="ads-brand">
+            <div class="ads-logo">
+                <img src="icon-192.png" alt="Azure Design Studio" />
+            </div>
+            <div class="ads-brand-copy">
                 <div class="ads-site-title">Azure Design Studio</div>
-            </Col>
-            <Col Span="8" Offset="8">
-                <TopMenu></TopMenu>
-            </Col>
-        </Row>
-    </Header>
-    <Content>@Body</Content>
-</Layout>
+                <div class="ads-site-subtitle">Design · Analyze · Deploy</div>
+            </div>
+        </div>
+
+        <div class="ads-header-actions">
+            <button type="button" class="ads-palette-trigger" title="Open command palette (Ctrl+K)"
+                    @onclick="OpenPalette">
+                <span class="ads-palette-search-icon" aria-hidden="true">⌕</span>
+                <span class="ads-palette-trigger-text">Search commands</span>
+                <kbd class="ads-kbd">Ctrl K</kbd>
+            </button>
+            <ThemeToggle />
+            <TopMenu />
+        </div>
+    </header>
+
+    <main class="ads-main">@Body</main>
+
+    <footer class="ads-statusbar-footer">
+        <StatusBar />
+    </footer>
+</div>
+
+<CommandPalette />
 
 @code {
+    private void OpenPalette() => Commands.RequestPalette();
 }

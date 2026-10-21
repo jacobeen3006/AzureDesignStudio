@@ -1,12 +1,40 @@
 ﻿.ads-stencil {
-    display: table-cell;
-    width: 69px;
-    height: 71px;
-    padding: 6px 6px 4px;
+    display: inline-block;
+    width: 76px;
+    height: 88px;
+    padding: 6px 4px 4px;
+    border-radius: 7px;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.ads-stencil > img {
+    -webkit-user-drag: none;
+}
+
+.ads-drag-ghost {
+    position: fixed;
+    z-index: 3000;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    padding: 6px 10px;
+    border: 1px solid var(--ads-accent);
+    border-radius: 8px;
+    background: var(--ads-surface-3);
+    color: var(--ads-text);
+    box-shadow: var(--ads-shadow-2);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+body.ads-dragging {
+    cursor: grabbing;
 }
 
     .ads-stencil:hover {
-        background-color: lightgrey;
+        background-color: var(--ads-surface-2);
     }
 
     .ads-stencil > img {
@@ -19,12 +47,14 @@
 
 .ads-stencil-label {
     text-align: center;
-    font-size: 11px;
+    font-size: 10px;
     overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    width: 69px;
-    height: 26px;
-    line-height: 26px;
+    white-space: normal;
+    width: 76px;
+    height: 30px;
+    line-height: 15px;
     margin: auto;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
 }

@@ -5,17 +5,20 @@
 @implements IDisposable
 @inject AzureDesignStudio.Services.AdsContext adsContext
 
-<div class="ads-navigator" @onpointerdown:stopPropagation="true" @onpointerdown="OnPointerDown"
-     @onpointermove="OnPointerMove" @onpointerup="OnPointerUp" @onpointerleave="OnPointerUp">
-    <svg width="@Width" height="@Height">
-        @foreach (var rect in ModelRects)
-        {
-            <rect class="@(rect.IsGroup ? "ads-navigator-group" : "ads-navigator-node")"
-                  x="@rect.X" y="@rect.Y" width="@rect.W" height="@rect.H"></rect>
-        }
-        <rect class="ads-navigator-viewport" x="@Viewport.X" y="@Viewport.Y" width="@Viewport.W" height="@Viewport.H"></rect>
-    </svg>
-</div>
+@if (diagram.Nodes.Count + diagram.Groups.Count > 0)
+{
+    <div class="ads-navigator" @onpointerdown:stopPropagation="true" @onpointerdown="OnPointerDown"
+         @onpointermove="OnPointerMove" @onpointerup="OnPointerUp" @onpointerleave="OnPointerUp">
+        <svg width="@Width" height="@Height">
+            @foreach (var rect in ModelRects)
+            {
+                <rect class="@(rect.IsGroup ? "ads-navigator-group" : "ads-navigator-node")"
+                      x="@rect.X" y="@rect.Y" width="@rect.W" height="@rect.H"></rect>
+            }
+            <rect class="ads-navigator-viewport" x="@Viewport.X" y="@Viewport.Y" width="@Viewport.W" height="@Viewport.H"></rect>
+        </svg>
+    </div>
+}
 
 @code {
     private const double Width = 200;
@@ -59,8 +62,17 @@
         tracked.Clear();
     }
 
-    private void OnModelAdded(MovableModel model) => Track(model);
-    private void OnModelRemoved(MovableModel model) => Untrack(model);
+    private void OnModelAdded(MovableModel model)
+    {
+        Track(model);
+        OnStateChanged();
+    }
+
+    private void OnModelRemoved(MovableModel model)
+    {
+        Untrack(model);
+        OnStateChanged();
+    }
 
     private void Track(MovableModel model)
     {

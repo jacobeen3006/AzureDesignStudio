@@ -1,0 +1,181 @@
+@implements IDisposable
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using AzureDesignStudio.Services
+@inject AdsCommandService Commands
+@inject IJSRuntime JS
+
+@if (open)
+{
+    <div class="ads-palette-backdrop" @onclick="Close">
+        <div class="ads-palette" role="dialog" aria-modal="true" aria-label="Command palette"
+             @onclick:stopPropagation="true">
+            <div class="ads-palette-search">
+                <span class="ads-palette-search-icon" aria-hidden="true">⌕</span>
+                <input @ref="input"
+                       value="@query"
+                       @oninput="OnInput"
+                       @onkeydown="OnKeyDown"
+                       placeholder="Search commands, surfaces, and actions…"
+                       aria-label="Search commands" />
+                <kbd class="ads-kbd">Esc</kbd>
+            </div>
+
+            <div class="ads-palette-list" role="listbox">
+                @if (filtered.Count == 0)
+                {
+                    <div class="ads-palette-empty">
+                        No command matches “@query”.
+                    </div>
+                }
+                else
+                {
+                    @for (var i = 0; i < filtered.Count; i++)
+                    {
+                        var command = filtered[i];
+                        var selected = i == active;
+                        <button type="button"
+                                role="option"
+                                aria-selected="@selected"
+                                class="ads-palette-item @(selected ? "active" : "")"
+                                @onclick="() => RunAsync(command)">
+                            <span class="ads-palette-glyph" aria-hidden="true">@command.Glyph</span>
+                            <span class="ads-palette-copy">
+                                <span class="ads-palette-label">@command.Label</span>
+                                <span class="ads-palette-description">@command.Description</span>
+                            </span>
+                            <span class="ads-palette-group-tag">@command.Group</span>
+                        </button>
+                    }
+                }
+            </div>
+
+            <div class="ads-palette-footer">
+                <span><kbd class="ads-kbd">↑</kbd><kbd class="ads-kbd">↓</kbd> move</span>
+                <span><kbd class="ads-kbd">Enter</kbd> run</span>
+                <span><kbd class="ads-kbd">Esc</kbd> close</span>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool open;
+    private bool focusPending;
+    private string query = string.Empty;
+    private int active;
+    private List<AdsCommand> filtered = new();
+    private ElementReference input;
+    private DotNetObjectReference<CommandPalette>? self;
+
+    protected override void OnInitialized()
+    {
+        Commands.PaletteRequested += OnPaletteRequested;
+        Commands.Changed += OnCommandsChanged;
+        Filter();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            self = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("AdsShortcuts.init", self);
+        }
+
+        if (focusPending)
+        {
+            focusPending = false;
+            await input.FocusAsync();
+        }
+    }
+
+    private void OnPaletteRequested()
+    {
+        _ = InvokeAsync(() =>
+        {
+            open = true;
+            query = string.Empty;
+            active = 0;
+            Filter();
+            focusPending = true;
+            StateHasChanged();
+        });
+    }
+
+    private void OnCommandsChanged()
+    {
+        _ = InvokeAsync(() =>
+        {
+            Filter();
+            StateHasChanged();
+        });
+    }
+
+    [JSInvokable]
+    public Task OpenFromShortcut() => InvokeAsync(OnPaletteRequested);
+
+    private void Close()
+    {
+        open = false;
+        query = string.Empty;
+        StateHasChanged();
+    }
+
+    private void OnInput(ChangeEventArgs args)
+    {
+        query = args.Value?.ToString() ?? string.Empty;
+        active = 0;
+        Filter();
+    }
+
+    private void Filter()
+    {
+        var q = query.Trim();
+        filtered = Commands.Commands
+            .Where(c => q.Length == 0
+                || c.Label.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || c.Description.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || c.Group.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || c.Key.Contains(q, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (active >= filtered.Count)
+            active = Math.Max(0, filtered.Count - 1);
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs args)
+    {
+        switch (args.Key)
+        {
+            case "Escape":
+                Close();
+                break;
+            case "ArrowDown":
+                if (filtered.Count > 0)
+                    active = (active + 1) % filtered.Count;
+                break;
+            case "ArrowUp":
+                if (filtered.Count > 0)
+                    active = (active - 1 + filtered.Count) % filtered.Count;
+                break;
+            case "Enter":
+                if (filtered.Count > 0)
+                    await RunAsync(filtered[active]);
+                break;
+        }
+    }
+
+    private async Task RunAsync(AdsCommand command)
+    {
+        Close();
+        await command.Execute();
+    }
+
+    public void Dispose()
+    {
+        Commands.PaletteRequested -= OnPaletteRequested;
+        Commands.Changed -= OnCommandsChanged;
+        self?.Dispose();
+    }
+}

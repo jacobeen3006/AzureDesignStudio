@@ -1,0 +1,54 @@
+@inject IJSRuntime JS
+
+<button class="ads-theme-toggle"
+        type="button"
+        title="@Title"
+        aria-label="@Title"
+        @onclick="CycleAsync">
+    <span aria-hidden="true">@Glyph</span>
+</button>
+
+@code {
+    private string mode = "system";
+
+    private string Glyph => mode switch
+    {
+        "light" => "☀",
+        "dark" => "☾",
+        _ => "◐"
+    };
+
+    private string Title => mode switch
+    {
+        "light" => "Theme: light (click for dark)",
+        "dark" => "Theme: dark (click for system)",
+        _ => "Theme: follow system (click for light)"
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        try
+        {
+            mode = await JS.InvokeAsync<string>("AdsTheme.get");
+            StateHasChanged();
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit is gone; nothing to update.
+        }
+    }
+
+    private async Task CycleAsync()
+    {
+        try
+        {
+            mode = await JS.InvokeAsync<string>("AdsTheme.cycle");
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+}

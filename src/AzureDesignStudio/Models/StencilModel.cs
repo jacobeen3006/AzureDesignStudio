@@ -16,13 +16,19 @@
         Compute,
         Database,
         Storage,
-        Others,
-        Gallery
+        /// <summary>Cross-cutting resources such as resource groups.</summary>
+        General,
+        Gallery,
+        Containers,
+        Integration,
+        SecurityAndOperations,
+        AiAndAnalytics
     }
 
     public record StencilPanelModel
     {
         public string Key { get; set; } = default!;
+        public string Name { get; set; } = default!;
         public string IconPath { get; set; } = default!;
         public StencilCategory Category { get; set; }
     }

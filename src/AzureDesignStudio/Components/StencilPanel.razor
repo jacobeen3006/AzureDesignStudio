@@ -5,7 +5,7 @@
 @inject AdsContext adsContext
 @inject ConfirmService confirmService
 
-<div>
+<div class="ads-stencil-panel">
     <div class="ads-icon-panel-container">
         <Tabs DefaultActiveKey="2" TabPosition="TabPosition.Left">
             <TabBarExtraContent>
@@ -16,7 +16,10 @@
                 {
                     <TabPane Key="@panel.Key">
                         <TabTemplate>
-                            <IconComponent IconPath="@panel.IconPath" />
+                            <span class="ads-category-tab">
+                                <IconComponent IconPath="@panel.IconPath" />
+                                <span class="ads-category-label">@panel.Name</span>
+                            </span>
                         </TabTemplate>
                         <ChildContent>
                             @foreach (var stencil in adsContext.AllStencils.Where(s => s.Category == panel.Category))
@@ -28,6 +31,10 @@
                 }
             </ChildContent>
         </Tabs>
+        <div class="ads-stencil-hint"
+             title="Subnets belong inside a Virtual Network; Web App needs an App Service Plan; App Gateway, Firewall and Bastion need a Subnet; Public IP cannot be inside a Virtual Network.">
+            Drag a resource onto the canvas. Some types need a parent frame.
+        </div>
     </div>
 </div>
 
@@ -37,38 +44,72 @@
         new StencilPanelModel()
         {
             Key = "1",
+            Name = "Gallery",
             IconPath = "assets/icons/gallery.svg",
             Category = StencilCategory.Gallery,
         },
         new StencilPanelModel()
         {
             Key = "2",
+            Name = "Networking",
             IconPath = "assets/icons/networking.svg",
             Category = StencilCategory.Networking,
         },
         new StencilPanelModel()
         {
             Key = "3",
+            Name = "Compute",
             IconPath = "assets/icons/compute.svg",
             Category = StencilCategory.Compute,
         },
         new StencilPanelModel()
         {
             Key = "4",
+            Name = "Containers",
+            IconPath = "assets/icons/containers.svg",
+            Category = StencilCategory.Containers,
+        },
+        new StencilPanelModel()
+        {
+            Key = "5",
+            Name = "Databases",
             IconPath = "assets/icons/database.svg",
             Category = StencilCategory.Database,
         },
         new StencilPanelModel()
         {
-            Key = "5",
+            Key = "6",
+            Name = "Storage",
             IconPath = "assets/icons/storage.svg",
             Category = StencilCategory.Storage,
         },
         new StencilPanelModel()
         {
-            Key = "6",
-            IconPath = "assets/icons/others.svg",
-            Category = StencilCategory.Others,
+            Key = "7",
+            Name = "Integration",
+            IconPath = "assets/icons/integration.svg",
+            Category = StencilCategory.Integration,
+        },
+        new StencilPanelModel()
+        {
+            Key = "8",
+            Name = "Security & Ops",
+            IconPath = "assets/icons/security.svg",
+            Category = StencilCategory.SecurityAndOperations,
+        },
+        new StencilPanelModel()
+        {
+            Key = "9",
+            Name = "AI & Analytics",
+            IconPath = "assets/icons/ai.svg",
+            Category = StencilCategory.AiAndAnalytics,
+        },
+        new StencilPanelModel()
+        {
+            Key = "10",
+            Name = "General",
+            IconPath = "assets/icons/general.svg",
+            Category = StencilCategory.General,
         }
     };
 

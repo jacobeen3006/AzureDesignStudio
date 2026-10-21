@@ -1,0 +1,176 @@
+@implements IDisposable
+@using AzureDesignStudio.Core.Models
+@using AzureDesignStudio.Services
+@using Blazor.Diagrams.Core.Extensions
+@using Blazor.Diagrams.Core.Models
+@using Blazor.Diagrams.Core.Models.Base
+@inject AdsContext adsContext
+@inject AdsCommandService Commands
+
+<div class="ads-inspector @(Collapsed ? "is-collapsed" : "")">
+    <div class="ads-inspector-head">
+        @if (!Collapsed)
+        {
+            <div class="ads-inspector-heading">
+                <div class="ads-inspector-eyebrow">Design</div>
+                <div class="ads-inspector-title" title="@DesignName">@DesignName</div>
+            </div>
+        }
+        <button type="button" class="ads-rail-toggle"
+                title="@(Collapsed ? "Open inspector" : "Collapse inspector")"
+                aria-label="@(Collapsed ? "Open inspector" : "Collapse inspector")"
+                @onclick="Toggle">
+            <span aria-hidden="true">@(Collapsed ? "‹" : "›")</span>
+        </button>
+    </div>
+
+    @if (!Collapsed)
+    {
+        <div class="ads-inspector-stats">
+            <div class="ads-stat">
+                <div class="ads-stat-value">@diagram.Nodes.Count</div>
+                <div class="ads-stat-label">resources</div>
+            </div>
+            <div class="ads-stat">
+                <div class="ads-stat-value">@diagram.Links.Count</div>
+                <div class="ads-stat-label">connections</div>
+            </div>
+            <div class="ads-stat">
+                <div class="ads-stat-value">@diagram.Groups.Count</div>
+                <div class="ads-stat-label">frames</div>
+            </div>
+            <div class="ads-stat">
+                <div class="ads-stat-value">@selectedCount</div>
+                <div class="ads-stat-label">selected</div>
+            </div>
+        </div>
+
+        <div class="ads-inspector-section">
+            <div class="ads-inspector-section-title">Selection</div>
+            @if (SelectedModel is null)
+            {
+                <div class="ads-empty">Select a resource or frame on the canvas to inspect it.</div>
+            }
+            else
+            {
+                <div class="ads-selected-card">
+                    <div class="ads-selected-name">@SelectedName</div>
+                    <div class="ads-selected-kind">@SelectedKind</div>
+                    <div class="ads-selected-state">
+                        @if (SelectedValid)
+                        {
+                            <span class="ads-chip ads-chip-ok">valid</span>
+                        }
+                        else
+                        {
+                            <span class="ads-chip ads-chip-warn">needs attention</span>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="ads-inspector-section">
+            <div class="ads-inspector-section-title">Actions</div>
+            <div class="ads-inspector-actions">
+                <button type="button" class="ads-action-btn" @onclick='() => RunAsync("validate")'>Validate</button>
+                <button type="button" class="ads-action-btn" @onclick='() => RunAsync("cost")'>Cost</button>
+                <button type="button" class="ads-action-btn" @onclick='() => RunAsync("export")'>Export</button>
+                <button type="button" class="ads-action-btn" @onclick='() => RunAsync("save")'>Save</button>
+            </div>
+        </div>
+
+        <div class="ads-inspector-hint">
+            <kbd class="ads-kbd">Ctrl</kbd><kbd class="ads-kbd">K</kbd> for every command
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public bool Collapsed { get; set; }
+    [Parameter] public EventCallback OnToggle { get; set; }
+
+    private AzureDesignStudio.Services.AdsDiagram diagram = null!;
+    private int selectedCount;
+
+    private string DesignName => string.IsNullOrWhiteSpace(adsContext.CurrentDesignName)
+        ? "Untitled design"
+        : adsContext.CurrentDesignName;
+
+    private SelectableModel? SelectedModel => diagram.GetSelectedModels().FirstOrDefault();
+
+    private string SelectedName => SelectedModel switch
+    {
+        AzureNodeBase node => node.Name,
+        AzureGroupBase group => group.Name,
+        _ => "Selection"
+    };
+
+    private string SelectedKind => SelectedModel?.GetType().Name ?? string.Empty;
+
+    private bool SelectedValid => SelectedModel switch
+    {
+        AzureNodeBase node => node.IsValid,
+        AzureGroupBase group => group.IsValid,
+        _ => true
+    };
+
+    protected override void OnInitialized()
+    {
+        diagram = adsContext.Diagram;
+        diagram.Nodes.Added += OnDiagramChanged;
+        diagram.Nodes.Removed += OnDiagramChanged;
+        diagram.Links.Added += OnDiagramChanged;
+        diagram.Links.Removed += OnDiagramChanged;
+        diagram.Groups.Added += OnDiagramChanged;
+        diagram.Groups.Removed += OnDiagramChanged;
+        diagram.SelectionChanged += OnSelectionChanged;
+        diagram.ZoomChanged += OnDiagramChanged;
+        RefreshSelection();
+    }
+
+    private void OnDiagramChanged(object? _) => OnDiagramChanged();
+    private void OnDiagramChanged(NodeModel _) => OnDiagramChanged();
+    private void OnDiagramChanged(GroupModel _) => OnDiagramChanged();
+    private void OnDiagramChanged(BaseLinkModel _) => OnDiagramChanged();
+
+    private void OnDiagramChanged()
+    {
+        _ = InvokeAsync(() =>
+        {
+            RefreshSelection();
+            StateHasChanged();
+        });
+    }
+
+    private void OnSelectionChanged(SelectableModel model)
+    {
+        _ = InvokeAsync(() =>
+        {
+            RefreshSelection();
+            StateHasChanged();
+        });
+    }
+
+    private void RefreshSelection() => selectedCount = diagram.GetSelectedModels().Count();
+
+    private Task Toggle() => OnToggle.InvokeAsync();
+
+    private async Task RunAsync(string key)
+    {
+        if (Commands.TryGet(key, out var command))
+            await command.Execute();
+    }
+
+    public void Dispose()
+    {
+        diagram.Nodes.Added -= OnDiagramChanged;
+        diagram.Nodes.Removed -= OnDiagramChanged;
+        diagram.Links.Added -= OnDiagramChanged;
+        diagram.Links.Removed -= OnDiagramChanged;
+        diagram.Groups.Added -= OnDiagramChanged;
+        diagram.Groups.Removed -= OnDiagramChanged;
+        diagram.SelectionChanged -= OnSelectionChanged;
+        diagram.ZoomChanged -= OnDiagramChanged;
+    }
+}
