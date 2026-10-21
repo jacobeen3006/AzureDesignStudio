@@ -6,7 +6,7 @@
     {
       "number": "1",
       "name": "Land and Stabilize",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "number": "2",
@@ -64,5 +64,5 @@
     "label": "Advance to the next step",
     "reason": "Phase 1 of 11 · 0% · executing"
   },
-  "updated_at": "2026-10-21T09:52:12.365Z"
+  "updated_at": "2026-10-21T10:47:29.930Z"
 }
