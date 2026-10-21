@@ -38,9 +38,9 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Dropping a stencil by pointer still reaches the canvas after the drawer remounts, with no console error.
   5. README and AGENTS report 11 projects and Entra ID work+personal auth (not B2C), and the publisher legal name plus signing path (Azure Artifact Signing, OV certificate, or controlled-pilot PFX) is recorded in PROJECT.md Key Decisions.
 
-**Plans**: 8 plans
+**Plans**: 1/8 plans executed
 **Wave 1**
-- [ ] 01-01-PLAN.md — Core topic: domain slice plus its tests, `.gitignore` hygiene, five tracked artefacts removed, proved in a worktree at 753
+- [x] 01-01-PLAN.md — Core topic: domain slice plus its tests, `.gitignore` hygiene, five tracked artefacts removed, proved in a worktree at 753
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 01-02-PLAN.md — Remount-safe pointer zone with a throwaway headless harness BEFORE/AFTER transcript
@@ -225,7 +225,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Land and Stabilize | 0/7 | Not started | - |
+| 1. Land and Stabilize | 1/8 | In Progress | - |
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
 | 3. Server Foundation and Integration Harness | 0/TBD | Not started | - |
 | 4. Database Durability | 0/TBD | Not started | - |
