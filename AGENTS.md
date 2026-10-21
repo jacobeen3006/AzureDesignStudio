@@ -6,7 +6,7 @@
 
 ## OVERVIEW
 
-Azure Design Studio — Blazor app for visual Azure architecture design, hosted as WASM (AAD B2C) and MAUI Blazor Hybrid desktop (Windows). Diagramming, validation, ARM/Bicep IaC generation, export. .NET 10, 8 projects in src/. Microsoft Global Hackathon 2022 winner.
+Azure Design Studio — Blazor app for visual Azure architecture design, hosted as WASM (Entra ID work+personal accounts) and MAUI Blazor Hybrid desktop (Windows). Diagramming, validation, ARM/Bicep IaC generation, export. .NET 10, 11 projects in src/. Microsoft Global Hackathon 2022 winner.
 
 ## STRUCTURE
 
@@ -66,7 +66,7 @@ AzureDesignStudio/
 - **TFM**: `net10.0` (Desktop: `net10.0-windows10.0.19041.0`); SourceGeneration targets `netstandard2.0`
 - **No Directory.Build.props** — each csproj declares its own packages/versions
 - **gRPC**: protobuf in SharedModels, clients via `Grpc.Net.ClientFactory`, server via `Grpc.AspNetCore`
-- **Auth**: Entra ID work+personal (not B2C) - MSAL redirect in WASM, native MSAL (WAM broker + device-code fallback) in Desktop, JWT + Microsoft.Identity.Web in Server; shared drawers use the `AdsHostAuth` host-override seam
+- **Auth**: Entra ID work+personal - MSAL redirect in WASM, native MSAL (WAM broker + device-code fallback) in Desktop, JWT + Microsoft.Identity.Web in Server; shared drawers use the `AdsHostAuth` host-override seam
 - **Diagrams**: `Z.Blazor.Diagrams` 3.0.4.1 NuGet; fork-only APIs reimplemented in `AdsDiagram`/`AzurePort`/`VirtualNetworkPort`
 - **Source gen**: Roslyn incremental generator with Scriban templates
 - **ARM models**: `ResourceBase` → `ARMResourceBase` hierarchy, JSON serialization, `[GeneratedCode("ArmTypeGenerator")]`

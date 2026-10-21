@@ -84,6 +84,15 @@ secrets sign automatically; without them the artifact is uploaded unsigned).
 For Store distribution change Identity/Publisher to your Store identity via
 Partner Center packaging.
 
+The publisher identity is decided: Azure Artifact Signing (formerly Trusted
+Signing) with individual validation, certificate subject `CN=Jakub Talaj`
+(Phase 1, 2026-10-21). The manifest's future `Publisher` must equal that
+subject verbatim; `PublisherDisplayName` may remain "Azure Design Studio".
+The manifest still carries the placeholder `Publisher="CN=Azure Design
+Studio"` and is not edited in Phase 1. Phase 11 makes the manifest
+`Publisher` equal the certificate subject and asserts it in CI, because a
+mismatch fails installation with `0x8007000B`.
+
 ## 5. Offline behaviour (desktop)
 
 - Designs saved while the server is unreachable are written under

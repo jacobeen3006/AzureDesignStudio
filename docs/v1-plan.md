@@ -3,6 +3,7 @@
 > **Date:** 2026-10-11
 > **From:** v0.4 (post platform-refresh, .NET 8) → **v1.0**
 > **Themes (phased):** Platform '26 → Catalog + Cost → Editor UX → Desktop → Release
+> **Status:** historical record (dated above) — counts, stack and identity statements reflect that date, not current truth; current structure and auth facts live in README.md, AGENTS.md and docs/architecture.md.
 
 ## Decisions (locked)
 

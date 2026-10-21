@@ -2,6 +2,7 @@
 
 > **Date:** 2026-06-27
 > **Scope:** Upgrade AzureDesignStudio from .NET 7 + deprecated Azure SDK to current Azure-compatible stack
+> **Status:** historical record (dated above) — counts, stack and identity statements reflect that date, not current truth; current structure and auth facts live in README.md, AGENTS.md and docs/architecture.md.
 
 ---
 

@@ -56,10 +56,10 @@ Design, observe, and change Azure from one workspace — canvas fidelity, live t
 ## Context
 
 - **Brownfield:** v1.0 closed 2026-10-13; v2 phases 6–13 substantially shipped with status notes in `docs/v2-plan.md`. The codebase map under `.planning/codebase/` was refreshed 2026-10-21.
-- **Pending work is visible in the tree:** 35 modified, 1 deleted, and 18 untracked paths at organization, including the Round 2 shell (`CommandPalette`, `DesignInspector`, `StatusBar`, `ThemeToggle`, `ads-tokens.css`, `AdsCommandService`, `LinkTypeClassifier`). The offline suite is green (755 passed).
+- **Pending work landed in Phase 1:** the Round 2 shell (`CommandPalette`, `DesignInspector`, `StatusBar`, `ThemeToggle`, `ads-tokens.css`, `AdsCommandService`, `LinkTypeClassifier`) and the rest of the slice that existed only on one machine were committed in the core and shell commits; the residual tree measured at planning time was 16 porcelain paths (9 modified, 7 untracked). The offline suite is green (755 passed).
 - **Roadmap authority:** `docs/v3-plan.md` defines N1–N50 and the Trust Gate; `docs/top-100-ui-improvements.md` defines Round 2 U1–U100; `docs/next-phases-plan.md` records the recommended execution order and gates.
 - **Known defects from the 2026-10-21 assessment:** stale pointer-drag zone in `wwwroot/js/ads.js`, a singleton command registry that outlives `TopMenu`, and two unused tracked WebCIL blobs at the repo root.
-- **Docs drift:** README/AGENTS still say 8 projects (11 exist) and AGENTS describes AAD B2C although auth is Entra ID work+personal.
+- **Docs drift resolved in Phase 1:** README/AGENTS/CONCERNS/architecture had reported 7-8 projects and the retired identity provider; the docs commit corrects them and banners the two dated plan records.
 - **No GSD state existed before this initialization**; `.planning/` previously held only codebase maps and graphify output.
 
 ## Constraints
@@ -81,6 +81,7 @@ Design, observe, and change Azure from one workspace — canvas fidelity, live t
 | Signed MSIX as the milestone artifact | Pilot users need a verifiable install; unsigned packaging defers trust questions | — Pending |
 | Keep v3 non-goals excluded | Multi-cloud, CRDT, custom policy engine, and WASM scans would each fork the architecture | — Pending |
 | Land the existing uncommitted slice before new work | 120 commits and 54 paths exist only on this machine; the tree is green now | — Pending |
+| Publisher legal name and signing route: `CN=Jakub Talaj` (individual validation) via Azure Artifact Signing | No private-key custody; matches the Phase 11 `azure/trusted-signing-action@v0` path; identity validation has external lead time | Decided 2026-10-21 — manifest update deferred to Phase 11 (D-21) |
 
 ## Evolution
 

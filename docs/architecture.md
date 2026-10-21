@@ -12,7 +12,7 @@ Azure Design Studio is a **Blazor WebAssembly** SPA for visually designing Azure
 
 ---
 
-## Solution Structure (7 projects)
+## Solution Structure (11 projects)
 
 ```
 AzureDesignStudio.sln
@@ -22,10 +22,14 @@ AzureDesignStudio.sln
 ├── AzureDesignStudio.SharedModels     — Protobuf contracts (gRPC service definitions)
 ├── AzureDesignStudio.AzureResources   — CLS-compliant Azure resource type definitions
 ├── AzureDesignStudio.SourceGeneration — Roslyn source generator for DTO/mapping profiles
-└── AzureDesignStudio.Core.Tests       — xUnit unit tests
+├── AzureDesignStudio.Core.Tests       — xUnit unit tests
+├── AzureDesignStudio.Workspace        — SQLite workspace store for designs, scans, plans and audit
+├── AzureDesignStudio.Discovery        — Tenant analysis engines (scan, drift, guardrails, decommission)
+├── AzureDesignStudio.Mcp              — Stdio MCP server with its read-only workspace tools
+└── AzureDesignStudio.Desktop          — .NET MAUI Windows app (native gRPC, MSAL broker auth, offline design cache)
 ```
 
-**Target**: .NET 7.0, Blazor WebAssembly
+**Target**: .NET 10, Blazor WebAssembly
 
 ---
 
@@ -33,12 +37,12 @@ AzureDesignStudio.sln
 
 | Layer | Technology |
 |---|---|
-| **UI framework** | Blazor WebAssembly + .NET 7 |
-| **UI components** | Ant Design Blazor 0.14.4 |
+| **UI framework** | Blazor WebAssembly + .NET 10 |
+| **UI components** | Ant Design Blazor 1.6.2 |
 | **Diagramming** | Z.Blazor.Diagrams 3.0.4.1 (NuGet) |
-| **Auth** | Azure AD B2C (MSAL via `Microsoft.Authentication.WebAssembly.Msal`) |
+| **Auth** | Microsoft Entra ID work+personal accounts (MSAL via `Microsoft.Authentication.WebAssembly.Msal`) |
 | **Backend API** | ASP.NET Core gRPC with gRPC-Web (browser-compatible) |
-| **ORM** | Entity Framework Core (InMemory dev / SQL Server prod) |
+| **ORM** | Entity Framework Core (SQLite workspace store / InMemory dev / SQL Server prod) |
 | **Mapping** | AutoMapper 12 + custom Roslyn source generator |
 | **Secrets** | Azure Key Vault (production) |
 | **Telemetry** | Azure Application Insights |
@@ -51,7 +55,7 @@ AzureDesignStudio.sln
 
 | Package | Purpose |
 |---|---|
-| `AntDesign` 0.14.4 | UI component library |
+| `AntDesign` 1.6.2 | UI component library |
 | `AutoMapper` 12.0.1 | Object mapping |
 | `Google.Protobuf` + `Grpc.Net.Client` | gRPC communication |
 | `Microsoft.AspNetCore.Components.WebAssembly` 7.0.4 | WASM host |
@@ -84,7 +88,7 @@ AzureDesignStudio.sln
 │  ├── DeployGrpcService.cs  (gRPC client)             │
 │  ├── AdsBicepDecompiler.cs (Bicep parsing)           │
 │                                                      │
-│  Auth: MSAL → Azure AD B2C                           │
+│  Auth: MSAL → Entra ID                               │
 └──────────────┬──────────────────────────────────────┘
                │ gRPC-Web (protobuf)
                ▼
@@ -98,7 +102,7 @@ AzureDesignStudio.sln
 │  │   (deploy ARM templates, stream status)           │
 │  └── CryptoService.cs   (encrypt stored credentials) │
 │                                                      │
-│  Auth: JWT Bearer + AzureAdB2C                       │
+│  Auth: JWT Bearer + Entra ID                         │
 │  Telemetry: Application Insights                     │
 └─────────────────────────────────────────────────────┘
 ```
@@ -218,7 +222,7 @@ This eliminates manual DTO boilerplate when adding new Azure resource types.
 ## Backend Server Details
 
 ### Authentication
-- **Azure AD B2C** with `Microsoft.Identity.Web`
+- **Microsoft Entra ID** with `Microsoft.Identity.Web`
 - JWT Bearer tokens, `name` claim type
 - All gRPC endpoints decorated with `[Authorize]` + `[RequiredScope]`
 - Client uses MSAL (`AddMsalAuthentication`) with scoped HTTP message handler (`BaseAddressAuthorizationMessageHandler`)
@@ -227,7 +231,7 @@ This eliminates manual DTO boilerplate when adding new Azure resource types.
 - Per-user isolation (userId extracted from JWT)
 - Maximum 10 designs per user quota
 - Designs stored as JSON blobs (`DesignData` column)
-- Entity Framework Core with InMemory DB (dev) or SQL Server (prod)
+- Entity Framework Core with a SQLite workspace store (desktop) or InMemory DB (dev) / SQL Server (prod) on the server
 
 ### DeployService
 - Stores encrypted Azure subscription credentials (`ICryptoService`)

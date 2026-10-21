@@ -45,7 +45,7 @@ Azure Design Studio won the **3rd Place Winner award** of Microsoft Global Hacka
 
 ---
 
-## 🏗️ Solution Structure (8 projects)
+## 🏗️ Solution Structure (11 projects)
 
 ```
 AzureDesignStudio.sln
@@ -56,6 +56,9 @@ AzureDesignStudio.sln
 ├── AzureDesignStudio.AzureResources   — CLS-compliant Azure resource type definitions
 ├── AzureDesignStudio.SourceGeneration — Roslyn source generator for DTO/mapping profiles
 ├── AzureDesignStudio.Core.Tests       — xUnit unit tests
+├── AzureDesignStudio.Workspace        — SQLite workspace store for designs, scans, plans and audit
+├── AzureDesignStudio.Discovery        — Tenant analysis engines (scan, drift, guardrails, decommission)
+├── AzureDesignStudio.Mcp              — Stdio MCP server with its read-only workspace tools
 └── AzureDesignStudio.Desktop          — .NET MAUI Windows app (native gRPC, MSAL broker auth, offline design cache)
 ```
 
@@ -278,7 +281,11 @@ cd AzureDesignStudio
 - [Development Guidelines](AGENTS.md) — Coding standards, conventions, and development workflow
 - [Changelog](CHANGELOG.md) — Release history
 - [Roadmap: v2 Plan](docs/v2-plan.md) — Live tenant analysis, drift, safe execution, decommissioning (phases 6–13)
+- [Proposal: v3 Plan](docs/v3-plan.md) — Next 50 improvements: delivery gates, security/tenancy, data scale, IaC depth, automation
+- [Execution Plan: Next Phases](docs/next-phases-plan.md) — Phase order, gates and verification for the next ~6 weeks
+- [Assessment 2026-10-21](docs/assessment-2026-10-21.md) — Findings F1–F7 and Round-2 slice review
 - [Improvement Backlog](docs/top-100-improvements.md) — The 100-item capability/competitive analysis behind the roadmap
+- [UI/UX Round 2](docs/top-100-ui-improvements.md) — The 100-item visual, motion, accessibility and help catalog
 
 ---
 

@@ -6,7 +6,7 @@ last_mapped_at: 2026-10-21
 
 **Analysis Date:** 2026-10-21
 
-Scope: full repository (`src/` — 8 projects, ~64k lines of C#/Razor across 760 source files). Severity is rated **High** (will cause data loss / security exposure / broken production behavior), **Medium** (degrades reliability or developer velocity; will bite during the next feature), **Low** (hygiene).
+Scope: full repository (`src/` — 11 projects, ~64k lines of C#/Razor across 760 source files). Severity is rated **High** (will cause data loss / security exposure / broken production behavior), **Medium** (degrades reliability or developer velocity; will bite during the next feature), **Low** (hygiene).
 
 ---
 
