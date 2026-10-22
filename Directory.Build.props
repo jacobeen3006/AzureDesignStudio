@@ -10,5 +10,11 @@
          command line, never a repository property: forcing it here would demand a forced
          re-evaluation on every local package edit. -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- Measured basis: a clean Release rebuild of all 11 projects emits zero compiler, NuGet,
+         analyzer, or MSBuild warnings, so this is a no-op today that keeps it that way. The 91
+         remaining warnings are WinAppSDK resource-packaging task warnings (PRI263); this is a
+         Roslyn switch, so it does not promote them. The MSBuild-level task-warning switch is
+         deliberately left unset: it would turn that resource-packaging quirk into a failure. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 </Project>
