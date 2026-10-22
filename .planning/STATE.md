@@ -34,6 +34,15 @@ Last activity: 2026-10-22 — Phase 02 execution started
 
 Progress: [█░░░░░░░░░] 9%
 
+## Deferred work
+
+- **Phase 02 plans 02-06 and 02-07 — DEFERRED by owner decision (2026-10-23): no GitHub Actions runs.**
+  `02-06` requires a red and two green `Desktop (windows-latest)` runs cited by URL; `02-07` flips
+  that job to blocking after those proofs. Neither will be fabricated from local builds, so the
+  Desktop job ships **non-blocking** and `BUILD-02`, `BUILD-03`, `BUILD-05` stay `Pending`.
+  The evidence ledger `.planning/phases/02-reproducible-build-and-ci-baseline/02-DESKTOP-RUNS.md`
+  stays `awaiting-runs`; resume by supplying the three run URLs + durations.
+
 ## Performance Metrics
 
 **Velocity:**
