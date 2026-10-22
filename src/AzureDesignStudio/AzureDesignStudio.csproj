@@ -21,36 +21,39 @@
     <NoWarn>$(NoWarn);NU1903</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="AntDesign" Version="1.6.2" />
-    <PackageReference Include="AutoMapper" Version="12.0.1" />
-    <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.0" />
-    <PackageReference Include="Azure.Bicep.Decompiler" Version="0.48.1" />
-    <PackageReference Include="BlazorApplicationInsights" Version="2.2.2" />
-    <PackageReference Include="Google.Protobuf" Version="3.28.2" />
-    <PackageReference Include="Grpc.Net.Client" Version="2.66.0" />
-    <PackageReference Include="Z.Blazor.Diagrams" Version="3.0.4.1" />
-    <PackageReference Include="Grpc.Net.Client.Web" Version="2.66.0" />
-    <PackageReference Include="Grpc.Net.ClientFactory" Version="2.66.0" />
+    <PackageReference Include="AntDesign" />
+    <PackageReference Include="AutoMapper" />
+    <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" />
+    <PackageReference Include="Azure.Bicep.Decompiler" />
+    <PackageReference Include="BlazorApplicationInsights" />
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="Z.Blazor.Diagrams" />
+    <PackageReference Include="Grpc.Net.Client.Web" />
+    <PackageReference Include="Grpc.Net.ClientFactory" />
     <!-- direct pin: transitive via Azure.Bicep.Decompiler -> Microsoft.Windows.Compatibility; >=10.0.0 <=10.0.12 carries GHSA-2fmv-rv2c-59x7 -->
-    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
-    <PackageReference Include="Grpc.Tools" Version="2.66.0">
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
+    <!-- direct pin: transitive via Azure.Bicep.Decompiler -> Azure.Deployments.*; 10.0.10 carries
+         three high advisories (GHSA-7hqp-7c5m-4vq6 and siblings); the central row raises it to 10.0.13. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" />
+    <PackageReference Include="Grpc.Tools">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.12" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.12" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.Authentication.WebAssembly.Msal" Version="10.0.12" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.12" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Configuration" Version="10.0.12" />
-    <PackageReference Include="Nerdbank.GitVersioning" Version="3.6.146">
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Authentication.WebAssembly.Msal" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Configuration" />
+    <PackageReference Include="Nerdbank.GitVersioning">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="System.IO.Abstractions.TestingHelpers" Version="19.2.4" />
+    <PackageReference Include="System.IO.Abstractions.TestingHelpers" />
     <!-- Mono AOT compiles System.Private.Windows.Core (pulled in by the Bicep decompiler via
          Microsoft.Windows.Compatibility) and fails to load its System.Formats.Nrbf reference
          unless that assembly is in the app payload. -->
-    <PackageReference Include="System.Formats.Nrbf" Version="10.0.12" />
+    <PackageReference Include="System.Formats.Nrbf" />
   </ItemGroup>
 
   <ItemGroup>

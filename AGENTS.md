@@ -54,7 +54,7 @@ AzureDesignStudio/
 | Add UI drawer/modal | AzureDesignStudio/Components/MenuDrawer/ | Follow existing drawer template pattern |
 | Modify diagram behavior | Core/Components/AzureNodeComponent.razor | Core renders diagram; WASM client hosts it |
 | Local persistence (offline) | AzureDesignStudio.Workspace/ | EF Core SQLite `workspace.db`; `SqliteDesignOfflineStore` = pending-design contract |
-| Fix build/packages | root csproj files | No Directory.Build.props — version per-project |
+| Fix build/packages | `Directory.Packages.props` / `Directory.Build.props` | Every package version lives in `Directory.Packages.props`; repo-wide MSBuild properties live in `Directory.Build.props` |
 | CI/CD | .github/workflows/build.yml + Server/Dockerfile | Docker build via DockerBuild.ps1 |
 | MCP tool surface | AzureDesignStudio.Mcp/ + Discovery/Mcp/AdsToolEngine.cs | Read-only workspace truth for agents; engines pure/tested, host thin + ReadOnly SQLite |
 
@@ -64,14 +64,14 @@ AzureDesignStudio/
 - **Nullable**: enabled in all projects except AzureResources
 - **ImplicitUsings**: enabled in all SDK-style projects
 - **TFM**: `net10.0` (Desktop: `net10.0-windows10.0.19041.0`); SourceGeneration targets `netstandard2.0`
-- **No Directory.Build.props** — each csproj declares its own packages/versions
+- **Build config is central**: `Directory.Build.props` owns repo-wide properties (MauiVersion, lock-file generation, warnings, audit level), `Directory.Packages.props` owns every package version, each csproj declares only `Include=` (plus its `PrivateAssets`/`IncludeAssets` metadata), and locked restore (`--locked-mode`) is a CI flag, never a repo property
 - **gRPC**: protobuf in SharedModels, clients via `Grpc.Net.ClientFactory`, server via `Grpc.AspNetCore`
 - **Auth**: Entra ID work+personal - MSAL redirect in WASM, native MSAL (WAM broker + device-code fallback) in Desktop, JWT + Microsoft.Identity.Web in Server; shared drawers use the `AdsHostAuth` host-override seam
 - **Diagrams**: `Z.Blazor.Diagrams` 3.0.4.1 NuGet; fork-only APIs reimplemented in `AdsDiagram`/`AzurePort`/`VirtualNetworkPort`
 - **Source gen**: Roslyn incremental generator with Scriban templates
 - **ARM models**: `ResourceBase` → `ARMResourceBase` hierarchy, JSON serialization, `[GeneratedCode("ArmTypeGenerator")]`
 - **DI registration pattern**: `AdsBicepDecompiler` uses custom extension method pattern (`AddAdsBicepDecompiler()`)
-- **Testing**: xUnit, no `Directory.Build.props` for test — each test project independent
+- **Testing**: xUnit; the offline suite is `dotnet test src/AzureDesignStudio.Core.Tests --filter "Category!=LiveAzure"`
 
 ## ANTI-PATTERNS
 

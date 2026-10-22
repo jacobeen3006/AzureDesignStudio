@@ -61,12 +61,15 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="Azure.Identity" Version="1.21.0" />
-        <PackageReference Include="Microsoft.Identity.Client" Version="4.91.0" />
-        <PackageReference Include="Microsoft.Identity.Client.Broker" Version="4.91.0" />
-        <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
-        <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="$(MauiVersion)" />
-        <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
+        <PackageReference Include="Azure.Identity" />
+        <PackageReference Include="Microsoft.Identity.Client" />
+        <PackageReference Include="Microsoft.Identity.Client.Broker" />
+        <PackageReference Include="Microsoft.Maui.Controls" />
+        <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Debug" />
+        <!-- direct pin: the same Azure.Bicep/Azure.Deployments transitive 10.0.10 as the WASM app
+             (three high advisories); the central row raises it to 10.0.13. -->
+        <PackageReference Include="System.Security.Cryptography.Xml" />
     </ItemGroup>
 
     <ItemGroup>

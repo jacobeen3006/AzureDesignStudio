@@ -9,7 +9,7 @@
 
   <ItemGroup>
     <!-- TokenCredential seam; the host (Desktop) supplies the concrete credential (AdsTokenBroker). -->
-    <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <PackageReference Include="Azure.Identity" />
   </ItemGroup>
 
   <ItemGroup>
