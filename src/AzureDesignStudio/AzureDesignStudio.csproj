@@ -15,11 +15,6 @@
          generated service-worker files; they are served uncompressed. -->
     <CompressionExcludePatterns>$(CompressionExcludePatterns);**/service-worker*.js;</CompressionExcludePatterns>
   </PropertyGroup>
-  <PropertyGroup>
-    <!-- AutoMapper 12.0.1 GHSA-rvv3-g6hj-g44x (DoS via uncontrolled recursion) accepted:
-         mappings are shallow node DTOs; 13+ requires a commercial license key. -->
-    <NoWarn>$(NoWarn);NU1903</NoWarn>
-  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="AntDesign" />
     <PackageReference Include="AutoMapper" />

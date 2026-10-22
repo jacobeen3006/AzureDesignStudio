@@ -1,0 +1,17 @@
+<Project>
+  <!-- NuGet's audit suppression has no expiry of its own: once the item is in
+       Directory.Build.props it silences its advisory forever. This target turns the date recorded
+       next to that item into an enforcement point, evaluated on restore and on build.
+       The comparison goes through System.String.Compare on purpose: both direct date spellings
+       fail with MSB4086 ("a numeric comparison was attempted on ... instead of a number").
+       No Sdk attribute — this file is imported into every project, including the netstandard2.0
+       SourceGeneration project. -->
+  <PropertyGroup>
+    <_AdsToday>$([System.DateTime]::UtcNow.ToString("yyyy-MM-dd"))</_AdsToday>
+    <_AdsExpiryCompare>$([System.String]::Compare('$(AdsAuditSuppressionAutoMapperExpires)', '$(_AdsToday)'))</_AdsExpiryCompare>
+  </PropertyGroup>
+  <Target Name="AdsCheckAuditSuppressionExpiry" BeforeTargets="Restore;Build;PrepareForBuild">
+    <Error Condition="$(_AdsExpiryCompare) &lt; 0"
+           Text="AutoMapper audit suppression expired on $(AdsAuditSuppressionAutoMapperExpires) (advisory GHSA-rvv3-g6hj-g44x); replace the package before this date. Today is $(_AdsToday)." />
+  </Target>
+</Project>
