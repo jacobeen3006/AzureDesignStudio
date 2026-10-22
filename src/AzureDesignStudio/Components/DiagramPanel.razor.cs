@@ -322,7 +322,7 @@ namespace AzureDesignStudio.Components
         {
             if (group == null)
                 return;
-            
+
             foreach (var child in group.Children)
             {
                 if (child is GroupModel g)

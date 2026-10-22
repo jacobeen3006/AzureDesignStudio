@@ -28,7 +28,7 @@ namespace AzureDesignStudio.Core.Web
         }
         public override bool IsValid
         {
-            get => !string.IsNullOrEmpty(HostingPlan) 
+            get => !string.IsNullOrEmpty(HostingPlan)
                 && (HostingPlan != "consumption" || Publish != "docker")
                 && base.IsValid;
         }
@@ -126,25 +126,25 @@ namespace AzureDesignStudio.Core.Web
                 siteConfig.AppSettings ??= new List<NameValuePair>();
 
                 siteConfig.AppSettings.Add(new()
-                    {
-                        Name = "DOCKER_REGISTRY_SERVER_URL",
-                        Value = "https://mcr.microsoft.com"
-                    });
+                {
+                    Name = "DOCKER_REGISTRY_SERVER_URL",
+                    Value = "https://mcr.microsoft.com"
+                });
                 siteConfig.AppSettings.Add(new()
-                    {
-                        Name = "DOCKER_REGISTRY_SERVER_USERNAME",
-                        Value = string.Empty
-                    });
+                {
+                    Name = "DOCKER_REGISTRY_SERVER_USERNAME",
+                    Value = string.Empty
+                });
                 siteConfig.AppSettings.Add(new()
-                    {
-                        Name = "DOCKER_REGISTRY_SERVER_PASSWORD",
-                        Value = string.Empty
-                    });
+                {
+                    Name = "DOCKER_REGISTRY_SERVER_PASSWORD",
+                    Value = string.Empty
+                });
                 siteConfig.AppSettings.Add(new()
-                    {
-                        Name = "WEBSITES_ENABLE_APP_SERVICE_STORAGE",
-                        Value = "false"
-                    });
+                {
+                    Name = "WEBSITES_ENABLE_APP_SERVICE_STORAGE",
+                    Value = "false"
+                });
             }
         }
         protected override void CreateSiteConfigForWinCode(ref SiteConfig siteConfig)
@@ -201,30 +201,31 @@ namespace AzureDesignStudio.Core.Web
             switch (HostingPlan)
             {
                 case "consumption":
-                {
-                    servicePlan.Kind = ServicePlanOS;
-                    servicePlan.SkuName = "Y1";
-                    servicePlan.SkuTier = "Dynamic";
-                    break;
-                }
+                    {
+                        servicePlan.Kind = ServicePlanOS;
+                        servicePlan.SkuName = "Y1";
+                        servicePlan.SkuTier = "Dynamic";
+                        break;
+                    }
                 case "premium":
-                {
-                    servicePlan.Kind = ServicePlanOS;
-                    servicePlan.SkuName = "EP1";
-                    servicePlan.SkuTier = "ElasticPremium";
-                    break;
-                }
+                    {
+                        servicePlan.Kind = ServicePlanOS;
+                        servicePlan.SkuName = "EP1";
+                        servicePlan.SkuTier = "ElasticPremium";
+                        break;
+                    }
                 case "asp":
-                {
-                    servicePlan.Kind = ServicePlanOS;
-                    servicePlan.SkuName = "P1V2";
-                    servicePlan.SkuTier = "PremiumV2";
-                    break;
-                }
+                    {
+                        servicePlan.Kind = ServicePlanOS;
+                        servicePlan.SkuName = "P1V2";
+                        servicePlan.SkuTier = "PremiumV2";
+                        break;
+                    }
                 default:
                     base.CreateHostingPlan();
                     break;
-            };
+            }
+            ;
 
             return servicePlan;
         }

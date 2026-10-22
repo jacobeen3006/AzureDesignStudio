@@ -267,17 +267,17 @@ public static class AdoptEngine
             // Bastion and firewall export only from their dedicated subnet with a linked
             // public IP - the same throwaway wiring the golden export suite builds.
             case AzureFirewallModel or BastionsModel:
-            {
-                var host = new VirtualNetworkModel { Name = "ads-probe" }
-                    .AddSubnet(new SubnetModel
-                    {
-                        Name = model is AzureFirewallModel ? "AzureFirewallSubnet" : "AzureBastionSubnet",
-                        AddressPrefix = "10.0.0.0/26",
-                    });
-                host.AddChild((AzureNodeBase)model);
-                LinkProbePip((AzureNodeBase)model);
-                break;
-            }
+                {
+                    var host = new VirtualNetworkModel { Name = "ads-probe" }
+                        .AddSubnet(new SubnetModel
+                        {
+                            Name = model is AzureFirewallModel ? "AzureFirewallSubnet" : "AzureBastionSubnet",
+                            AddressPrefix = "10.0.0.0/26",
+                        });
+                    host.AddChild((AzureNodeBase)model);
+                    LinkProbePip((AzureNodeBase)model);
+                    break;
+                }
             // App gateway export requires at least one linked public IP on its ports.
             case AppGatewayModel gateway:
                 LinkProbePip(gateway);

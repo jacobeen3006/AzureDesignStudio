@@ -78,8 +78,8 @@ namespace AzureDesignStudio.Core.Models
         protected virtual ResourceBase ArmResource => throw new NotImplementedException();
         public virtual string ResourceId => $"[resourceId('{ArmResource.Type}', '{Name}')]";
         public string Name { get; set; } = string.Empty;
-        public virtual string Location 
-        { 
+        public virtual string Location
+        {
             get => UseResourceGroupLocation ? "[parameters('location')]" : ArmResource.Location;
             set => ArmResource.Location = value;
         }

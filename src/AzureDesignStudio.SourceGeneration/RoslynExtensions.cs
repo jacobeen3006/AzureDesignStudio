@@ -21,7 +21,7 @@ public static class RoslynExtensions
             .FirstOrDefault();
     }
 
-    public static string? GetAttributeParameterValue(this ClassDeclarationSyntax classSyntax, 
+    public static string? GetAttributeParameterValue(this ClassDeclarationSyntax classSyntax,
         string attributeName, string paramName)
     {
         var attributeSyntax = classSyntax.GetAttribute(attributeName);
@@ -35,7 +35,7 @@ public static class RoslynExtensions
 
     public static bool HasAttribute(this PropertyDeclarationSyntax propertySyntax, string attributeName)
     {
-        return propertySyntax.AttributeLists.Count > 0 
+        return propertySyntax.AttributeLists.Count > 0
             && propertySyntax.AttributeLists.SelectMany(al => al.Attributes
             .Where(a => (a.Name as IdentifierNameSyntax)?.Identifier.Text == attributeName))
             .Any();
@@ -65,6 +65,6 @@ public static class RoslynExtensions
         return classSyntax.Ancestors().OfType<BaseNamespaceDeclarationSyntax>()
             .FirstOrDefault()
             .Name
-            .ToString();            
+            .ToString();
     }
 }

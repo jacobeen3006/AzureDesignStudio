@@ -56,7 +56,7 @@ builder.Services.AddHttpClient("RetailPrices", client => client.Timeout = TimeSp
 builder.Services.AddSingleton(new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl));
 builder.Services.AddHttpClient("arm", client => client.Timeout = TimeSpan.FromSeconds(120));
 #if DEBUG
-    builder.Services.AddGrpcReflection();
+builder.Services.AddGrpcReflection();
 #endif
 // For running behind an ingress
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
@@ -181,10 +181,10 @@ app.MapGrpcService<DeployService>().EnableGrpcWeb();
 app.MapGrpcService<RetailPriceService>().EnableGrpcWeb();
 
 #if DEBUG
-    if (app.Environment.IsDevelopment())
-    {
-        app.MapGrpcReflectionService();
-    }
+if (app.Environment.IsDevelopment())
+{
+    app.MapGrpcReflectionService();
+}
 #endif
 
 app.MapStaticAssets();

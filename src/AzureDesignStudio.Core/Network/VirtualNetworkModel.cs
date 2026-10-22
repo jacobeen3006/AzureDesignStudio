@@ -118,7 +118,7 @@ namespace AzureDesignStudio.Core.Network
 
             var result = base.GetArmResources().ToList();
 
-            foreach(var subnet in Subnets)
+            foreach (var subnet in Subnets)
             {
                 // Deploy subnets as separate resources.
                 // It is necessary when there are other resources which depend on subnets.
@@ -142,12 +142,12 @@ namespace AzureDesignStudio.Core.Network
                             RemoteVirtualNetworkId = n.ResourceId,
                         };
                         peering.DependsOn.Add(ResourceId);
-                        foreach(var subnet in Subnets)
+                        foreach (var subnet in Subnets)
                         {
                             peering.DependsOn.Add(subnet.ResourceId);
                         }
                         peering.DependsOn.Add(n.ResourceId);
-                        foreach(var subnet in n.Subnets)
+                        foreach (var subnet in n.Subnets)
                         {
                             peering.DependsOn.Add(subnet.ResourceId);
                         }

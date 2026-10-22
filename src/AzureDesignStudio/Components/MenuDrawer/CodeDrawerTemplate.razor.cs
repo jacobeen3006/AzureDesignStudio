@@ -404,7 +404,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
                     }
                     if (stateHasChanged)
                         await InvokeAsync(StateHasChanged);
-            });
+                });
             _retryTemplate = null;
         }
         private void CloseDeployStatus(MouseEventArgs e)

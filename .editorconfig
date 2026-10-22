@@ -1,0 +1,13 @@
+root = true
+
+[*.cs]
+# Deliberately absent, each for a measured reason:
+#   end_of_line — the index is LF for all 820 source files while a Windows checkout materialises
+#                 519 of them as CRLF; pinning either value would rewrite hundreds of files.
+#   charset     — 102 of 820 files carry a UTF-8 BOM and the rest do not; any value forces a
+#                 wholesale rewrite of the majority.
+indent_style = space
+indent_size = 4
+tab_width = 4
+trim_trailing_whitespace = true
+insert_final_newline = true

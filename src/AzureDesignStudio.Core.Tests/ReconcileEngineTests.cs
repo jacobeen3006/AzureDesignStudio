@@ -227,7 +227,10 @@ public class ReconcileEngineTests
         intent.Nodes.Add(frame);
         intent.Nodes.Add(new AzureNodeDto
         {
-            Id = "child-guid", TypeKey = "storage-account", Name = "child", GroupId = StorageId,
+            Id = "child-guid",
+            TypeKey = "storage-account",
+            Name = "child",
+            GroupId = StorageId,
         });
         intent.Links.Add(Link(StorageId, "child-guid"));
 

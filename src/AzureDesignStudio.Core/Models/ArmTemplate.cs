@@ -50,7 +50,7 @@ namespace AzureDesignStudio.Core.Models
 
         public void AddResource(IList<ResourceBase> resources)
         {
-            foreach(var resource in resources)
+            foreach (var resource in resources)
             {
                 Template.Resources.Add(resource);
             }

@@ -56,17 +56,17 @@ namespace AzureDesignStudio.Core.SQL
         }
         [MapToDto]
         [Required, DisplayName("SKU Name")]
-        public string SkuName 
-        { 
-            get => _database.Sku.Name; 
-            set => _database.Sku.Name = value; 
+        public string SkuName
+        {
+            get => _database.Sku.Name;
+            set => _database.Sku.Name = value;
         }
         [MapToDto]
         [Required, DisplayName("Tier")]
-        public string SkuTier 
-        { 
-            get => _database.Sku.Tier; 
-            set => _database.Sku.Tier = value; 
+        public string SkuTier
+        {
+            get => _database.Sku.Tier;
+            set => _database.Sku.Tier = value;
         }
 
         public override AzureNodeDto GetNodeDto(IMapper mapper)

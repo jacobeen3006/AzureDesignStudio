@@ -53,21 +53,21 @@ namespace AzureDesignStudio.Core.Web
         protected override ResourceBase ArmResource => _servicePlan;
         [MapToDto]
         [Required, DisplayName("OS")]
-        public string Kind 
-        { 
-            get => _servicePlan.Kind; 
-            set => _servicePlan.Kind = value; 
+        public string Kind
+        {
+            get => _servicePlan.Kind;
+            set => _servicePlan.Kind = value;
         }
         [MapToDto]
         [Required, DisplayName("SKU Name")]
-        public string SkuName 
-        { 
-            get => _servicePlan.Sku.Name; 
-            set => _servicePlan.Sku.Name = value; 
+        public string SkuName
+        {
+            get => _servicePlan.Sku.Name;
+            set => _servicePlan.Sku.Name = value;
         }
         [MapToDto]
         [Required, DisplayName("Tier")]
-        public string SkuTier 
+        public string SkuTier
         {
             get => _servicePlan.Sku.Tier;
             set
