@@ -100,3 +100,108 @@ jobs:
       uses: github/codeql-action/analyze@v3
       with:
         category: '/language:csharp'
+
+  desktop:
+
+    # Non-blocking on purpose: two consecutive green runs recorded in
+    # .planning/phases/02-reproducible-build-and-ci-baseline/02-DESKTOP-RUNS.md
+    # are the flip condition; plan 02-07 deletes the line below and requires the check.
+    name: Desktop (windows-latest)
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 30
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # avoid shallow clone so nbgv can do its work.
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        # global.json is the one SDK authority here too; a second dotnet-version
+        # key would make the job ignore the pinned SDK.
+        global-json-file: global.json
+        # Cache key is the lock-file set, so a cache from a different graph
+        # is never reused (a stale restore would look like a fresh one).
+        cache: true
+        cache-dependency-path: '**/packages.lock.json'
+
+    - name: Restore workloads
+      # The windows-latest image ships the .NET 9 MAUI workloads only; this project
+      # targets net10.0-windows10.0.19041.0, so the workload band the TFM needs is
+      # resolved from the project graph rather than from a bare workload name.
+      run: dotnet workload restore src/AzureDesignStudio.Desktop/AzureDesignStudio.Desktop.csproj
+
+    - name: Restore (locked)
+      # bash, not the Windows runner's PowerShell default: the guard below uses
+      # POSIX `test`/`wc` syntax and would not parse as PowerShell.
+      shell: bash
+      run: dotnet restore src/AzureDesignStudio.sln --locked-mode
+
+    - name: Lock files must be committed
+      # Same three assertions as the Linux job's guard: a committed lock that no
+      # longer matches the graph, a lock the restore created or rewrote (invisible
+      # to `git diff`), and a project with no committed lock at all.
+      shell: bash
+      run: |
+        git diff --exit-code -- '*packages.lock.json'
+        test -z "$(git status --porcelain -- '*packages.lock.json')"
+        test "$(git ls-files '*packages.lock.json' | wc -l)" -eq "$(ls src/*/*.csproj | wc -l)"
+
+    - name: Start timer
+      id: t0
+      shell: pwsh
+      run: echo "start=$([DateTime]::UtcNow.ToString('o'))" >> $env:GITHUB_OUTPUT
+
+    - name: Build Desktop
+      # Release, no restore (the locked restore above owns the graph) and AOT off:
+      # measured 74 s with -p:RunAOTCompilation=false against 466 s with AOT on the
+      # same machine. AOT is a publish concern, re-verified in Phase 11.
+      run: dotnet build src/AzureDesignStudio.Desktop/AzureDesignStudio.Desktop.csproj -c Release --no-restore -p:RunAOTCompilation=false
+
+    - name: Format (changed files)
+      # Scoped on purpose: the whole solution is 51 s cold, one changed file is ~18 s,
+      # and the repo-wide normalisation already landed. Exit 2 means "would change";
+      # any non-zero exit is a failure.
+      shell: pwsh
+      run: |
+        if ([string]::IsNullOrWhiteSpace($env:GITHUB_BASE_REF)) {
+          Write-Host 'Not a pull-request run (no base ref); skipping the changed-file format gate.'
+          exit 0
+        }
+        git fetch --no-tags --depth=1 origin "$env:GITHUB_BASE_REF"
+        $changed = @(git diff --name-only --diff-filter=ACMR "origin/$env:GITHUB_BASE_REF...HEAD" -- '*.cs')
+        if ($changed.Count -eq 0) {
+          Write-Host 'No changed C# files; skipping the format gate.'
+          exit 0
+        }
+        Write-Host "Checking $($changed.Count) changed C# file(s)."
+        dotnet format src/AzureDesignStudio.sln --verify-no-changes --no-restore --include $changed
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host "dotnet format exited $LASTEXITCODE; the changed files need formatting."
+          exit $LASTEXITCODE
+        }
+
+    - name: Record duration
+      if: always()
+      shell: pwsh
+      run: |
+        $start = [DateTime]::Parse('${{ steps.t0.outputs.start }}')
+        $metrics = [pscustomobject]@{
+          job        = '${{ github.job }}'
+          run_id     = '${{ github.run_id }}'
+          commit     = '${{ github.sha }}'
+          started_at = $start.ToString('o')
+          ended_at   = [DateTime]::UtcNow.ToString('o')
+          seconds    = [int]([DateTime]::UtcNow - $start).TotalSeconds
+          aot        = 'disabled'
+        }
+        $metrics | ConvertTo-Json | Set-Content desktop-build-metrics.json
+        $metrics | ConvertTo-Json | Out-File -Append $env:GITHUB_STEP_SUMMARY
+
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: desktop-build-metrics
+        path: desktop-build-metrics.json
