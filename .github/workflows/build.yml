@@ -21,7 +21,34 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '10.0.x'
+        # global.json is the one SDK authority; the CodeQL job below still
+        # pins '10.0.x' and is recorded drift, not fixed here.
+        global-json-file: global.json
+        # Cache key is the lock-file set, so a cache from a different graph
+        # is never reused (a stale restore would look like a fresh one).
+        cache: true
+        cache-dependency-path: '**/packages.lock.json'
+
+    - name: Restore (locked)
+      # Only the four Linux-safe projects: the solution carries the
+      # net10.0-windows Desktop project, which cannot restore on ubuntu.
+      run: |
+        dotnet restore src/AzureDesignStudio.Server --locked-mode
+        dotnet restore src/AzureDesignStudio --locked-mode
+        dotnet restore src/AzureDesignStudio.Mcp --locked-mode
+        dotnet restore src/AzureDesignStudio.Core.Tests --locked-mode
+
+    - name: Lock files must be committed
+      # --locked-mode alone is not a gate: line 1 catches a committed lock
+      # that no longer matches the graph (NU1004 normally beats us to it);
+      # line 2 catches a lock the restore above created or rewrote, which
+      # `git diff` misses because it ignores untracked files; line 3 catches
+      # a project with no committed lock at all, where --locked-mode exits 0
+      # and writes one.
+      run: |
+        git diff --exit-code -- '*packages.lock.json'
+        test -z "$(git status --porcelain -- '*packages.lock.json')"
+        test "$(git ls-files '*packages.lock.json' | wc -l)" -eq "$(ls src/*/*.csproj | wc -l)"
 
     - name: Build
       # Explicit project set instead of the full solution: the MAUI desktop
