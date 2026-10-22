@@ -1,0 +1,9 @@
+<Project>
+  <!-- MAUI's BundledVersions.targets assigns MauiVersion in the inner (per-target-framework)
+       build, so the outer evaluation sees it empty; and Directory.Build.props is imported
+       before Directory.Packages.props. The pin has to live here, or the two central MAUI
+       rows in Directory.Packages.props evaluate to an empty version. -->
+  <PropertyGroup>
+    <MauiVersion>10.0.110</MauiVersion>
+  </PropertyGroup>
+</Project>
