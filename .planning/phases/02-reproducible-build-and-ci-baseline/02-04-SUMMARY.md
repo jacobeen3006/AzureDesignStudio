@@ -15,7 +15,7 @@ affects: [08-auto-mapper-replacement]
 actuals:
   tokens: 1630
   tasks: 2
-  commits: 2
+  commits: 4
   plan_head_before: e222e67
   plan_head_after: b563a93
 tech-stack:
@@ -53,7 +53,7 @@ High/Critical NuGet advisories now fail restore and build in every project's ful
 | 1 | `2564a30` | `build(02-04): fail on High/Critical advisories with one dated AutoMapper exception` | `Directory.Build.props`, `Directory.Build.targets`, `src/AzureDesignStudio/AzureDesignStudio.csproj`, `src/AzureDesignStudio.Core/AzureDesignStudio.Core.csproj` (4 files, +42/−10) |
 | 2 | `b563a93` | `docs(02-04): mark BUILD-04 complete after the four audit probes` | `.planning/REQUIREMENTS.md` (1 file, +2/−2) |
 
-Measured: `git rev-list --count e222e67..HEAD` = 2.
+Measured: `git rev-list --count e222e67..HEAD` = 4 — the two task commits above plus documents only: `b563a93` (`docs(02-04): mark BUILD-04 complete…`), the SUMMARY commit, and the test-evidence appendix to this file.
 
 ## What changed
 
@@ -108,6 +108,7 @@ Both projects consume AutoMapper; leaving either would have made the repo-wide g
 | Locked restore | `dotnet restore src/AzureDesignStudio.Core --locked-mode` | exit 0 |
 | Format gate | `dotnet format src/AzureDesignStudio.sln --verify-no-changes` | exit 0 |
 | Commit shape | `git show --name-only --pretty=format: HEAD` | exactly the four expected paths |
+| Offline tests | `dotnet test src/AzureDesignStudio.Core.Tests -c Release --no-build --filter "Category!=LiveAzure"` | exit 0 — `Passed! - Failed: 0, Passed: 755, Skipped: 0, Total: 755` |
 
 Resolved `System.Security.Cryptography.Xml` (from the committed lock files, so the crypto pin still holds and needs no suppression):
 
@@ -215,6 +216,7 @@ None — plan executed as written. Two environment notes, not deviations:
 
 - The isolated worktree was a checkout of the session repository, so the project was cloned into `./work` and `gsd/02-04` branched from `e222e67` as the shared contract directs.
 - The clone had no committer identity; `git config user.name/user.email` were set locally to the repository's existing author (`Jakub Talaj <jacobeen@icloud.com>`) so the commits join the history cleanly.
+- The unfiltered `Core.Tests` run reports 4 failures, all `Category=LiveAzure` (`AppServicePlanTest`, `FuncAppTest`, `WebAppInVnetTest`, `WebAppTest`). They call `ArmDeploymentResource.ValidateAsync` against the shared test subscription, which answers `400 SubscriptionIsOverQuotaForSku` (`Current Limit (P1v2 VMs): 0`). Nine tests carry that trait (the other five — APIM/vnet, two network, two SQL — passed because they do not request the exhausted P1v2 capacity). They are environment failures, pre-existing and unrelated to this plan — no product source was touched — and the offline run (`764 − 9 = 755`) is green.
 
 ## Threat register outcome
 
