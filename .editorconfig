@@ -1,11 +1,13 @@
 root = true
 
 [*.cs]
-# Deliberately absent, each for a measured reason:
-#   end_of_line — the index is LF for all 820 source files while a Windows checkout materialises
-#                 519 of them as CRLF; pinning either value would rewrite hundreds of files.
-#   charset     — 102 of 820 files carry a UTF-8 BOM and the rest do not; any value forces a
-#                 wholesale rewrite of the majority.
+# end_of_line is pinned to LF (with .gitattributes `* text=auto eol=lf`) because the index is
+# already LF for every source file: leaving it automatic made `dotnet format --verify-no-changes`
+# platform-dependent (a CRLF checkout reports four EOL-only "fixes" on a tree whose content is
+# identical), which is exactly the non-reproducibility this phase removes.
+# charset stays absent — 102 of 820 files carry a UTF-8 BOM and the rest do not; any value forces
+# a wholesale rewrite of the majority.
+end_of_line = lf
 indent_style = space
 indent_size = 4
 tab_width = 4
