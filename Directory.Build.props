@@ -5,5 +5,10 @@
        rows in Directory.Packages.props evaluate to an empty version. -->
   <PropertyGroup>
     <MauiVersion>10.0.110</MauiVersion>
+    <!-- One lock file per project, written by restore and committed, so the resolved graph is
+         reviewable and drift is visible. Locked mode itself is a CI flag passed to restore on the
+         command line, never a repository property: forcing it here would demand a forced
+         re-evaluation on every local package edit. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 </Project>
