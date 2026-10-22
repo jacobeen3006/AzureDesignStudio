@@ -8,7 +8,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
     {
         [Required]
         public string Name { get; set; } = null!;
-    }    
+    }
     public partial class SaveDrawerTemplate
     {
         int _savedDesignCount = -1;
@@ -99,7 +99,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
             }
 
             _loadingDesigns = true;
-            
+
             var (s, savedDesigns) = await _designService.GetAllSavedDesign();
             if (s == 200 && savedDesigns != null)
             {

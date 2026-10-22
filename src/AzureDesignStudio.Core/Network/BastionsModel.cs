@@ -42,10 +42,10 @@ namespace AzureDesignStudio.Core.Network
 
         public bool HasPublicIp => LinkedPublicIps.Any();
 
-        public override bool IsValid => 
+        public override bool IsValid =>
             Group is SubnetModel subnet && subnet.Children.Count == 1
                 && subnet.Name.Equals("AzureBastionSubnet") && HasPublicIp;
-        
+
         //[Required, DisplayName("Tier")]
         //public string Sku { get; set; } = "Standard";
         //[DisplayName("Instance")]

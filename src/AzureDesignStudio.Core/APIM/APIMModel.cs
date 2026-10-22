@@ -31,39 +31,39 @@ public class APIMModel : AzureNodeBase
     };
     protected override ResourceBase ArmResource => _apimService;
     [Required, DisplayName("Sku Name"), MapToDto]
-    public string SkuName 
-    { 
-        get => _apimService.Sku.Name; 
-        set => _apimService.Sku.Name = value; 
+    public string SkuName
+    {
+        get => _apimService.Sku.Name;
+        set => _apimService.Sku.Name = value;
     }
     [Required, DisplayName("Sku Capacity"), MapToDto]
-    public int SkuCapacity 
-    { 
-        get => _apimService.Sku.Capacity; 
-        set => _apimService.Sku.Capacity = value; 
+    public int SkuCapacity
+    {
+        get => _apimService.Sku.Capacity;
+        set => _apimService.Sku.Capacity = value;
     }
     [Required, DisplayName("Publisher Email"), MapToDto]
-    public string PublisherEmail 
-    { 
+    public string PublisherEmail
+    {
         get => _apimService.Properties.PublisherEmail;
-        set => _apimService.Properties.PublisherEmail = value; 
+        set => _apimService.Properties.PublisherEmail = value;
     }
     [Required, DisplayName("Publisher Name"), MapToDto]
-    public string PublisherName 
-    { 
-        get => _apimService.Properties.PublisherName; 
+    public string PublisherName
+    {
+        get => _apimService.Properties.PublisherName;
         set => _apimService.Properties.PublisherName = value;
     }
     [Required, DisplayName("VNET Type"), MapToDto]
-    public string VnetType 
-    { 
-        get => _apimService.Properties.VirtualNetworkType; 
-        set => _apimService.Properties.VirtualNetworkType = value; 
+    public string VnetType
+    {
+        get => _apimService.Properties.VirtualNetworkType;
+        set => _apimService.Properties.VirtualNetworkType = value;
     }
 
     public override bool IsValid
     {
-        get => !(string.IsNullOrEmpty(PublisherName) 
+        get => !(string.IsNullOrEmpty(PublisherName)
             || string.IsNullOrEmpty(PublisherEmail)
             || (SkuName == "Consumption" && SkuCapacity > 0)
             || (Group is SubnetModel && (SkuName is "Consumption" or "Basic" or "Standard")));

@@ -77,21 +77,21 @@ namespace AzureDesignStudio.Core.Tests
                 // Bastion/firewall are only valid inside their Azure-preset subnet,
                 // which itself must live in a vnet.
                 case BastionsModel or AzureFirewallModel:
-                {
-                    var host = new VirtualNetworkModel { Name = "ads-vnet" }
-                        .AddSubnet(new SubnetModel
-                        {
-                            Name = model is AzureFirewallModel ? "AzureFirewallSubnet" : "AzureBastionSubnet",
-                            AddressPrefix = "10.0.0.0/24",
-                        });
-                    host.AddChild((AzureNodeBase)model);
-                    // Both require a linked public IP (diagram port wiring).
-                    var pip = new PublicIpModel { Name = "ads-host-pip" };
-                    var diagram = new BlazorDiagram();
-                    diagram.Links.Add(new Blazor.Diagrams.Core.Models.LinkModel(
-                        new SinglePortAnchor(pip.Ports[1]), new SinglePortAnchor(((AzureNodeBase)model).Ports[0])));
-                    break;
-                }
+                    {
+                        var host = new VirtualNetworkModel { Name = "ads-vnet" }
+                            .AddSubnet(new SubnetModel
+                            {
+                                Name = model is AzureFirewallModel ? "AzureFirewallSubnet" : "AzureBastionSubnet",
+                                AddressPrefix = "10.0.0.0/24",
+                            });
+                        host.AddChild((AzureNodeBase)model);
+                        // Both require a linked public IP (diagram port wiring).
+                        var pip = new PublicIpModel { Name = "ads-host-pip" };
+                        var diagram = new BlazorDiagram();
+                        diagram.Links.Add(new Blazor.Diagrams.Core.Models.LinkModel(
+                            new SinglePortAnchor(pip.Ports[1]), new SinglePortAnchor(((AzureNodeBase)model).Ports[0])));
+                        break;
+                    }
                 // APIM demands publisher contact info before it exports.
                 case APIMModel apim:
                     apim.PublisherName = "ads-publisher";
@@ -99,22 +99,22 @@ namespace AzureDesignStudio.Core.Tests
                     break;
                 // Web apps live in a service plan; the plan carries the OS.
                 case WebAppModel or FunctionAppModel:
-                {
-                    var plan = new AppServicePlanModel { Name = "ads-plan", Kind = "linux" };
-                    plan.AddChild((AzureNodeBase)model);
-                    if (model is FunctionAppModel func)
-                        func.HostingPlan = "consumption";
-                    ((dynamic)model).RuntimeStack = "dotnet|v6.0";
-                    break;
-                }
+                    {
+                        var plan = new AppServicePlanModel { Name = "ads-plan", Kind = "linux" };
+                        plan.AddChild((AzureNodeBase)model);
+                        if (model is FunctionAppModel func)
+                            func.HostingPlan = "consumption";
+                        ((dynamic)model).RuntimeStack = "dotnet|v6.0";
+                        break;
+                    }
                 // App gateway needs a linked public IP.
                 case AppGatewayModel gw:
-                {
-                    var pip = new PublicIpModel { Name = "ads-gw-pip" };
-                    var diagram = new BlazorDiagram();
-                    diagram.Links.Add(new Blazor.Diagrams.Core.Models.LinkModel(new SinglePortAnchor(pip.Ports[1]), new SinglePortAnchor(gw.Ports[0])));
-                    break;
-                }
+                    {
+                        var pip = new PublicIpModel { Name = "ads-gw-pip" };
+                        var diagram = new BlazorDiagram();
+                        diagram.Links.Add(new Blazor.Diagrams.Core.Models.LinkModel(new SinglePortAnchor(pip.Ports[1]), new SinglePortAnchor(gw.Ports[0])));
+                        break;
+                    }
             }
 
             return (IAzureResource)model;

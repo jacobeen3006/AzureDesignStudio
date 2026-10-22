@@ -37,8 +37,8 @@ namespace AzureDesignStudio.Services
         public async Task<IList<string>> GetResourceGroups(string subscriptionId)
         {
             var response = await _deployClient.GetResourceGroupsAsync(
-                new GetRgsRequest 
-                { 
+                new GetRgsRequest
+                {
                     SubscriptionId = subscriptionId
                 });
 

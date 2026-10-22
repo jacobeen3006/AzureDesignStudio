@@ -57,7 +57,7 @@ namespace AzureDesignStudio.Server.Services
             }
             var userId = new Guid(userIdClaim);
 
-            if(!ServiceTools.IsValidSubscriptionName(request.SubscriptionName))
+            if (!ServiceTools.IsValidSubscriptionName(request.SubscriptionName))
             {
                 _logger.LogWarning("{SubscriptionName} is not valid.", request.SubscriptionName);
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -77,7 +77,7 @@ namespace AzureDesignStudio.Server.Services
                 };
                 _designContext.AzureSubscriptions.Add(subscription);
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Exception occurred.");
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -116,7 +116,7 @@ namespace AzureDesignStudio.Server.Services
             var userId = new Guid(userIdClaim);
 
             var subResources = _designContext.AzureSubscriptions.Where(s => s.UserId == userId);
-            foreach(var subResource in subResources)
+            foreach (var subResource in subResources)
             {
                 response.SubscriptionData.Add(new SubscriptionRes
                 {
@@ -1658,24 +1658,24 @@ namespace AzureDesignStudio.Server.Services
         private static PlanApplyEventModel NewApplyEvent(Guid applyId, PlanApprovalModel approval, string subscriptionId,
             string resourceGroupName, string eventType, string? previewEvidence, string? detail, string? deploymentName = null,
             string? targetScope = null) => new()
-        {
-            ApplyId = applyId,
-            PlanHash = approval.PlanHash,
-            PlanJson = approval.PlanJson,
-            SubscriptionId = subscriptionId,
-            ResourceGroupName = resourceGroupName,
-            TargetScope = targetScope,
-            DeploymentName = deploymentName ?? WhatIfClient.DeploymentName,
-            ApprovedBy = approval.ApprovedBy,
-            ApprovedByUserId = approval.ApprovedByUserId,
-            ApprovedAtUtc = approval.ApprovedAtUtc,
-            PreviewEvidence = previewEvidence,
-            RevertPlanHash = RevertPlan.HashOf(approval.RevertPlanJson),
-            RevertPlanJson = approval.RevertPlanJson,
-            EventType = eventType,
-            Detail = PlanApplyEventModel.Truncate(detail),
-            TimestampUtc = DateTime.UtcNow,
-        };
+            {
+                ApplyId = applyId,
+                PlanHash = approval.PlanHash,
+                PlanJson = approval.PlanJson,
+                SubscriptionId = subscriptionId,
+                ResourceGroupName = resourceGroupName,
+                TargetScope = targetScope,
+                DeploymentName = deploymentName ?? WhatIfClient.DeploymentName,
+                ApprovedBy = approval.ApprovedBy,
+                ApprovedByUserId = approval.ApprovedByUserId,
+                ApprovedAtUtc = approval.ApprovedAtUtc,
+                PreviewEvidence = previewEvidence,
+                RevertPlanHash = RevertPlan.HashOf(approval.RevertPlanJson),
+                RevertPlanJson = approval.RevertPlanJson,
+                EventType = eventType,
+                Detail = PlanApplyEventModel.Truncate(detail),
+                TimestampUtc = DateTime.UtcNow,
+            };
 
         private async Task RecordApplyEventAsync(Guid applyId, PlanApprovalModel approval, string subscriptionId,
             string resourceGroupName, string eventType, string? detail, string? deploymentName = null, string? targetScope = null)
@@ -2152,18 +2152,18 @@ namespace AzureDesignStudio.Server.Services
 
         private static DecomWindowEventModel NewDecomWindowEvent(Guid applyId, string windowId, string planHash,
             string executionHash, string subscriptionId, string principal, string eventType, string? detail) => new()
-        {
-            Id = Guid.NewGuid(),
-            ApplyId = applyId,
-            Event = eventType,
-            WindowId = windowId,
-            PlanHash = planHash,
-            ExecutionHash = executionHash,
-            SubscriptionId = subscriptionId,
-            Principal = principal,
-            Detail = PlanApplyEventModel.Truncate(detail),
-            AtUtc = DateTime.UtcNow,
-        };
+            {
+                Id = Guid.NewGuid(),
+                ApplyId = applyId,
+                Event = eventType,
+                WindowId = windowId,
+                PlanHash = planHash,
+                ExecutionHash = executionHash,
+                SubscriptionId = subscriptionId,
+                Principal = principal,
+                Detail = PlanApplyEventModel.Truncate(detail),
+                AtUtc = DateTime.UtcNow,
+            };
 
         private async Task RecordDecomWindowEventAsync(Guid applyId, string windowId, string planHash,
             string executionHash, string subscriptionId, string principal, string eventType, string? detail)

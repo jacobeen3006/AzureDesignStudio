@@ -24,7 +24,11 @@ public sealed class TopologyPositions(WorkspaceDb db)
         if (row is null)
             context.NodePositions.Add(new NodePositionRecord
             {
-                NodeId = nodeId, ContainerId = containerId, X = x, Y = y, SavedAt = DateTimeOffset.UtcNow,
+                NodeId = nodeId,
+                ContainerId = containerId,
+                X = x,
+                Y = y,
+                SavedAt = DateTimeOffset.UtcNow,
             });
         else
         {
