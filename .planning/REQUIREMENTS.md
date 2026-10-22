@@ -50,7 +50,7 @@ Requirements for the pilot-ready milestone. Each maps to exactly one roadmap pha
 - [x] **BUILD-01**: A clean clone restores and builds with the SDK pinned at 10.0.401 and locked package versions.
 - [ ] **BUILD-02**: The Desktop host builds on pull requests, and a deliberate error in `MauiProgram.cs` fails the job.
 - [ ] **BUILD-03**: Package versions are centralized, app projects treat warnings as errors, and changed files pass a format check.
-- [ ] **BUILD-04**: CI fails on High/Critical vulnerable packages, with one dated AutoMapper allowlist entry that expires.
+- [x] **BUILD-04**: CI fails on High/Critical vulnerable packages, with one dated AutoMapper allowlist entry that expires.
 - [ ] **BUILD-05**: The non-blocking Windows Desktop job records its duration and becomes blocking after two consecutive green runs.
 
 ### Tests (TEST)
@@ -164,7 +164,7 @@ Updated 2026-10-21 during roadmap creation. Every v1 requirement maps to exactly
 | BUILD-01 | Phase 2 | Complete |
 | BUILD-02 | Phase 2 | Pending |
 | BUILD-03 | Phase 2 | Pending |
-| BUILD-04 | Phase 2 | Pending |
+| BUILD-04 | Phase 2 | Complete |
 | BUILD-05 | Phase 2 | Pending |
 | TEST-01 | Phase 3 | Pending |
 | TEST-02 | Phase 8 | Pending |
