@@ -185,7 +185,7 @@
         "type": "Direct",
         "requested": "[10.0.12, )",
         "resolved": "10.0.12",
-        "contentHash": "MIeBVeWkbKdggl3kmmIUnx8ZNEgjD2m1gTN/0W+TDRn6zcL1WZdq5hXhGQ0wjuSlw/8tvwwCg79PemfkJ3+5JA=="
+        "contentHash": "DbQBhmNAEuwgkTo2tvVp1FEvmTvGDp6ShzEH96l6lz2/x9Cmc/TGLK6gqC45TS4HMY9jmGMq3uaCQRX86luHbw=="
       },
       "Nerdbank.GitVersioning": {
         "type": "Direct",
