@@ -77,21 +77,28 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Package versions appear only in `Directory.Packages.props`, app projects build with warnings as errors, and a changed file that violates formatting fails the check.
   5. After two consecutive green non-blocking Windows runs, the Desktop job becomes blocking and every subsequent merge requires it.
 
-**Plans**: 7 plans
+**Plans**: 1/7 plans executed
 **Wave 1**
-- [ ] 02-01-PLAN.md — pinned SDK, centralized versions, crypto pin, 11 committed lock files
+- [x] 02-01-PLAN.md — pinned SDK, centralized versions, crypto pin, 11 committed lock files
+
 **Wave 2** *(blocked on Wave 1)*
 - [ ] 02-02-PLAN.md — Linux locked restore, three-part lock guard, cold-cache clone proof
+
 **Wave 3** *(blocked on Wave 2)*
 - [ ] 02-03-PLAN.md — warnings as errors and the whitespace normalisation
+
 **Wave 4** *(blocked on Wave 3)*
 - [ ] 02-04-PLAN.md — High/Critical audit gate with the single dated AutoMapper exception
+
 **Wave 5** *(blocked on Wave 4)*
 - [ ] 02-05-PLAN.md — non-blocking Desktop job, workload-set pin, evidence ledger
+
 **Wave 6** *(blocked on Wave 5)*
 - [ ] 02-06-PLAN.md — recorded red run and two green runs (human)
+
 **Wave 7** *(blocked on Wave 6)*
 - [ ] 02-07-PLAN.md — blocking flip and the required-check proof (human)
+
 **Parallel track**: Phase 7 shell completion may start as soon as Phase 1 lands; it has no server dependency, but no new UI surface may start before Phase 9.
 **Implementation note**: `global.json` (10.0.401/`latestPatch`), `Directory.Build.props`, `Directory.Packages.props`, `packages.lock.json`, `.editorconfig`. In `.github/workflows/build.yml` add a `windows-latest` job with NuGet cache and `dotnet workload restore` (runner images ship MAUI 9 workloads), keep the Linux job as the fast gate, and use `dotnet format --verify-no-changes` (`--verify-changed` does not exist in SDK 10.0.401 — RESEARCH E23). Keep `WindowsPackageType=None` as the csproj default — packaging in Phase 11 passes `-p:WindowsPackageType=Package`. Do not add MSIX packing until the duration is known.
 
@@ -240,7 +247,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Land and Stabilize | 8/8 | Complete    | 2026-10-21 |
-| 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
+| 2. Reproducible Build and CI Baseline | 1/7 | In Progress | - |
 | 3. Server Foundation and Integration Harness | 0/TBD | Not started | - |
 | 4. Database Durability | 0/TBD | Not started | - |
 | 5. Identity, Guardrails, and Offline Development | 0/TBD | Not started | - |
