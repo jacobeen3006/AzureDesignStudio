@@ -140,7 +140,7 @@ no `PackageReference` — intentionally dependency-free (`src/AzureDesignStudio.
 
 **Build:**
 - Versioning: `src/version.json` (`version` `1.0`, `cloudBuild.setVersionVariables=false`). `src/DockerBuild.ps1` runs `nbgv get-version -f json`, then `src/GenerateVersioningTargets.ps1` emits a transient `Directory.Build.targets`, builds the image, and deletes both files.
-- Docker: `src/AzureDesignStudio.Server/Dockerfile` (build arg `BuildConfiguration`, default `Release`), `.dockerignore` at `src/.dockerignore`.
+- Docker: `src/AzureDesignStudio.Server/Dockerfile` (build arg `BuildConfiguration`, default `Release`), built with the repository root as context (`src/DockerBuild.ps1`, `publish.yml`) so `global.json`, `Directory.Build.props`, `Directory.Packages.props` and `Directory.Build.targets` are visible to the image restore; `.dockerignore` at the repository root.
 - CI: `.github/workflows/build.yml` builds `src/AzureDesignStudio.Server`, `src/AzureDesignStudio`, `src/AzureDesignStudio.Mcp`, `src/AzureDesignStudio.Core.Tests` (desktop deliberately excluded on `ubuntu-latest`), runs offline tests, then `DockerBuild.ps1`; a `codeql` job autobuilds C#.
 - Release: `.github/workflows/publish.yml` publishes the WASM site zip, the Docker image, and a signed (optionally unsigned) Windows MSIX on `v*` tags.
 

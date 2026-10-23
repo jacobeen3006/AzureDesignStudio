@@ -55,11 +55,13 @@ jobs:
       # project targets net10.0-windows and cannot build on ubuntu runners.
       # Server + WASM + MCP + Tests transitively cover Core, AzureResources,
       # SharedModels, SourceGeneration, Workspace and Discovery.
+      # --no-restore: the locked restore above owns the graph; an implicit restore
+      # here would silently rewrite a lock that the guard has already checked.
       run: |
-        dotnet build src/AzureDesignStudio.Server -c Release
-        dotnet build src/AzureDesignStudio -c Release
-        dotnet build src/AzureDesignStudio.Mcp -c Release
-        dotnet build src/AzureDesignStudio.Core.Tests -c Release
+        dotnet build src/AzureDesignStudio.Server -c Release --no-restore
+        dotnet build src/AzureDesignStudio -c Release --no-restore
+        dotnet build src/AzureDesignStudio.Mcp -c Release --no-restore
+        dotnet build src/AzureDesignStudio.Core.Tests -c Release --no-restore
 
     - name: Test (offline)
       run: dotnet test src/AzureDesignStudio.Core.Tests -c Release --no-build --filter "Category!=LiveAzure"
@@ -152,7 +154,7 @@ jobs:
     - name: Start timer
       id: t0
       shell: pwsh
-      run: echo "start=$([DateTime]::UtcNow.ToString('o'))" >> $env:GITHUB_OUTPUT
+      run: echo "start=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())" >> $env:GITHUB_OUTPUT
 
     - name: Build Desktop
       # Release, no restore (the locked restore above owns the graph) and AOT off:
@@ -163,7 +165,8 @@ jobs:
     - name: Format (changed files)
       # Scoped on purpose: the whole solution is 51 s cold, one changed file is ~18 s,
       # and the repo-wide normalisation already landed. Exit 2 means "would change";
-      # any non-zero exit is a failure.
+      # any non-zero exit is a failure. The gate fails closed: a fetch/diff error must
+      # not look like "no changed files". Skipping is only for a run with no base ref.
       shell: pwsh
       run: |
         if ([string]::IsNullOrWhiteSpace($env:GITHUB_BASE_REF)) {
@@ -171,7 +174,15 @@ jobs:
           exit 0
         }
         git fetch --no-tags --depth=1 origin "$env:GITHUB_BASE_REF"
+        if ($LASTEXITCODE -ne 0) {
+          Write-Error "git fetch of '$env:GITHUB_BASE_REF' failed (exit $LASTEXITCODE); cannot determine the changed files."
+          exit 1
+        }
         $changed = @(git diff --name-only --diff-filter=ACMR "origin/$env:GITHUB_BASE_REF...HEAD" -- '*.cs')
+        if ($LASTEXITCODE -ne 0) {
+          Write-Error "git diff against 'origin/$env:GITHUB_BASE_REF' failed (exit $LASTEXITCODE); cannot determine the changed files."
+          exit 1
+        }
         if ($changed.Count -eq 0) {
           Write-Host 'No changed C# files; skipping the format gate.'
           exit 0
@@ -187,14 +198,23 @@ jobs:
       if: always()
       shell: pwsh
       run: |
-        $start = [DateTime]::Parse('${{ steps.t0.outputs.start }}')
+        # Unix seconds on both ends: [DateTime]::Parse('...Z') returns Local and mixes
+        # zones with UtcNow, which recorded a negative duration on UTC+2 hosts.
+        $raw = '${{ steps.t0.outputs.start }}'
+        if ($raw -notmatch '^\d+$') {
+          Write-Warning "Start timer output '$raw' is not a unix timestamp; skipping the duration record."
+          exit 0
+        }
+        $startUnix = [long]$raw
+        $endUnix = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        $seconds = [Math]::Max(0, $endUnix - $startUnix)
         $metrics = [pscustomobject]@{
           job        = '${{ github.job }}'
           run_id     = '${{ github.run_id }}'
           commit     = '${{ github.sha }}'
-          started_at = $start.ToString('o')
-          ended_at   = [DateTime]::UtcNow.ToString('o')
-          seconds    = [int]([DateTime]::UtcNow - $start).TotalSeconds
+          started_at = [DateTimeOffset]::FromUnixTimeSeconds($startUnix).UtcDateTime.ToString('o')
+          ended_at   = [DateTimeOffset]::FromUnixTimeSeconds($endUnix).UtcDateTime.ToString('o')
+          seconds    = [long]$seconds
           aot        = 'disabled'
         }
         $metrics | ConvertTo-Json | Set-Content desktop-build-metrics.json
