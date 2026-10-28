@@ -1,0 +1,11 @@
+<Project>
+
+  <!-- MAUI's BundledVersions.targets sets $(MauiVersion) only in the inner
+       (per-TFM) Desktop build; the outer multi-target evaluation sees it empty.
+       Directory.Build.props is evaluated before Directory.Packages.props, so
+       the pin must live here for the two MAUI central package rows to resolve. -->
+  <PropertyGroup>
+    <MauiVersion>10.0.110</MauiVersion>
+  </PropertyGroup>
+
+</Project>
