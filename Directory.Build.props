@@ -6,6 +6,9 @@
        the pin must live here for the two MAUI central package rows to resolve. -->
   <PropertyGroup>
     <MauiVersion>10.0.110</MauiVersion>
+    <!-- One packages.lock.json per project is required. Locked mode is a CI
+         restore flag, never a repository property. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 
 </Project>
