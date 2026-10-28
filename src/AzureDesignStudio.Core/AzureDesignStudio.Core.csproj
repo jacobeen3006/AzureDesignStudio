@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+<Project Sdk="Microsoft.NET.Sdk.Razor">
 
 	<PropertyGroup>
 		<TargetFramework>net10.0</TargetFramework>
@@ -16,18 +16,18 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="AntDesign" Version="1.6.2" />
-    <PackageReference Include="AutoMapper" Version="12.0.1" />
+    <PackageReference Include="AntDesign" />
+    <PackageReference Include="AutoMapper" />
     <!--<PackageReference Include="AzureDesignStudio.AzureResources.ApiManagement" Version="0.2.0" />-->
     <!--<PackageReference Include="AzureDesignStudio.AzureResources.Compute" Version="0.2.0" />-->
 	<!--<PackageReference Include="AzureDesignStudio.AzureResources.Sql" Version="0.3.0" />-->
 	<!--<PackageReference Include="AzureDesignStudio.AzureResources.Storage" Version="0.2.0" />-->
 	<!--<PackageReference Include="AzureDesignStudio.AzureResources.Web" Version="0.2.0" />-->
-    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.12" />
-    <PackageReference Include="Z.Blazor.Diagrams" Version="3.0.4.1" />
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.12" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.12" />
-	<PackageReference Include="Nerdbank.GitVersioning" Version="3.6.146">
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
+    <PackageReference Include="Z.Blazor.Diagrams" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+	<PackageReference Include="Nerdbank.GitVersioning">
 		<PrivateAssets>all</PrivateAssets>
 		<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 	</PackageReference>

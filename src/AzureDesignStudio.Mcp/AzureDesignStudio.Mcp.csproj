@@ -8,8 +8,8 @@
     <RootNamespace>AzureDesignStudio.Mcp</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
+    <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
 
   <ItemGroup>
