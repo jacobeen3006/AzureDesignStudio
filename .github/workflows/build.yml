@@ -21,7 +21,27 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '10.0.x'
+        global-json-file: global.json
+        cache: true
+        cache-dependency-path: '**/packages.lock.json'
+
+    - name: Restore (locked)
+      run: |
+        dotnet restore src/AzureDesignStudio.Server --locked-mode
+        dotnet restore src/AzureDesignStudio --locked-mode
+        dotnet restore src/AzureDesignStudio.Mcp --locked-mode
+        dotnet restore src/AzureDesignStudio.Core.Tests --locked-mode
+
+    # Three holes, three lines: a tracked lock the restore had to rewrite
+    # (diff catches it), a lock the restore just created that was never
+    # committed (porcelain sees untracked files, diff does not), and a
+    # project whose lock was never added at all (locked restore exits 0 on
+    # a missing file, so the tracked count must equal the csproj count).
+    - name: Lock files must be committed
+      run: |
+        git diff --exit-code -- '*packages.lock.json'
+        test -z "$(git status --porcelain -- '*packages.lock.json')"
+        test "$(git ls-files '*packages.lock.json' | wc -l)" -eq "$(ls src/*/*.csproj | wc -l)"
 
     - name: Build
       # Explicit project set instead of the full solution: the MAUI desktop
