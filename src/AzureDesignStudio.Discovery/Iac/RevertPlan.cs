@@ -90,31 +90,31 @@ public sealed class RevertPlan
 
                 case WhatIfChangeKind.Modify:
                 case WhatIfChangeKind.Delete:
-                {
-                    var action = change.Kind == WhatIfChangeKind.Modify ? RevertActionKind.Restore : RevertActionKind.Recreate;
-                    if (string.IsNullOrWhiteSpace(change.BeforeJson))
                     {
-                        Add(entries, ref unrevertable, RevertActionKind.Unrevertable, change, payload: null, reason: "ARM did not return the pre-change payload");
+                        var action = change.Kind == WhatIfChangeKind.Modify ? RevertActionKind.Restore : RevertActionKind.Recreate;
+                        if (string.IsNullOrWhiteSpace(change.BeforeJson))
+                        {
+                            Add(entries, ref unrevertable, RevertActionKind.Unrevertable, change, payload: null, reason: "ARM did not return the pre-change payload");
+                            continue;
+                        }
+
+                        // Any valid JSON is a snapshot (objects, arrays, scalars, JSON null included)
+                        // and embeds as-is; only malformed JSON is unrevertable. JsonNode.Parse maps
+                        // JSON null to a null node, so the null payload is preserved explicitly.
+                        string? payload;
+                        try
+                        {
+                            payload = JsonNode.Parse(change.BeforeJson)?.ToJsonString() ?? "null";
+                        }
+                        catch (JsonException)
+                        {
+                            Add(entries, ref unrevertable, RevertActionKind.Unrevertable, change, payload: null, reason: "failed to parse pre-deployment payload");
+                            continue;
+                        }
+
+                        Add(entries, ref unrevertable, action, change, payload: payload, reason: null);
                         continue;
                     }
-
-                    // Any valid JSON is a snapshot (objects, arrays, scalars, JSON null included)
-                    // and embeds as-is; only malformed JSON is unrevertable. JsonNode.Parse maps
-                    // JSON null to a null node, so the null payload is preserved explicitly.
-                    string? payload;
-                    try
-                    {
-                        payload = JsonNode.Parse(change.BeforeJson)?.ToJsonString() ?? "null";
-                    }
-                    catch (JsonException)
-                    {
-                        Add(entries, ref unrevertable, RevertActionKind.Unrevertable, change, payload: null, reason: "failed to parse pre-deployment payload");
-                        continue;
-                    }
-
-                    Add(entries, ref unrevertable, action, change, payload: payload, reason: null);
-                    continue;
-                }
 
                 default:
                     // Bad/Unknown: ARM's prediction was indeterminate, so the undo is too.

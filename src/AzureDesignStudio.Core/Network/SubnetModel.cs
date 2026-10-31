@@ -56,10 +56,10 @@ namespace AzureDesignStudio.Core.Network
 
         [MapToDto]
         [Required, DisplayName("Address space")]
-        public string AddressPrefix 
-        { 
-            get => _subnet.Properties.AddressPrefix; 
-            set => _subnet.Properties.AddressPrefix = value; 
+        public string AddressPrefix
+        {
+            get => _subnet.Properties.AddressPrefix;
+            set => _subnet.Properties.AddressPrefix = value;
         }
 
         [MapToDto]
@@ -83,19 +83,19 @@ namespace AzureDesignStudio.Core.Network
                         && serviceEndpoints.FirstOrDefault(d => d.Service == "Microsoft.Sql") is null)
                     {
                         serviceEndpoints.Add(new()
-                            {
-                                Service = "Microsoft.Sql",
-                                Locations = new List<string>{ sqlDb.Location }
-                            });
+                        {
+                            Service = "Microsoft.Sql",
+                            Locations = new List<string> { sqlDb.Location }
+                        });
                     }
                     if (link.Target.Model is PortModel webTp && webTp.Parent is WebAppModel webapp
                         && serviceEndpoints.FirstOrDefault(d => d.Service == "Microsoft.Web") is null)
                     {
                         serviceEndpoints.Add(new()
-                            {
-                                Service = "Microsoft.Web",
-                                Locations = new List<string>{ "*" }
-                            });
+                        {
+                            Service = "Microsoft.Web",
+                            Locations = new List<string> { "*" }
+                        });
                     }
                 }
             }
@@ -117,7 +117,7 @@ namespace AzureDesignStudio.Core.Network
             _subnet.Properties.ServiceEndpoints = new List<ServiceEndpointPropertiesFormat>();
             _subnet.Properties.Delegations = new List<Delegation>();
 
-            foreach(var child in Children)
+            foreach (var child in Children)
             {
                 if (child is AppServicePlanModel
                     && _subnet.Properties.Delegations.FirstOrDefault(d => d.Properties?.ServiceName == "Microsoft.Web/serverfarms") is null)

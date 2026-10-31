@@ -78,9 +78,9 @@ public class AppGatewayModel : AzureNodeBase
     };
     protected override ResourceBase ArmResource => _appGateway;
     [Required, DisplayName("Tier"), MapToDto]
-    public string Tier 
-    { 
-        get => _appGateway.Properties.Sku.Tier; 
+    public string Tier
+    {
+        get => _appGateway.Properties.Sku.Tier;
         set
         {
             _appGateway.Properties.Sku.Tier = value;
@@ -90,16 +90,16 @@ public class AppGatewayModel : AzureNodeBase
     [DisplayName("Autoscaling"), MapToDto]
     public bool Autoscaling { get; set; } = false;
     [DisplayName("Instance"), MapToDto]
-    public int InstanceCount 
-    { 
-        get => _appGateway.Properties.Sku.Capacity; 
-        set => _appGateway.Properties.Sku.Capacity = value; 
+    public int InstanceCount
+    {
+        get => _appGateway.Properties.Sku.Capacity;
+        set => _appGateway.Properties.Sku.Capacity = value;
     }
     [DisplayName("Min Instance"), MapToDto]
-    public int MinCapacity 
-    { 
-        get => _appGateway.Properties.AutoscaleConfiguration.MinCapacity; 
-        set => _appGateway.Properties.AutoscaleConfiguration.MinCapacity = value; 
+    public int MinCapacity
+    {
+        get => _appGateway.Properties.AutoscaleConfiguration.MinCapacity;
+        set => _appGateway.Properties.AutoscaleConfiguration.MinCapacity = value;
     }
     [DisplayName("Max Instance"), MapToDto]
     public int MaxCapacity

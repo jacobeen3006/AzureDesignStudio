@@ -143,7 +143,7 @@ namespace AzureDesignStudio.Core.Web
                     var stacks = webApp.RuntimeStack.Split("|");
                     if (stacks[0].Equals("python", StringComparison.InvariantCultureIgnoreCase)
                         || stacks[0].Equals("ruby", StringComparison.InvariantCultureIgnoreCase)
-                        || (stacks[0].Equals("php", StringComparison.InvariantCultureIgnoreCase) 
+                        || (stacks[0].Equals("php", StringComparison.InvariantCultureIgnoreCase)
                             && stacks[1].Equals("8.0", StringComparison.InvariantCultureIgnoreCase)))
                     {
                         return true;

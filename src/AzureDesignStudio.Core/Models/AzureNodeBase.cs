@@ -64,9 +64,9 @@ namespace AzureDesignStudio.Core.Models
             {
                 throw new Exception($"{Name} is not valid.");
             }
-            
+
             PopulateArmAttributes();
-            
+
             return new List<ResourceBase> { ArmResource };
         }
 

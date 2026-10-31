@@ -46,7 +46,7 @@ namespace AzureDesignStudio.Core.Web
         [Required, DisplayName("Runtime"), MapToDto]
         public string RuntimeStack { get; set; } = null!;
         [Required, DisplayName("OS")]
-        public string ServicePlanOS 
+        public string ServicePlanOS
         {
             get => (Group as AppServicePlanModel)!.Kind;
             set => (Group as AppServicePlanModel)!.Kind = value;
@@ -169,7 +169,7 @@ namespace AzureDesignStudio.Core.Web
         {
             var stacks = RuntimeStack.Split("|");
 
-            switch(stacks[0])
+            switch (stacks[0])
             {
                 case "dotnet":
                     siteConfig.NetFrameworkVersion = stacks[1];
@@ -200,7 +200,7 @@ namespace AzureDesignStudio.Core.Web
         {
             if (Group is not AppServicePlanModel servicePlan)
                 throw new Exception($"{ServiceName} must be in a service plan");
-            
+
             servicePlan.Kind = ServicePlanOS;
 
             return servicePlan;

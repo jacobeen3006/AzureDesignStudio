@@ -100,8 +100,8 @@ namespace AzureDesignStudio.Components
             openedDrawer = string.Empty;
             return Task.CompletedTask;
         }
-        private async Task<DrawerRef<string>> OpenDrawer<TDrawerTemplate>(string title, string options, 
-            bool bodyNoPadding = false, int width = 350) 
+        private async Task<DrawerRef<string>> OpenDrawer<TDrawerTemplate>(string title, string options,
+            bool bodyNoPadding = false, int width = 350)
             where TDrawerTemplate : FeedbackComponent<string, string>
         {
             var drawerOptions = new DrawerOptions()
@@ -170,7 +170,8 @@ namespace AzureDesignStudio.Components
                     case "ads":
                         await ExportAdsJson();
                         break;
-                };
+                }
+                ;
             };
         }
         private async Task OpenImportDrawer()
@@ -304,7 +305,7 @@ namespace AzureDesignStudio.Components
                     builder.CloseElement();
                 }
             });
-            
+
             await Task.Delay(10);
 
             var bicep = await _adsBicepDecompiler.Decompile(jsonString);
@@ -331,9 +332,9 @@ namespace AzureDesignStudio.Components
             {
                 return;
             }
-            
-            await OpenCodeDrawer(new CodeDrawerContent 
-            { 
+
+            await OpenCodeDrawer(new CodeDrawerContent
+            {
                 Type = CodeDrawerContentType.Json,
                 Content = jsonString,
                 ArmTemplate = armTemplate
@@ -403,7 +404,7 @@ namespace AzureDesignStudio.Components
         private async Task InvokePrintJS()
         {
             var bound = adsContext.Diagram.BeforePrint();
-            
+
             try
             {
                 imgUrl = await JS.InvokeAsync<string>("diagram2PicAsync", "png", bound!.Width, bound!.Height);
@@ -508,6 +509,6 @@ namespace AzureDesignStudio.Components
                 adsContext.CurrentDesignName = designName;
             }
 
-    }
+        }
     }
 }

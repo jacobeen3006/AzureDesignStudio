@@ -1,0 +1,12 @@
+root = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+tab_width = 4
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# end_of_line is intentionally omitted: the index is LF for all files while this
+# worktree checks out 519 of them as CRLF; pinning would rewrite hundreds of files.
+# charset is intentionally omitted: 102 of 820 files carry a UTF-8 BOM.

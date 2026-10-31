@@ -23,7 +23,7 @@ namespace AzureDesignStudio.Server.Services
         internal static bool IsValidSubscriptionName(string subscriptionName)
         {
             Regex regex = new(@"^[^<>;|]+$"); // Azure subscription name cannot have these characters: < > ; |
-            if (string.IsNullOrWhiteSpace(subscriptionName) || subscriptionName.Length > 64 
+            if (string.IsNullOrWhiteSpace(subscriptionName) || subscriptionName.Length > 64
                 || !regex.IsMatch(subscriptionName))
                 return false;
 

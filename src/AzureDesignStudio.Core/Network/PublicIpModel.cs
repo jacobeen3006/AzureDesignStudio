@@ -39,31 +39,31 @@ namespace AzureDesignStudio.Core.Network
         public override Type? DataFormType => typeof(PublicIpForm);
         [MapToDto]
         [DisplayName("IP version")]
-        public string IpVersion 
-        { 
-            get => _pipAddress.Properties.PublicIPAddressVersion; 
-            set => _pipAddress.Properties.PublicIPAddressVersion = value; 
+        public string IpVersion
+        {
+            get => _pipAddress.Properties.PublicIPAddressVersion;
+            set => _pipAddress.Properties.PublicIPAddressVersion = value;
         }
         [MapToDto]
         [DisplayName("IP assignment")]
-        public string IpAllocationMethod 
-        { 
+        public string IpAllocationMethod
+        {
             get => _pipAddress.Properties.PublicIPAllocationMethod;
-            set => _pipAddress.Properties.PublicIPAllocationMethod = value; 
+            set => _pipAddress.Properties.PublicIPAllocationMethod = value;
         }
         [MapToDto]
         [DisplayName("SKU")]
-        public string Sku 
-        { 
-            get => _pipAddress.Sku.Name; 
-            set => _pipAddress.Sku.Name = value; 
+        public string Sku
+        {
+            get => _pipAddress.Sku.Name;
+            set => _pipAddress.Sku.Name = value;
         }
         [MapToDto]
         [DisplayName("Tier")]
-        public string Tier 
-        { 
-            get => _pipAddress.Sku.Tier; 
-            set => _pipAddress.Sku.Tier = value; 
+        public string Tier
+        {
+            get => _pipAddress.Sku.Tier;
+            set => _pipAddress.Sku.Tier = value;
         }
         public override (bool result, string message) IsDrappable(GroupModel overlappedGroup)
         {

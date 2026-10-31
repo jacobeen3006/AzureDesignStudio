@@ -118,7 +118,7 @@ namespace AzureDesignStudio.SourceGeneration
                 Properties = new List<DtoTypeProperty>(),
             };
 
-            foreach(var member in classDecl.Members)
+            foreach (var member in classDecl.Members)
             {
                 if (member is PropertyDeclarationSyntax propSyntax && propSyntax.HasAttribute(GeneratorConsts.DtoAttributeName))
                 {

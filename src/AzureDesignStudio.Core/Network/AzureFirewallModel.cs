@@ -27,9 +27,9 @@ namespace AzureDesignStudio.Core.Network
         private string sku = "Premium";
         [MapToDto]
         [DisplayName("SKU")]
-        public string Sku 
-        { 
-            get => sku; 
+        public string Sku
+        {
+            get => sku;
             set
             {
                 sku = value;
@@ -61,7 +61,7 @@ namespace AzureDesignStudio.Core.Network
 
         public bool HasPublicIp => LinkedPublicIps.Any();
 
-        public override bool IsValid 
+        public override bool IsValid
             => Group is SubnetModel subnet && subnet.Children.Count == 1
                 && subnet.Name.Equals("AzureFirewallSubnet") && HasPublicIp;
 
@@ -91,8 +91,8 @@ namespace AzureDesignStudio.Core.Network
                     Name = "AZFW_VNet",
                     Tier = Sku
                 },
-                IpConfigurations = new List<AzureFirewallIPConfiguration> 
-                { 
+                IpConfigurations = new List<AzureFirewallIPConfiguration>
+                {
                     new AzureFirewallIPConfiguration
                     {
                         Name = Name + "-ipcfg",
@@ -101,7 +101,7 @@ namespace AzureDesignStudio.Core.Network
                             Subnet = new SubResource { Id = s.ResourceId },
                             PublicIPAddress = new SubResource { Id = publicIp.ResourceId },
                         }
-                    } 
+                    }
                 },
                 FirewallPolicy = new() { Id = FirewallPolicy.ResourceId },
             };

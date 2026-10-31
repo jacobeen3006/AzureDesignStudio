@@ -33,14 +33,14 @@ public class LivePlaneMergerTests
 
     private static AzureNodeDto Node(string id, string typeKey, string name, double x, double y,
         string groupId = "", double w = 81, double h = 81) => new()
-    {
-        Id = id,
-        TypeKey = typeKey,
-        Name = name,
-        Position = new Point(x, y),
-        Size = new Size(w, h),
-        GroupId = groupId,
-    };
+        {
+            Id = id,
+            TypeKey = typeKey,
+            Name = name,
+            Position = new Point(x, y),
+            Size = new Size(w, h),
+            GroupId = groupId,
+        };
 
     private static string Key(AzureNodeDto n) => $"{n.Id}@{n.Position.X},{n.Position.Y}|g:{n.GroupId}";
 

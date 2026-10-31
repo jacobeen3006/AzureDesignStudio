@@ -46,8 +46,11 @@ public class BicepParamsTextTests
             ],
             values: new System.Collections.Generic.Dictionary<string, string>
             {
-                ["location"] = "westeurope", ["replica"] = "true", ["count"] = "3",
-                ["settings"] = """{"a":1}""", ["greeting"] = "it's here",
+                ["location"] = "westeurope",
+                ["replica"] = "true",
+                ["count"] = "3",
+                ["settings"] = """{"a":1}""",
+                ["greeting"] = "it's here",
             });
 
         Assert.Contains("param location = 'westeurope'", text);

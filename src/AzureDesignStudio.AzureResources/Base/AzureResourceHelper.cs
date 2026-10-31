@@ -6,7 +6,7 @@ namespace AzureDesignStudio.AzureResources.Base
     {
         public static Type GetTypeOfAzureResource(string resourceType, string apiVersion)
         {
-            if (string.IsNullOrEmpty(resourceType)) 
+            if (string.IsNullOrEmpty(resourceType))
             {
                 throw new ArgumentNullException(resourceType);
             }
