@@ -9,6 +9,11 @@
     <!-- One packages.lock.json per project is required. Locked mode is a CI
          restore flag, never a repository property. -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Measured baseline: zero compiler, NuGet, analyzer, and MSBuild warnings;
+         the 91 PRI263 warnings are WinAppSDK task warnings and are deliberately
+         not promoted. No MSBuildTreatWarningsAsErrors, WarningsAsErrors, NoWarn,
+         CodeAnalysisTreatWarningsAsErrors, or EnforceCodeStyleInBuild. -->
   </PropertyGroup>
 
 </Project>
