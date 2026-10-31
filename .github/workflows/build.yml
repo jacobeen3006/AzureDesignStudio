@@ -87,9 +87,91 @@ jobs:
         languages: csharp
 
     - name: Autobuild
-      uses: github/codeql-action/autobuild@v3
+      uses: github/codeql-action/autobuild
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
       with:
         category: '/language:csharp'
+
+  desktop:
+    name: Desktop (windows-latest)
+    runs-on: windows-latest
+    # Two consecutive green runs recorded in 02-DESKTOP-RUNS.md, then
+    # plan 02-07 deletes this line so the check can turn red.
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # avoid shallow clone so nbgv can do its work.
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        global-json-file: global.json
+        cache: true
+        cache-dependency-path: '**/packages.lock.json'
+
+    # The runner image ships .NET 9 MAUI only, so the .NET 10 band the
+    # Desktop TFM needs is restored by project rather than installed manually.
+    - name: Restore workloads
+      run: dotnet workload restore src/AzureDesignStudio.Desktop/AzureDesignStudio.Desktop.csproj
+
+    - name: Restore (locked)
+      shell: bash
+      run: dotnet restore src/AzureDesignStudio.sln --locked-mode
+
+    - name: Lock files must be committed
+      shell: bash
+      run: |
+        git diff --exit-code -- '*packages.lock.json'
+        test -z "$(git status --porcelain -- '*packages.lock.json')"
+        test "$(git ls-files '*packages.lock.json' | wc -l)" -eq "$(ls src/*/*.csproj | wc -l)"
+
+    - name: Start timer
+      id: t0
+      shell: pwsh
+      run: echo "start=$([DateTime]::UtcNow.ToString('o'))" >> $env:GITHUB_OUTPUT
+
+    # 74 s vs 466 s: AOT is pulled in through the WASM ProjectReference;
+    # AOT itself is re-verified in Phase 11.
+    - name: Build Desktop
+      run: >
+        dotnet build src/AzureDesignStudio.Desktop/AzureDesignStudio.Desktop.csproj
+        -c Release --no-restore -p:RunAOTCompilation=false
+
+    - name: Format (changed files)
+      shell: pwsh
+      run: |
+        if (-not $env:GITHUB_BASE_REF) {
+          Write-Host 'not a pull-request run; skipping format gate'
+          exit 0
+        }
+        git fetch --no-tags --depth=1 origin "$env:GITHUB_BASE_REF"
+        $changed = git diff --name-only --diff-filter=ACMR "origin/$env:GITHUB_BASE_REF...HEAD" -- '*.cs'
+        if (-not $changed) { Write-Host 'no C# changes'; exit 0 }
+        dotnet format src/AzureDesignStudio.sln --verify-no-changes --no-restore --include $changed
+
+    - name: Record duration
+      if: always()
+      shell: pwsh
+      run: |
+        $start = [DateTime]::Parse('${{ steps.t0.outputs.start }}')
+        $metrics = [pscustomobject]@{
+          job        = '${{ github.job }}'
+          run_id     = '${{ github.run_id }}'
+          commit     = '${{ github.sha }}'
+          started_at = $start.ToString('o')
+          ended_at   = [DateTime]::UtcNow.ToString('o')
+          seconds    = [int]([DateTime]::UtcNow - $start).TotalSeconds
+          aot        = 'disabled'
+        }
+        $metrics | ConvertTo-Json | Set-Content desktop-build-metrics.json
+        $metrics | ConvertTo-Json | Out-File -Append $env:GITHUB_STEP_SUMMARY
+
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: desktop-build-metrics
+        path: desktop-build-metrics.json
