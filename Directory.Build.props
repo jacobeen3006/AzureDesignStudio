@@ -10,10 +10,28 @@
          restore flag, never a repository property. -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Audit at High/Critical severity across every project's full graph.
+         Only High/Critical are reported at all, so only they can fail; promoting
+         lower severities would break every developer's local build on a moderate
+         advisory. The SDK defaults the mode to 'all' only for .NETCoreApp 10.0+,
+         so the netstandard2.0 SourceGeneration project audits direct dependencies
+         only unless NuGetAuditMode is set here. With the 10.0.13 crypto pin in
+         place (plan 02-01), 'all' adds no advisory beyond AutoMapper's. -->
+    <NuGetAuditLevel>high</NuGetAuditLevel>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <AdsAuditSuppressionAutoMapperExpires>2027-01-31</AdsAuditSuppressionAutoMapperExpires>
     <!-- Measured baseline: zero compiler, NuGet, analyzer, and MSBuild warnings;
          the 91 PRI263 warnings are WinAppSDK task warnings and are deliberately
          not promoted. No MSBuildTreatWarningsAsErrors, WarningsAsErrors, NoWarn,
          CodeAnalysisTreatWarningsAsErrors, or EnforceCodeStyleInBuild. -->
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Single dated exception: AutoMapper 12.0.1 GHSA-rvv3-g6hj-g44x (DoS via
+         uncontrolled recursion). Mappings are shallow node DTOs; 13+ requires a
+         commercial license key. Phase 8 owns the replacement. The expiry property
+         above is enforced by Directory.Build.targets (AdsCheckAuditSuppressionExpiry). -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-rvv3-g6hj-g44x" />
+  </ItemGroup>
 
 </Project>

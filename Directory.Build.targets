@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <_AdsToday>$([System.DateTime]::UtcNow.ToString("yyyy-MM-dd"))</_AdsToday>
+    <_AdsExpiryCompare>$([System.String]::Compare('$(AdsAuditSuppressionAutoMapperExpires)', '$(_AdsToday)'))</_AdsExpiryCompare>
+  </PropertyGroup>
+
+  <Target Name="AdsCheckAuditSuppressionExpiry" BeforeTargets="Restore;Build;PrepareForBuild">
+    <Error Condition="$(_AdsExpiryCompare) &lt; 0"
+           Text="AutoMapper audit suppression expired on $(AdsAuditSuppressionAutoMapperExpires) (advisory GHSA-rvv3-g6hj-g44x); replace the package before this date. Today is $(_AdsToday)." />
+  </Target>
+</Project>
