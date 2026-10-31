@@ -1,6 +1,6 @@
 ---
 phase: 01-land-and-stabilize
-verified: 2026-10-21T11:19:33Z
+verified: 2026-10-31T00:00:00Z
 status: passed
 score: 5/5 must-haves verified
 covered_files:
@@ -82,17 +82,39 @@ covered_files:
   - src/AzureDesignStudio/wwwroot/css/ads-tokens.css
   - src/AzureDesignStudio/wwwroot/index.html
   - src/AzureDesignStudio/wwwroot/js/ads.js
-covered_digest: "v3:sha256:c3bff7add381fadbd573eaabb59e8f605f7a78564c77bc50023e51769c72378a"
+covered_digest: "v3:sha256:429a4de0b22f9b211daab13eaca59def432e60af4208c6c0843038e1536656cc"
 behavior_unverified: 0
 overrides_applied: 0
+re_verification:
+  previous_status: passed
+  previous_score: 5/5
+  gaps_closed: []
+  gaps_remaining: []
+  regressions: []
 ---
 
 # Phase 01: Land and Stabilize Verification Report
 
 **Phase Goal:** The milestone's starting point stops living on one machine: the working slice lands in reviewable commits, tracked artifacts stop lying, the stale pointer zone is fixed, and the publisher identity is decided before any packaging work begins.
-**Verified:** 2026-10-21T11:19:33Z
+**Verified:** 2026-10-31T00:00:00Z
 **Status:** passed
-**Re-verification:** No — initial verification
+**Re-verification:** Yes — fingerprint refresh after `stale` (previous status: passed, 5/5), scoped to the landed commits
+
+## Re-verification Scope and Staleness
+
+**Scope (user decision):** the verdict is for the three LANDED commits `078a9d7` / `ea8ac77` / `3315b94` (read via `git show`/`git ls-tree`/ancestry, not the working tree). Uncommitted working-tree WIP and the Phase 2 edit to `AGENTS.md` are out of scope.
+
+**Why the prior report went `stale`:** (1) `AGENTS.md` was legitimately edited by Phase 2 commit `acc2027` (2026-10-28: regenerated stamp, CI/build-authority/pitfall lines; +9/−6); (2) seven covered source files carry uncommitted user WIP (`VirtualNetworkModel.cs`, `SubnetForm.razor`, `DiagramPanel.razor.cs`, `Stencil.razor.css`, `ads-tokens.css`, `ads.js`, plus `SubnetPlacementTests.cs`). The `covered_digest` below therefore fingerprints the *current working tree*; the verdict is for the landed commits. The WIP is not Phase 1 work.
+
+**Regression check — none found.**
+- `acc2027`'s AGENTS.md diff does not touch the SC#5 claims: HEAD `AGENTS.md:9` still says "Entra ID work+personal accounts … 11 projects in src/", `:69` still "Entra ID work+personal"; `README.md:38,48,76,223` unchanged; `CONCERNS.md:9,15` and `docs/architecture.md` still carry "11 project(s)"; zero `B2C`/`(7|8) projects` in README/AGENTS at HEAD.
+- `git ls-tree 3315b94`: 0 `*.dll`/`.omo/`/`.swarm/` paths, 11 csproj. `git ls-files` at HEAD: same (no dll/.omo/.swarm; 11 csproj; 55 `.planning` files).
+- `.gitignore` at `3315b94` lines 364–367 carry `/*.dll`, `.omo/`, `.swarm/`, `.planning/.omp-ui-state.json`.
+- Ancestry: all three land commits and converged head `0aa2a54` are ancestors of `origin/main` (`578949c`, which also contains Phase 2 planning). HEAD `fa62bb9` is 5 Phase 2 commits ahead of origin (unpushed, Phase 2 scope; not a Phase 1 concern).
+- Publisher decision: `CN=Jakub Talaj` appears once in `.planning/PROJECT.md` and once in `docs/entra-setup.md` at HEAD, Artifact Signing route once in entra-setup; `git diff e9078d1 3315b94 -- Package.appxmanifest` empty.
+- SC#4: `ads.js` at `ea8ac77` still resolves the zone at event time via `liveZone()` (lines 146–243) and reads `__adsRef` off the live node; element guard (line ~134) precedes document guard.
+- Re-run in a throwaway worktree at `3315b94` (removed afterwards): `dotnet test AzureDesignStudio.Core.Tests --filter "Category!=LiveAzure"` → `Passed: 755, Failed: 0`, matching the prior 755. 753/755 at the earlier SHAs were not re-run; they remain the baseline recorded evidence (trees unchanged since land).
+- Minor baseline correction: the core commit has 20 name-status entries (15 A/M + 5 D), not "16 paths"; the topic and hygiene content is unchanged and single-topic.
 
 ## Goal Achievement
 
@@ -102,7 +124,7 @@ overrides_applied: 0
 |---|-------|--------|----------|
 | 1 | SC#1 — A fresh clone contains only tracked source: no root `*.dll`, no `.omo/`/`.swarm/`, `.planning/` tracked, 11 csproj, every cited `docs/*.md` tracked | ✓ VERIFIED | Cloned the retained bundle to a temp dir: `CLONE_HEAD=0aa2a54…`; `git status --porcelain` empty; `git ls-files \| grep -E '\.dll$\|^\.(omo\|swarm)/'` no output; 39 `.planning` files; 11 csproj; 1023 tracked files; 8/8 README-cited docs present via `git ls-files --error-unmatch` |
 | 2 | SC#2 — `origin/main` equals the converged head, the three land commits are ancestors, no non-`.planning` path is unpushed, the recovery bundle restores its recorded head | ✓ VERIFIED | `origin/main` = `0aa2a54e065af2b9fa4abb8770fd820164e58989` = `CONVERGE_SHA`; `merge-base --is-ancestor` 0 for all three; `rev-list --count origin/main..HEAD -- . ':!.planning/'` = 0; bundle verify "complete history" and clone HEAD = `0aa2a54…` |
-| 3 | SC#3 — Three reviewable land commits (core/shell/docs), single-topic path sets, each builds and keeps the suite green; 753 at core + 2 stencil facts = 755 | ✓ VERIFIED | `078a9d7` (16 paths, 753), `ea8ac77` (35 paths, 755), `3315b94` (12 paths, 755). Independent worktrees at each SHA: build 0 errors each; `Passed: 753/755/755`. `StencilTests.cs` adds exactly two `[Fact]`s |
+| 3 | SC#3 — Three reviewable land commits (core/shell/docs), single-topic path sets, each builds and keeps the suite green; 753 at core + 2 stencil facts = 755 | ✓ VERIFIED | `078a9d7` (20 entries: 15 A/M + 5 D, 753), `ea8ac77` (35 paths, 755), `3315b94` (12 paths, 755). Independent worktrees at each SHA: build 0 errors each; `Passed: 753/755/755`. `StencilTests.cs` adds exactly two `[Fact]`s |
 | 4 | SC#4 — Pointer drop reaches the live canvas after wrapper replacement, no console error; zone resolved at event time, element guard before document guard | ✓ VERIFIED | `ads.js:134` element guard, `:138` document guard; `liveZone()` at `:146-148` used by `inZone`/`clear`/move/`finish`; ref read only off `dropZone` at `:243-244`; no `.catch`/`try`. Harness BEFORE `calls:[]`; AFTER `[["b",["HandleDropAtAsync",68,86,"virtual-network"]]]`, zero on detached `old`/`a`; in-app drop grew canvas descendants 2→11 with no drop-phase console entry |
 | 5 | SC#5 — README/AGENTS report 11 projects and Entra ID work+personal; CONCERNS/architecture carry the measured count; publisher `CN=Jakub Talaj` + Azure Artifact Signing recorded once in PROJECT.md and docs/entra-setup.md; manifest untouched | ✓ VERIFIED | `11 project` in README:48, AGENTS:9, CONCERNS:9, architecture:15; zero `(7\|8) projects`; zero `B2C`; Entra ID work+personal at README:38, AGENTS:9/69, architecture:43/225; CONCERNS carries the count only and asserts no auth model (see plan-truth note); publisher string and route each exactly once in both authorities; `git diff e9078d1 3315b94 -- Package.appxmanifest` exit 0 |
 
@@ -129,7 +151,7 @@ overrides_applied: 0
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `078a9d7` core commit | 16-path core topic + hygiene | ✓ VERIFIED | 10 Core files, 2 Core.Tests, `.gitignore`, 5 deletions |
+| `078a9d7` core commit | 15 added/modified paths + 5 deletions (20 entries; baseline said "16 paths") | ✓ VERIFIED | 10 Core files, 2 Core.Tests, `.gitignore`, 5 deletions |
 | `ea8ac77` shell commit | 35-path shell topic | ✓ VERIFIED | WASM components, catalog, 7 assets, Desktop host, pointer fix, `StencilTests` |
 | `3315b94` docs commit | 12-path docs topic | ✓ VERIFIED | README/AGENTS/CONCERNS/architecture/PROJECT/entra-setup + 3 newly tracked docs + 2 banners |
 | `src/AzureDesignStudio/wwwroot/js/ads.js` | Remount-safe pointer zone | ✓ VERIFIED | Element-scoped guard + event-time re-resolution; no swallowed errors |
@@ -293,15 +315,15 @@ None required for phase acceptance. The phase is an infrastructure/landing gate 
     "src/AzureDesignStudio/wwwroot/index.html",
     "src/AzureDesignStudio/wwwroot/js/ads.js"
   ],
-  "covered_digest": "v3:sha256:c3bff7add381fadbd573eaabb59e8f605f7a78564c77bc50023e51769c72378a"
+  "covered_digest": "v3:sha256:429a4de0b22f9b211daab13eaca59def432e60af4208c6c0843038e1536656cc"
 }
 ```
 
 ## Self-Check: PASSED
 
-All five ROADMAP success criteria are proven against the actual repository, commits, remote, and fresh clone; the documented deviations are weighed above and none leaves a finding I could not check. No blocker, no gap, no unresolved must-have.
+All five ROADMAP success criteria and ten must-haves re-hold against the landed commits; no regression, no gap. Digest covers the working tree; verdict covers the landed commits.
 
 ---
 
-_Verified: 2026-10-21T11:19:33Z_
+_Verified: 2026-10-31T00:00:00Z_
 _Verifier: Claude (gsd-verifier)_
