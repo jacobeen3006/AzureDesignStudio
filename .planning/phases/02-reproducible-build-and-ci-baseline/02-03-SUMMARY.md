@@ -42,3 +42,5 @@ insert_final_newline = true
 ## Deviations
 
 - 6 `.cs` files exhibit non-whitespace line splits under `git diff -w` (FunctionAppModel.cs, StorageAccountModel.cs, TopologyPositions.cs, BicepParamsTextTests.cs, ReconcileEngineTests.cs, TopMenu.razor.cs) — formatter split single-line initializers / removed a double BOM. Reported; not weakened. The remaining 437 `.cs` files are provably whitespace-only.
+
+- Orchestrator re-check (T-02-08): the observed count (443 `.cs`) is far above the 38-file research baseline; the plan treats the count as an observation, not a gate. The six `git diff -w` hits are line-break/BOM edits that `-w` does not ignore. Stronger proof run on the commit: for all 443 changed `.cs` files, `4cecbcb^:<file>` and `4cecbcb:<file>` are identical after stripping every whitespace character and BOM (0 non-equivalent). The change is lexically whitespace/BOM-only. Residual risk: trailing whitespace inside multi-line string literals would not be caught by either check; the 755-test suite and golden export tests stayed green. Accepted deviation.
