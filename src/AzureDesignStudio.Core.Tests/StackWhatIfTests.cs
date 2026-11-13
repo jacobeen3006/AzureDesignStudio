@@ -129,17 +129,38 @@ public class StackWhatIfTests
     }
 
     [Theory]
+    [InlineData("create")]
+    [InlineData("modify")]
     [InlineData("delete")]
     [InlineData("detach")]
-    public void Parse_DeleteOrDetachWithoutId_IsIndeterminate(string changeType)
+    [InlineData("unsupported")]
+    public void Parse_ChangedRowWithoutId_IsIndeterminate(string changeType)
     {
         var missing = "{\"type\":\"Microsoft.Storage/storageAccounts\",\"changeType\":\"" + changeType + "\",\"changeCertainty\":\"definite\"}";
         var summary = StackWhatIf.Parse(Result(missing));
         Assert.NotNull(summary.IndeterminacyReason);
-        Assert.Contains(changeType, summary.IndeterminacyReason);
 
         var empty = StackWhatIf.Parse(Result(Change("", changeType)));
         Assert.NotNull(empty.IndeterminacyReason);
+    }
+
+    [Theory]
+    [InlineData("create")]
+    [InlineData("modify")]
+    [InlineData("delete")]
+    [InlineData("detach")]
+    public void Parse_ChangedRowWithoutId_NamesTheChange(string changeType)
+    {
+        var missing = "{\"type\":\"Microsoft.Storage/storageAccounts\",\"changeType\":\"" + changeType + "\",\"changeCertainty\":\"definite\"}";
+        Assert.Contains(changeType, StackWhatIf.Parse(Result(missing)).IndeterminacyReason);
+    }
+
+    [Fact]
+    public void Parse_NoChangeWithoutId_IsNotIndeterminate()
+    {
+        var missing = "{\"type\":\"Microsoft.Storage/storageAccounts\",\"changeType\":\"noChange\",\"changeCertainty\":\"definite\"}";
+        Assert.Null(StackWhatIf.Parse(Result(missing)).IndeterminacyReason);
+        Assert.Null(StackWhatIf.Parse(Result(Change("", "noChange"))).IndeterminacyReason);
     }
 
     [Fact]

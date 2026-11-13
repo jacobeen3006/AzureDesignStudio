@@ -38,7 +38,7 @@ public sealed record StackWhatIfSummary(
     public bool HasDelete => Changes.Any(c => c.Kind == StackChangeKind.Delete);
 
     /// <summary>Non-null when the result cannot be trusted as complete: a state other than
-    /// "succeeded", an error-level diagnostic, any Unsupported change, a delete or detach without an id, or any Potential
+    /// "succeeded", an error-level diagnostic, any Unsupported change, a changed row (anything but noChange) without an id, or any Potential
     /// change (a missing or unknown changeCertainty counts as potential).
     /// A result with no <c>changes</c> member carries an error diagnostic, so it lands here too.</summary>
     public string? IndeterminacyReason
@@ -52,8 +52,8 @@ public sealed record StackWhatIfSummary(
             if (Changes.FirstOrDefault(c => c.Kind == StackChangeKind.Unsupported) is { } unsupported)
                 return $"stack what-if cannot evaluate {unsupported.Id}"
                     + (string.IsNullOrEmpty(unsupported.UnsupportedReason) ? "" : $": {unsupported.UnsupportedReason}");
-            if (Changes.FirstOrDefault(c => c.Kind is StackChangeKind.Delete or StackChangeKind.Detach && c.Id.Length == 0) is { } anonymous)
-                return $"stack what-if reports a {anonymous.Kind.ToString().ToLowerInvariant()} without a resource id";
+            if (Changes.FirstOrDefault(c => c.Kind != StackChangeKind.NoChange && c.Id.Length == 0) is { } anonymous)
+                return $"stack what-if reports a {anonymous.Kind.ToString().ToLowerInvariant()} row without a resource id";
             if (Changes.FirstOrDefault(c => c.Potential) is { } potential)
                 return $"stack what-if is only potentially sure about {potential.Id}";
             return null;
