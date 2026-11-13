@@ -76,6 +76,15 @@ namespace AzureDesignStudio.Core.Tests
                 findings.Select(f => f.RuleId + ":" + f.NodeName));
         }
 
+        [Fact]
+        public void Lint_RulesInTheSamePillar_SortByRuleId()
+        {
+            var findings = Lint(Create(AdsConstants.VirtualMachine, "vm1"), Create(AdsConstants.StorageAccount, "st1"));
+            Assert.Equal(
+                ["REL-STORAGE-LRS:st1", "REL-VM-SINGLE:vm1", "SEC-NO-BASTION:design", "OPS-NO-MONITORING:design"],
+                findings.Select(f => f.RuleId + ":" + f.NodeName));
+        }
+
         private static LintFinding[] ForRule(LintFinding[] findings, string id) =>
             findings.Where(f => f.RuleId == id).ToArray();
 

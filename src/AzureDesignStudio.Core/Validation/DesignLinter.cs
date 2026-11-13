@@ -155,24 +155,6 @@ namespace AzureDesignStudio.Core.Validation
             }
         }
 
-        // Nodes that export an ARM resource; models without one (unknown stencils) throw on the type.
-        private static string? ArmTypeOf(NodeModel node)
-        {
-            try
-            {
-                return node switch
-                {
-                    AzureNodeBase n => n.ArmResourceType,
-                    AzureGroupBase g => g.ArmResourceType,
-                    _ => null,
-                };
-            }
-            catch (NotImplementedException)
-            {
-                return null;
-            }
-        }
-
         private static IEnumerable<LintFinding> NoPrivateEndpoint(List<NodeModel> nodes)
         {
             if (!nodes.OfType<VirtualNetworkModel>().Any())
@@ -183,9 +165,15 @@ namespace AzureDesignStudio.Core.Validation
 
             foreach (var node in nodes)
             {
-                if (node is not (AzureNodeBase or AzureGroupBase) || node is UnknownNodeModel)
+                // Unknown stencils have no ARM type (it throws), so they are skipped first.
+                if (node is UnknownNodeModel)
                     continue;
-                var type = ArmTypeOf(node);
+                var type = node switch
+                {
+                    AzureNodeBase n => n.ArmResourceType,
+                    AzureGroupBase g => g.ArmResourceType,
+                    _ => null,
+                };
                 if (type is null || !PrivateEndpointModel.SupportsPrivateLink(type))
                     continue;
 
