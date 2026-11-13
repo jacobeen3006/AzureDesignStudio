@@ -301,14 +301,15 @@ namespace AzureDesignStudio.Components.MenuDrawer
             && r.Deletes == 0 && !r.GuardrailBlocked && r.IndeterminacyReason.Length == 0;
 
         private bool ReviewDeployAllowed => _deployAsStack
-            ? !_stackWhatIfLoading && StackDeployAllowed
+            ? !_stackWhatIfLoading && WhatIfDeployAllowed && StackDeployAllowed
             : WhatIfDeployAllowed;
 
         /// <summary>The bypass flag lands in the hashed stack body, so the preview and the apply send the same value.</summary>
         private bool EffectiveBypass => _bypassOutOfSync && _stackProbe?.Exists == true;
 
         /// <summary>Plan touches do-not-touch resources: server issued no token, approval is moot.</summary>
-        private bool GuardrailBlocked => _whatIfResult?.GuardrailBlocked ?? false;
+        private bool GuardrailBlocked => (_whatIfResult?.GuardrailBlocked ?? false)
+            || (_deployAsStack && (_stackWhatIf?.GuardrailBlocked ?? false));
 
         private async Task ApproveAndDeployAsync(MouseEventArgs e)
         {

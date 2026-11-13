@@ -97,11 +97,11 @@
         {
             <Alert Type="@AlertType.Error" Message="What-If predicts deletes. This version never deploys delete-bearing plans." ShowIcon="true" Banner="true" />
         }
-        @if (GuardrailBlocked)
+        @if (_whatIfResult.GuardrailBlocked)
         {
             <Alert Type="@AlertType.Warning" Message="@($"{_guardrailFlags.Count} resource(s) protected by do-not-touch guardrails. This plan cannot be approved or deployed until the guardrail policy changes.")" ShowIcon="true" Banner="true" Style="margin-bottom:8px" />
         }
-        @if (_whatIfResult.Deletes == 0 && !GuardrailBlocked && _whatIfChanges.Count == 0)
+        @if (_whatIfResult.Deletes == 0 && !_whatIfResult.GuardrailBlocked && _whatIfChanges.Count == 0)
         {
             <p>No changes predicted for this template.</p>
         }
