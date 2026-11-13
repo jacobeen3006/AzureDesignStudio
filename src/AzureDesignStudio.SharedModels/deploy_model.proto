@@ -105,11 +105,26 @@ message WhatIfResponse {
 	// the block verdict. A blocked review carries NO token - it cannot be approved or applied.
 	repeated GuardrailFlag guardrail_flags = 11;
 	bool guardrail_blocked = 12;
+	// Azure Policy preflight (Wave B2): advisory only - it never withholds the token or changes
+	// status_code. policy_notes carries the engine's notes followed by its caveats.
+	repeated PolicyFlag policy_flags = 13;
+	repeated string policy_notes = 14;
 }
 
 message GuardrailFlag {
 	string resource_id = 1;
 	string reason = 2;
+}
+
+// One Azure Policy evaluation for one previewed resource. verdict is Deny, Audit or Other.
+message PolicyFlag {
+	string resource_id = 1;
+	string verdict = 2;
+	string effect = 3;
+	string policy_assignment_id = 4;
+	string policy_definition_id = 5;
+	string policy_definition_reference_id = 6;
+	string reason = 7;
 }
 
 message GuardrailPolicyRequest {

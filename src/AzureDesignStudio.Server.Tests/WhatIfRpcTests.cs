@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using AzureDesignStudio.Discovery.Iac.WhatIf;
+using AzureDesignStudio.Discovery.Preflight;
 using AzureDesignStudio.Services;
 using AzureDesignStudio.Services.Models;
 using AzureDesignStudio.SharedModels.Protos;
@@ -112,6 +113,214 @@ public class WhatIfRpcTests
         Assert.Equal("No subscription is found.", response.ErrorMessage);
         Assert.Equal("", response.WhatIfToken);
         Assert.Empty(_arm.Requests);
+    }
+
+    // ---------- Azure Policy preflight (Wave B2) ----------
+
+    private string PolicyPath => $"{GroupPath}/providers/Microsoft.PolicyInsights/checkPolicyRestrictions";
+
+    private string AllowedLocationsAssignment =>
+        $"{SubscriptionPath}/providers/Microsoft.Authorization/policyAssignments/allowed-locations";
+
+    private const string AllowedLocationsDefinition =
+        "/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c";
+
+    /// <summary>A checkPolicyRestrictions answer with no evaluations: nothing to report.</summary>
+    private const string NoPolicyFindings = """{"fieldRestrictions":[],"contentEvaluationResult":{"policyEvaluations":[]}}""";
+
+    /// <summary>A checkPolicyRestrictions answer in the documented shape: one NonCompliant Deny evaluation.</summary>
+    private string DenyAnswer => JsonSerializer.Serialize(new
+    {
+        fieldRestrictions = Array.Empty<object>(),
+        contentEvaluationResult = new
+        {
+            policyEvaluations = new[]
+            {
+                new
+                {
+                    policyInfo = new { policyDefinitionId = AllowedLocationsDefinition, policyAssignmentId = AllowedLocationsAssignment },
+                    evaluationResult = "NonCompliant",
+                    evaluationDetails = new
+                    {
+                        evaluatedExpressions = new[]
+                        {
+                            new
+                            {
+                                result = "False", expressionKind = "Field", expression = "location", path = "location",
+                                expressionValue = "westeurope", targetValue = new[] { "northeurope" }, @operator = "In",
+                            },
+                        },
+                        reason = "Location 'westeurope' is not allowed.",
+                    },
+                    effectDetails = new { policyEffect = "Deny" },
+                },
+            },
+        },
+    });
+
+    private IReadOnlyList<RecordedRequest> PolicyRequests =>
+        [.. _arm.Requests.Where(r => r.Path.Contains("checkPolicyRestrictions", StringComparison.OrdinalIgnoreCase))];
+
+    [Fact]
+    public async Task WhatIf_PolicyDeny_IsReturned_AndTokenStillIssued()
+    {
+        _arm.Answer(HttpMethod.Post, PolicyPath, HttpStatusCode.OK, DenyAnswer);
+
+        var response = await Service(new AmbientCredential()).WhatIf(Request(), Me);
+
+        Assert.True(response.StatusCode == 200, response.ErrorMessage);
+        Assert.NotEqual("", response.WhatIfToken);
+        Assert.False(response.GuardrailBlocked);
+        Assert.True(_gate.ValidateAndConsume(response.WhatIfToken, _subscription.ToString(), ResourceGroup, Template, "{}").IsOk);
+
+        var flag = Assert.Single(response.PolicyFlags);
+        Assert.Equal(StorageId("sa1"), flag.ResourceId);
+        Assert.Equal("Deny", flag.Verdict);
+        Assert.Equal("Deny", flag.Effect);
+        Assert.Equal(AllowedLocationsAssignment, flag.PolicyAssignmentId);
+        Assert.Equal(AllowedLocationsDefinition, flag.PolicyDefinitionId);
+        Assert.Equal("", flag.PolicyDefinitionReferenceId);
+        Assert.Equal("Location 'westeurope' is not allowed.", flag.Reason);
+        // The engine had nothing to say; its caveats follow (here: alone).
+        Assert.Equal(PolicyPreflight.Caveats, response.PolicyNotes);
+
+        var post = Assert.Single(PolicyRequests);
+        Assert.Equal(PolicyPath, post.Path, ignoreCase: true);
+        Assert.Contains("api-version=2024-10-01", post.Query);
+        using var body = JsonDocument.Parse(post.Body);
+        var details = body.RootElement.GetProperty("resourceDetails");
+        Assert.Equal("Microsoft.Storage/storageAccounts", details.GetProperty("resourceContent").GetProperty("type").GetString());
+        Assert.Equal("2023-01-01", details.GetProperty("apiVersion").GetString());
+        Assert.True(body.RootElement.GetProperty("includeAuditEffect").GetBoolean());
+    }
+
+    [Fact]
+    public async Task WhatIf_PolicyForbidden_AddsNote_TokenUnchanged()
+    {
+        var service = Service(new AmbientCredential());
+        _arm.Answer(HttpMethod.Post, PolicyPath, HttpStatusCode.OK, NoPolicyFindings);
+        var baseline = await service.WhatIf(Request(), Me);
+        _arm.Answer(HttpMethod.Post, PolicyPath, HttpStatusCode.Forbidden, RouteTableHttp.ArmError("AuthorizationFailed",
+            "The client does not have authorization to perform action 'Microsoft.PolicyInsights/checkPolicyRestrictions/read'."));
+
+        var response = await service.WhatIf(Request(), Me);
+
+        // The review is exactly what it is without the preflight; only the notes say what was not checked.
+        Assert.True(response.StatusCode == 200, response.ErrorMessage);
+        Assert.NotEqual("", response.WhatIfToken);
+        Assert.True(_gate.ValidateAndConsume(response.WhatIfToken, _subscription.ToString(), ResourceGroup, Template, "{}").IsOk);
+        Assert.Equal((baseline.Status, baseline.PlanHash, baseline.Caveats, baseline.ChangesJson, baseline.GuardrailBlocked),
+            (response.Status, response.PlanHash, response.Caveats, response.ChangesJson, response.GuardrailBlocked));
+        Assert.Equal((1, 0, 0), (response.Creates, response.Modifies, response.Deletes));
+        Assert.Equal("", response.ErrorMessage);
+
+        Assert.Empty(response.PolicyFlags);
+        Assert.Equal(
+            ["No permission to check Azure Policy (needs Microsoft.PolicyInsights/checkPolicyRestrictions/read).", .. PolicyPreflight.Caveats],
+            response.PolicyNotes);
+    }
+
+    [Fact]
+    public async Task WhatIf_WhatIfFails_NoPolicyCall()
+    {
+        _arm.Answer(HttpMethod.Post, PolicyPath, HttpStatusCode.OK, DenyAnswer)
+            .Answer(HttpMethod.Post, WhatIfPath, HttpStatusCode.BadRequest,
+                RouteTableHttp.ArmError("InvalidTemplateDeployment", "The template deployment 'ads-deployment' is not valid."));
+
+        var response = await Service(new AmbientCredential()).WhatIf(Request(), Me);
+
+        Assert.Equal(400, response.StatusCode);
+        Assert.Equal("", response.WhatIfToken);
+        Assert.Single(_arm.To(HttpMethod.Post, WhatIfPath));
+        Assert.Empty(PolicyRequests);
+        Assert.Empty(response.PolicyFlags);
+        Assert.Empty(response.PolicyNotes);
+    }
+
+    [Fact]
+    public async Task WhatIf_ManagementGroupTarget_SkipsPolicyWithNote()
+    {
+        const string mgTemplate =
+            """{"$schema":"https://schema.management.azure.com/schemas/2019-08-01/managementGroupDeploymentTemplate.json#","contentVersion":"1.0.0.0","resources":[{"type":"Microsoft.Authorization/roleAssignments","apiVersion":"2022-04-01","name":"ra1","properties":{"roleDefinitionId":"/providers/Microsoft.Authorization/roleDefinitions/acdd72a7-3385-48ef-bd42-f606fba81ae7","principalId":"00000000-0000-0000-0000-000000000001"}}]}""";
+        const string mgWhatIfPath =
+            "/providers/Microsoft.Management/managementGroups/mg1/providers/Microsoft.Resources/deployments/ads-deployment/whatIf";
+        // A row under a subscription that the engine would otherwise check.
+        _arm.Answer(HttpMethod.Post, mgWhatIfPath, HttpStatusCode.OK, WhatIfResult(StorageCreate("sa1")))
+            .Answer(HttpMethod.Post, PolicyPath, HttpStatusCode.OK, DenyAnswer);
+        var request = new DeploymentRequest
+        {
+            SubscriptionId = _subscription.ToString(),
+            ArmTemplate = mgTemplate,
+            Parameters = "{}",
+            Target = DeployTarget.ManagementGroup,
+            ManagementGroupId = "mg1",
+            Location = "westeurope",
+        };
+
+        var response = await Service(new AmbientCredential()).WhatIf(request, Me);
+
+        Assert.True(response.StatusCode == 200, response.ErrorMessage);
+        Assert.NotEqual("", response.WhatIfToken);
+        Assert.Single(_arm.To(HttpMethod.Post, mgWhatIfPath));
+        Assert.Empty(PolicyRequests);
+        Assert.Empty(response.PolicyFlags);
+        Assert.Equal(["Policy is not checked for management-group or tenant deployments."], response.PolicyNotes);
+    }
+
+    [Fact]
+    public async Task WhatIf_PolicyRequestBody_HasNoSecrets()
+    {
+        const string secret = "S3cretPa55word";
+        const string vmTemplate =
+            """{"$schema":"https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#","contentVersion":"1.0.0.0","parameters":{"adminPassword":{"type":"secureString"}},"resources":[{"type":"Microsoft.Compute/virtualMachines","apiVersion":"2024-07-01","name":"vm1","location":"westeurope","properties":{"hardwareProfile":{"vmSize":"Standard_D2s_v5"},"osProfile":{"computerName":"vm1","adminUsername":"azureuser","adminPassword":"[parameters('adminPassword')]","linuxConfiguration":{"disablePasswordAuthentication":false}}}}]}""";
+        var vmId = $"{GroupPath}/providers/Microsoft.Compute/virtualMachines/vm1";
+        // Whether what-if masks secure values in after payloads is not documented: assume it does not,
+        // and let the value turn up elsewhere too.
+        var vmCreate = "{\"resourceId\":\"" + vmId + "\",\"changeType\":\"Create\",\"after\":{\"id\":\"" + vmId
+            + "\",\"name\":\"vm1\",\"type\":\"Microsoft.Compute/virtualMachines\",\"apiVersion\":\"2024-07-01\",\"location\":\"westeurope\","
+            + "\"tags\":{\"note\":\"first login with " + secret + " then rotate\"},"
+            + "\"properties\":{\"hardwareProfile\":{\"vmSize\":\"Standard_D2s_v5\"},\"osProfile\":{\"computerName\":\"vm1\","
+            + "\"adminUsername\":\"azureuser\",\"adminPassword\":\"" + secret + "\",\"linuxConfiguration\":{\"disablePasswordAuthentication\":false}}}}}";
+        _arm.Answer(HttpMethod.Post, WhatIfPath, HttpStatusCode.OK, WhatIfResult(vmCreate))
+            .Answer(HttpMethod.Post, PolicyPath, HttpStatusCode.OK, NoPolicyFindings);
+        var request = Request();
+        request.ArmTemplate = vmTemplate;
+        request.Parameters = "{\"adminPassword\":{\"value\":\"" + secret + "\"}}";
+
+        var response = await Service(new AmbientCredential()).WhatIf(request, Me);
+
+        Assert.True(response.StatusCode == 200, response.ErrorMessage);
+        Assert.NotEqual("", response.WhatIfToken);
+        var post = Assert.Single(PolicyRequests);
+        Assert.DoesNotContain(secret, post.Body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("adminPassword", post.Body, StringComparison.OrdinalIgnoreCase);
+        using var body = JsonDocument.Parse(post.Body);
+        var content = body.RootElement.GetProperty("resourceDetails").GetProperty("resourceContent");
+        var osProfile = content.GetProperty("properties").GetProperty("osProfile");
+        Assert.False(osProfile.GetProperty("linuxConfiguration").GetProperty("disablePasswordAuthentication").GetBoolean());
+        Assert.Equal("azureuser", osProfile.GetProperty("adminUsername").GetString());
+        Assert.Equal("Standard_D2s_v5", content.GetProperty("properties").GetProperty("hardwareProfile").GetProperty("vmSize").GetString());
+        Assert.False(content.GetProperty("tags").TryGetProperty("note", out _));
+        // The deployment parameters themselves are never sent.
+        Assert.False(body.RootElement.TryGetProperty("parameters", out _));
+        Assert.False(body.RootElement.GetProperty("resourceDetails").TryGetProperty("parameters", out _));
+    }
+
+    [Fact]
+    public async Task WhatIf_PolicyCheckHangs_StopsAtTheBudget_TokenStillIssued()
+    {
+        _arm.Hold(HttpMethod.Post, PolicyPath, new TaskCompletionSource().Task);
+        var service = Service(new AmbientCredential());
+        service.PreflightBudget = TimeSpan.FromMilliseconds(200);
+
+        var response = await service.WhatIf(Request(), Me);
+
+        Assert.True(response.StatusCode == 200, response.ErrorMessage);
+        Assert.NotEqual("", response.WhatIfToken);
+        Assert.Single(PolicyRequests);
+        Assert.Empty(response.PolicyFlags);
+        Assert.Equal(["Policy check stopped at the time limit: 1 of 1 resources not checked.", .. PolicyPreflight.Caveats],
+            response.PolicyNotes);
     }
 }
 

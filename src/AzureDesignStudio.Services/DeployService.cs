@@ -4,6 +4,7 @@ using AzureDesignStudio.Discovery.Arm;
 using SubscriptionInfo = AzureDesignStudio.SharedModels.Protos.SubscriptionInfo;
 using AzureDesignStudio.Discovery.Iac;
 using AzureDesignStudio.Discovery.Iac.WhatIf;
+using AzureDesignStudio.Discovery.Preflight;
 using AzureDesignStudio.Discovery.ResourceGraph;
 using AzureDesignStudio.Discovery.Decommission;
 using AzureDesignStudio.Discovery.Unmanaged;
@@ -30,6 +31,11 @@ namespace AzureDesignStudio.Services
         private readonly WhatIfTokenGate _whatIfGate;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IAmbientAzureCredential? _ambient;
+
+        /// <summary>How long the advisory preflights of a what-if review may take; what they have
+        /// not finished by then is reported as not checked. Settable so tests can shorten it.</summary>
+        internal TimeSpan PreflightBudget { get; set; } = TimeSpan.FromSeconds(30);
+
         public DeployService(DesignDbContext context, ILogger<DeployService> logger, ICryptoService cryptoService,
             WhatIfTokenGate whatIfGate, IHttpClientFactory httpClientFactory, IAmbientAzureCredential? ambient = null)
         {
@@ -430,8 +436,8 @@ namespace AzureDesignStudio.Services
                     location = request.Location;
                 }
 
-                var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), credential,
-                    ArmEndpointSet.AzureCloud);
+                var http = _httpClientFactory.CreateClient("arm");
+                var transport = new ArmTransport(http, credential, ArmEndpointSet.AzureCloud);
                 var preview = StagedPreviewPlanner.Select(stagedPlan, target, request.ArmTemplate, parametersJson);
                 if (preview.Unsupported)
                 {
@@ -497,6 +503,11 @@ namespace AzureDesignStudio.Services
                 response.Caveats = string.Join("\n", caveats);
                 response.PlanHash = plan.PlanHash;
                 response.WhatIfToken = token ?? "";
+
+                // Wave B2: advisory only, and only once the what-if has succeeded - it adds flags
+                // and notes, never touches the token, the plan hash or the status code.
+                await AddPolicyPreflightAsync(response, target, summary, http, credential,
+                    request.ArmTemplate, parametersJson, context.CancellationToken);
                 return response;
             }
             catch (WhatIfException ex)
@@ -520,6 +531,62 @@ namespace AzureDesignStudio.Services
                 response.ErrorMessage = $"HTTP {ex.Status}: {ex.ErrorCode}";
                 return response;
             }
+        }
+
+        private const string PolicyTargetNote = "Policy is not checked for management-group or tenant deployments.";
+        private const string PolicyFailedNote = "Azure Policy was not checked: the check failed unexpectedly.";
+
+        /// <summary>
+        /// Wave B2 policy preflight over a successful what-if: asks Azure Policy about each resource
+        /// the previewed batch creates or modifies and puts the findings in
+        /// <c>policy_flags</c>, the engine's notes followed by its caveats in <c>policy_notes</c>.
+        /// It runs on its own <see cref="ArmTransport"/> (same "arm" HttpClient and credential) so
+        /// other preflights do not queue behind it. Management-group and tenant targets get a note,
+        /// not a check. Advisory: nothing it does - no permission, throttling, the time limit -
+        /// changes the token, plan hash or status code; only the caller's cancellation propagates.
+        /// </summary>
+        private async Task AddPolicyPreflightAsync(WhatIfResponse response, DeployTargetScope target, WhatIfSummary summary,
+            HttpClient http, Azure.Core.TokenCredential credential, string templateJson, string parametersJson,
+            CancellationToken ct)
+        {
+            if (target.Kind is DeployScopeKind.ManagementGroup or DeployScopeKind.Tenant)
+            {
+                response.PolicyNotes.Add(PolicyTargetNote);
+                return;
+            }
+
+            PolicyPreflightResult result;
+            try
+            {
+                var transport = new ArmTransport(http, credential, ArmEndpointSet.AzureCloud);
+                result = await new PolicyPreflight(transport).CheckAsync(summary.Changes, templateJson, parametersJson,
+                    PreflightBudget, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // The engine turns every failure into a note; this only guards the review against a bug in it.
+                _logger.LogWarning(ex, "Policy preflight failed.");
+                response.PolicyNotes.Add(PolicyFailedNote);
+                return;
+            }
+
+            foreach (var finding in result.Findings)
+            {
+                response.PolicyFlags.Add(new PolicyFlag
+                {
+                    ResourceId = finding.ResourceId,
+                    Verdict = finding.Verdict.ToString(),
+                    Effect = finding.Effect,
+                    PolicyAssignmentId = finding.PolicyAssignmentId ?? "",
+                    PolicyDefinitionId = finding.PolicyDefinitionId ?? "",
+                    PolicyDefinitionReferenceId = finding.PolicyDefinitionReferenceId ?? "",
+                    Reason = finding.Reason,
+                });
+            }
+            response.PolicyNotes.AddRange(result.Notes);
+            response.PolicyNotes.AddRange(PolicyPreflight.Caveats);
+            _logger.LogInformation("Policy preflight: {Checked} checked, {NotChecked} not checked, {Findings} finding(s).",
+                result.Checked, result.NotChecked, result.Findings.Count);
         }
 
         /// <summary>

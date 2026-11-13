@@ -101,6 +101,39 @@
         {
             <Alert Type="@AlertType.Warning" Message="@($"{_guardrailFlags.Count} resource(s) protected by do-not-touch guardrails. This plan cannot be approved or deployed until the guardrail policy changes.")" ShowIcon="true" Banner="true" Style="margin-bottom:8px" />
         }
+        @if (_policyFlags.Count > 0 || _whatIfResult.PolicyNotes.Count > 0)
+        {
+            <div style="margin:8px 0">
+                <strong>Policy</strong>
+                <p style="margin:2px 0 4px 0"><em>Azure enforces policy when you deploy; this is an early warning.</em></p>
+                @if (_policyFlags.Count > 0)
+                {
+                    <ul style="margin:0 0 6px 18px">
+                        @foreach (var policyFlag in _policyFlags)
+                        {
+                            <li>
+                                <Tag Color="@PolicyTagColor(policyFlag.Verdict)">@PolicyTagText(policyFlag.Verdict)</Tag>
+                                <strong title="@policyFlag.ResourceId">@LastSegment(policyFlag.ResourceId)</strong>
+                                @if (policyFlag.PolicyAssignmentId.Length > 0)
+                                {
+                                    <span title="@policyFlag.PolicyAssignmentId"> · @LastSegment(policyFlag.PolicyAssignmentId)</span>
+                                }
+                                <span> · @policyFlag.Reason</span>
+                            </li>
+                        }
+                    </ul>
+                }
+                @if (_whatIfResult.PolicyNotes.Count > 0)
+                {
+                    <ul style="margin:0 0 6px 18px;color:var(--ads-text-muted)">
+                        @foreach (var policyNote in _whatIfResult.PolicyNotes)
+                        {
+                            <li>@policyNote</li>
+                        }
+                    </ul>
+                }
+            </div>
+        }
         @if (_whatIfResult.Deletes == 0 && !_whatIfResult.GuardrailBlocked && _whatIfChanges.Count == 0)
         {
             <p>No changes predicted for this template.</p>
@@ -117,6 +150,10 @@
                     @if (change.ResourceId is not null && _guardrailFlags.TryGetValue(change.ResourceId, out var protectReason))
                     {
                         <Tag Color="@("orange")">protected: @protectReason</Tag>
+                    }
+                    @if (change.ResourceId is not null && _policyDenied.Contains(change.ResourceId))
+                    {
+                        <Tag Color="@("red")">Policy: denied</Tag>
                     }
                     @if (change.Before is not null || change.After is not null)
                     {

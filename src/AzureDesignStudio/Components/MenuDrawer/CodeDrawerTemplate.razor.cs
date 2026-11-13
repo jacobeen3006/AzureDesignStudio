@@ -84,6 +84,10 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private string? _whatIfError = null;
         private IReadOnlyList<WhatIfChangeRow> _whatIfChanges = [];
         private Dictionary<string, string> _guardrailFlags = new(StringComparer.OrdinalIgnoreCase);
+        // Azure Policy preflight (advisory): the review's findings, Deny first, then Audit, then
+        // the rest; and the ids that would be denied, for the per-row tag (ids case-insensitive).
+        private IReadOnlyList<PolicyFlag> _policyFlags = [];
+        private HashSet<string> _policyDenied = new(StringComparer.OrdinalIgnoreCase);
         private bool _deployAsStack = false;
         private string _stackName = "ads-stack";
         // v2 12.3 closer: the review-screen stack probe (null = availability unknown), whether a
@@ -239,6 +243,8 @@ namespace AzureDesignStudio.Components.MenuDrawer
             _whatIfError = null;
             _whatIfChanges = [];
             _guardrailFlags = new(StringComparer.OrdinalIgnoreCase);
+            _policyFlags = [];
+            _policyDenied = new(StringComparer.OrdinalIgnoreCase);
             // A new preview means new bytes and maybe a new scope: the old probe proves nothing.
             _stackProbe = null;
             _stackProbed = false;
@@ -261,6 +267,9 @@ namespace AzureDesignStudio.Components.MenuDrawer
                     _guardrailFlags = new(StringComparer.OrdinalIgnoreCase);
                     foreach (var flag in response.GuardrailFlags)
                         _guardrailFlags[flag.ResourceId] = flag.Reason;
+                    _policyFlags = [.. response.PolicyFlags.OrderBy(f => PolicyRank(f.Verdict))];
+                    _policyDenied = new(response.PolicyFlags.Where(f => PolicyRank(f.Verdict) == 0).Select(f => f.ResourceId),
+                        StringComparer.OrdinalIgnoreCase);
                 }
             }
             catch (Exception ex) when (ex is Grpc.Core.RpcException or InvalidOperationException or HttpRequestException)
@@ -291,6 +300,33 @@ namespace AzureDesignStudio.Components.MenuDrawer
             {
                 return [];
             }
+        }
+
+        /// <summary>Deny 0, Audit 1, anything else 2 - the order and the tag of a policy finding.</summary>
+        private static int PolicyRank(string verdict) =>
+            string.Equals(verdict, "Deny", StringComparison.OrdinalIgnoreCase) ? 0
+            : string.Equals(verdict, "Audit", StringComparison.OrdinalIgnoreCase) ? 1
+            : 2;
+
+        private static string PolicyTagColor(string verdict) => PolicyRank(verdict) switch
+        {
+            0 => "red",
+            1 => "orange",
+            _ => "default",
+        };
+
+        private static string PolicyTagText(string verdict) => PolicyRank(verdict) switch
+        {
+            0 => "Would be denied",
+            1 => "Audit",
+            _ => "Check",
+        };
+
+        /// <summary>The name an ARM id ends with: a resource's name, a policy assignment's name.</summary>
+        private static string LastSegment(string id)
+        {
+            var trimmed = id.TrimEnd('/');
+            return trimmed[(trimmed.LastIndexOf('/') + 1)..];
         }
 
         private bool WhatIfDeployAllowed => _whatIfResult is not null && _whatIfResult.Deletes == 0 && !_whatIfResult.GuardrailBlocked;
