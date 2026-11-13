@@ -229,8 +229,9 @@ public sealed class ScanEngine(ResourceGraphClient graph, int groupSize = 100, i
     {
         var list = string.Join(",", subs.Select(s => $"'{s}'"));
         // managedBy is a top-level column in Resource Graph, not part of properties; without
-        // it no disk could be seen as attached (InventoryNormalizer folds it into Raw).
-        return "Resources | where subscriptionId in (" + list + ") | order by id asc | project id, name, type, location, resourceGroup, subscriptionId, tags, managedBy, properties";
+        // it no disk could be seen as attached (InventoryNormalizer folds it into Raw). sku is
+        // top-level likewise and is how retired Basic SKUs are recognised.
+        return "Resources | where subscriptionId in (" + list + ") | order by id asc | project id, name, type, location, resourceGroup, subscriptionId, tags, managedBy, sku, properties";
     }
 
     private static string ScanHash(IEnumerable<string> parts) =>

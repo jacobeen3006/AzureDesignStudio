@@ -969,7 +969,7 @@
             @foreach (var (item, entry) in watched)
             {
                 <div style="border-bottom:1px solid #fafafa;padding:4px 0;font-size:13px;">
-                    <Tag Color="@("red")">@entry.Status</Tag> <b>@item.Name</b> <span style="color:#999">@item.Type</span>
+                    <Tag Color="@("red")">@entry.Status</Tag> <b>@item.Name</b> <span style="color:#999">@(entry.Sku is null ? item.Type : item.Type + " · " + entry.Sku)</span>
                     <div style="color:#666;">@entry.Note</div>
                 </div>
             }
@@ -2218,7 +2218,7 @@
         sb.AppendLine();
         sb.AppendLine($"## Retirement watch ({watched.Count})");
         foreach (var (item, entry) in watched)
-            sb.AppendLine($"- [{entry.Status}] {item.Id} ({item.Type}): {entry.Note}");
+            sb.AppendLine($"- [{entry.Status}] {item.Id} ({item.Type}{(entry.Sku is null ? "" : " " + entry.Sku)}): {entry.Note}");
         if (watched.Count == 0) sb.AppendLine("- none");
         sb.AppendLine();
         sb.AppendLine($"## Internet exposure ({exposure.Count})");

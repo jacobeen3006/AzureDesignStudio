@@ -71,6 +71,18 @@ public static class InventoryNormalizer
             raw = JsonSerializer.SerializeToElement(merged);
         }
 
+        // sku is a top-level column too (public IPs, load balancers); fold it into Raw unless
+        // the resource keeps its own properties.sku (application gateways), which wins.
+        if (row.TryGetProperty("sku", out var sku) && sku.ValueKind == JsonValueKind.Object
+            && (raw is null || !raw.Value.TryGetProperty("sku", out _)))
+        {
+            var merged = raw is null
+                ? new System.Text.Json.Nodes.JsonObject()
+                : System.Text.Json.Nodes.JsonObject.Create(raw.Value)!;
+            merged["sku"] = System.Text.Json.Nodes.JsonNode.Parse(sku.GetRawText());
+            raw = JsonSerializer.SerializeToElement(merged);
+        }
+
         return new InventoryItem(
             Str(row, "id"), Str(row, "name"), Str(row, "type"), Str(row, "location"),
             Str(row, "resourceGroup"), Str(row, "subscriptionId"), tags, raw);

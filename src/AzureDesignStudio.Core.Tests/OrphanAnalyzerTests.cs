@@ -168,7 +168,7 @@ public class OrphanAnalyzerTests
     [Fact]
     public void Catalog_FreshnessTiers_WildcardMatch_AndWatch()
     {
-        var asOf = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+        var asOf = new DateTimeOffset(2026, 11, 13, 0, 0, 0, TimeSpan.Zero);
         var catalog = DeprecationCatalog.Seed;
 
         Assert.Equal(CatalogFreshness.Current, catalog.FreshnessAt(asOf.AddDays(30)));
@@ -207,5 +207,95 @@ public class OrphanAnalyzerTests
             Assert.Same(DeprecationCatalog.Seed, DeprecationCatalog.Load(null));
         }
         finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    // Real Resource Graph row shape: sku is a top-level column, the rest sits under properties.
+    private static InventoryItem ArgRow(string type, string name, string? skuJson, string propsJson = "{}")
+    {
+        var sku = skuJson is null ? "" : "\"sku\":" + skuJson + ",";
+        var row = "{\"id\":\"/subscriptions/s/resourceGroups/rg/providers/" + type + "/" + name + "\",\"name\":\"" + name
+            + "\",\"type\":\"" + type + "\",\"location\":\"westeurope\",\"resourceGroup\":\"rg\",\"subscriptionId\":\"s\","
+            + sku + "\"properties\":" + propsJson + "}";
+        return InventoryNormalizer.FromArgRow(System.Text.Json.JsonDocument.Parse(row).RootElement.Clone());
+    }
+
+    [Fact]
+    public void Watch_FlagsBasicPublicIp()
+    {
+        var watch = DeprecationCatalog.Seed.Watch([ArgRow("Microsoft.Network/publicIPAddresses", "pip1", """{"name":"Basic","tier":"Regional"}""")]);
+        var hit = Assert.Single(watch);
+        Assert.Equal("retired", hit.Entry.Status);
+        Assert.Equal("Basic", hit.Entry.Sku);
+    }
+
+    [Fact]
+    public void Watch_IgnoresStandardPublicIp()
+    {
+        Assert.Empty(DeprecationCatalog.Seed.Watch([ArgRow("Microsoft.Network/publicIPAddresses", "pip2", """{"name":"Standard","tier":"Regional"}""")]));
+    }
+
+    [Fact]
+    public void Watch_FlagsApplicationGatewayV1ByTier()
+    {
+        var v1 = ArgRow("Microsoft.Network/applicationGateways", "agw1", null, """{"sku":{"name":"Standard_Medium","tier":"Standard","capacity":2}}""");
+        var v2 = ArgRow("Microsoft.Network/applicationGateways", "agw2", null, """{"sku":{"name":"Standard_v2","tier":"Standard_v2","capacity":2}}""");
+        var waf = ArgRow("Microsoft.Network/applicationGateways", "agw3", null, """{"sku":{"name":"WAF_Medium","tier":"WAF"}}""");
+
+        var watch = DeprecationCatalog.Seed.Watch([v1, v2, waf]);
+        Assert.Equal(["agw1", "agw3"], watch.Select(w => w.Item.Name).ToArray());
+    }
+
+    [Fact]
+    public void Watch_ItemWithoutRaw_MatchesTypeOnlyEntries()
+    {
+        var catalog = DeprecationCatalog.Seed;
+        var pip = Item("/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/p", "Microsoft.Network/publicIPAddresses", null);
+        var classic = Item("/subscriptions/s/resourceGroups/rg/providers/Microsoft.ClassicCompute/virtualMachines/legacy", "Microsoft.ClassicCompute/virtualMachines", null);
+
+        var watch = catalog.Watch([pip, classic]);
+        Assert.Equal("legacy", Assert.Single(watch).Item.Name);
+        Assert.Null(catalog.Match("Microsoft.Network/publicIPAddresses"));
+    }
+
+    [Fact]
+    public void Load_OldSnapshotWithoutSku_StillParses()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "ads-cat-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var path = Path.Combine(dir, "catalog.json");
+            File.WriteAllText(path, """{"dataAsOf":"2026-01-01T00:00:00+00:00","entries":[{"resourceType":"Microsoft.Test/x","status":"retiring","note":"soon"}]}""");
+            var loaded = DeprecationCatalog.Load(path);
+            Assert.NotSame(DeprecationCatalog.Seed, loaded);
+            var entry = Assert.Single(loaded.Entries);
+            Assert.Null(entry.Sku);
+            Assert.Equal("retiring", loaded.Match("Microsoft.Test/x")?.Status);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void SeedAgreesWithCoreRetiredSkus()
+    {
+        foreach (var retired in AzureDesignStudio.Core.Validation.RetiredSkus.All)
+        {
+            var entry = DeprecationCatalog.Seed.Entries.SingleOrDefault(e =>
+                string.Equals(e.ResourceType, retired.ResourceType, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(e.Sku, retired.Sku, StringComparison.OrdinalIgnoreCase));
+            Assert.True(entry is not null, $"seed has no entry for {retired.ResourceType} {retired.Sku}");
+            Assert.Equal("retired", entry!.Status);
+            Assert.Equal(new DateTimeOffset(retired.RetiredOn.Year, retired.RetiredOn.Month, retired.RetiredOn.Day, 0, 0, 0, TimeSpan.Zero), entry.RetirementDate);
+        }
+    }
+
+    [Fact]
+    public void Normalizer_CarriesTopLevelSku_ButNeverOverwritesPropertiesSku()
+    {
+        var pip = ArgRow("Microsoft.Network/publicIPAddresses", "p", """{"name":"Basic"}""");
+        Assert.Equal("Basic", pip.Raw!.Value.GetProperty("sku").GetProperty("name").GetString());
+
+        var agw = ArgRow("Microsoft.Network/applicationGateways", "a", """{"name":"ignored"}""", """{"sku":{"tier":"WAF"}}""");
+        Assert.Equal("WAF", agw.Raw!.Value.GetProperty("sku").GetProperty("tier").GetString());
     }
 }
