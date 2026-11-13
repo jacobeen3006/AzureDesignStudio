@@ -235,6 +235,9 @@ public class WhatIfRpcTests
         Assert.Empty(PolicyRequests);
         Assert.Empty(response.PolicyFlags);
         Assert.Empty(response.PolicyNotes);
+        Assert.Empty(QuotaRequests);
+        Assert.Empty(response.QuotaFlags);
+        Assert.Empty(response.QuotaNotes);
     }
 
     [Fact]
@@ -265,6 +268,9 @@ public class WhatIfRpcTests
         Assert.Empty(PolicyRequests);
         Assert.Empty(response.PolicyFlags);
         Assert.Equal(["Policy is not checked for management-group or tenant deployments."], response.PolicyNotes);
+        Assert.Empty(QuotaRequests);
+        Assert.Empty(response.QuotaFlags);
+        Assert.Equal(["Quota is not checked for management-group or tenant deployments."], response.QuotaNotes);
     }
 
     [Fact]
@@ -321,6 +327,229 @@ public class WhatIfRpcTests
         Assert.Empty(response.PolicyFlags);
         Assert.Equal(["Policy check stopped at the time limit: 1 of 1 resources not checked.", .. PolicyPreflight.Caveats],
             response.PolicyNotes);
+    }
+
+    // ---------- quota preflight (Wave B4) ----------
+
+    private const string DSv5 = "standardDSv5Family";
+
+    private string SkusPath => $"{SubscriptionPath}/providers/Microsoft.Compute/skus";
+    private string ComputeUsagesPath => $"{SubscriptionPath}/providers/Microsoft.Compute/locations/westeurope/usages";
+
+    private IReadOnlyList<RecordedRequest> QuotaRequests =>
+        [.. _arm.Requests.Where(r => r.Path.EndsWith("/skus", StringComparison.OrdinalIgnoreCase)
+            || r.Path.EndsWith("/usages", StringComparison.OrdinalIgnoreCase))];
+
+    private string VmId(string name) => $"{GroupPath}/providers/Microsoft.Compute/virtualMachines/{name}";
+
+    /// <summary>vm1..vmN of one size. The what-if is scripted; the template only has to pass the
+    /// validator and the token gate.</summary>
+    private static string VmTemplate(int count, string size) => JsonSerializer.Serialize(new Dictionary<string, object>
+    {
+        ["$schema"] = "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+        ["contentVersion"] = "1.0.0.0",
+        ["resources"] = Enumerable.Range(1, count).Select(i => new
+        {
+            type = "Microsoft.Compute/virtualMachines",
+            apiVersion = "2024-07-01",
+            name = $"vm{i}",
+            location = "westeurope",
+            properties = new { hardwareProfile = new { vmSize = size } },
+        }).ToArray(),
+    });
+
+    /// <summary>The what-if Create rows for <see cref="VmTemplate"/>: the resolved payload in <c>after</c>.</summary>
+    private string[] VmCreates(int count, string size) =>
+    [
+        .. Enumerable.Range(1, count).Select(i => JsonSerializer.Serialize(new
+        {
+            resourceId = VmId($"vm{i}"),
+            changeType = "Create",
+            after = new
+            {
+                id = VmId($"vm{i}"),
+                name = $"vm{i}",
+                type = "Microsoft.Compute/virtualMachines",
+                apiVersion = "2024-07-01",
+                location = "westeurope",
+                properties = new
+                {
+                    hardwareProfile = new { vmSize = size },
+                    osProfile = new { computerName = $"vm{i}", adminUsername = "azureuser" },
+                },
+            },
+        })),
+    ];
+
+    private DeploymentRequest VmRequest(int count, string size)
+    {
+        _arm.Answer(HttpMethod.Post, WhatIfPath, HttpStatusCode.OK, WhatIfResult(VmCreates(count, size)));
+        var request = Request();
+        request.ArmTemplate = VmTemplate(count, size);
+        return request;
+    }
+
+    private static object Sku(string name, int vCpus) => new
+    {
+        resourceType = "virtualMachines",
+        name,
+        tier = "Standard",
+        size = name["Standard_".Length..],
+        family = DSv5,
+        locations = new[] { "westeurope" },
+        capabilities = new[] { new { name = "vCPUs", value = vCpus.ToString(System.Globalization.CultureInfo.InvariantCulture) } },
+        restrictions = Array.Empty<object>(),
+    };
+
+    /// <summary>The Resource SKUs list for westeurope, in the documented shape.</summary>
+    private static string SkuList => JsonSerializer.Serialize(new { value = new[] { Sku("Standard_D2s_v5", 2), Sku("Standard_D4s_v5", 4) } });
+
+    private static object Usage(string name, string localizedValue, long current, long limit) =>
+        new { name = new { value = name, localizedValue }, currentValue = current, limit, unit = "Count" };
+
+    /// <summary>The compute usages for westeurope: the regional total at 10 of 100, DSv5 as given.</summary>
+    private static string ComputeUsages(long familyCurrent, long familyLimit = 50) => JsonSerializer.Serialize(new
+    {
+        value = new[]
+        {
+            Usage("cores", "Total Regional vCPUs", 10, 100),
+            Usage(DSv5, "Standard DSv5 Family vCPUs", familyCurrent, familyLimit),
+        },
+    });
+
+    [Fact]
+    public async Task WhatIf_QuotaExceeds_IsReturned_TokenStillIssued()
+    {
+        var request = VmRequest(2, "Standard_D4s_v5");
+        _arm.Answer(HttpMethod.Post, PolicyPath, HttpStatusCode.OK, NoPolicyFindings)
+            .Answer(HttpMethod.Get, SkusPath, HttpStatusCode.OK, SkuList)
+            .Answer(HttpMethod.Get, ComputeUsagesPath, HttpStatusCode.OK, ComputeUsages(familyCurrent: 44));
+
+        var response = await Service(new AmbientCredential()).WhatIf(request, Me);
+
+        Assert.True(response.StatusCode == 200, response.ErrorMessage);
+        Assert.NotEqual("", response.WhatIfToken);
+        Assert.False(response.GuardrailBlocked);
+        Assert.True(_gate.ValidateAndConsume(response.WhatIfToken, _subscription.ToString(), ResourceGroup, request.ArmTemplate, "{}").IsOk);
+        Assert.Equal((2, 0, 0), (response.Creates, response.Modifies, response.Deletes));
+
+        // Two D4s_v5 ask 8 vCPUs: 44 + 8 > 50 for the family; 10 + 8 of 100 regionally.
+        QuotaFlag[] expected =
+        [
+            new()
+            {
+                Location = "westeurope", QuotaName = DSv5, DisplayName = "Standard DSv5 Family vCPUs",
+                Current = 44, Limit = 50, Requested = 8, Status = "Exceeds", VmSize = "Standard_D4s_v5", Detail = "",
+            },
+            new()
+            {
+                Location = "westeurope", QuotaName = "cores", DisplayName = "Total Regional vCPUs",
+                Current = 10, Limit = 100, Requested = 8, Status = "Ok", VmSize = "", Detail = "",
+            },
+        ];
+        Assert.Equal(expected, response.QuotaFlags);
+        Assert.Equal(QuotaPreflight.Caveats, response.QuotaNotes);
+
+        // The reads went to the target's subscription, once each; no public IP, so no network read.
+        var skus = Assert.Single(_arm.To(HttpMethod.Get, SkusPath));
+        Assert.Contains("api-version=2021-07-01", skus.Query);
+        Assert.Contains("$filter=location eq 'westeurope'", Uri.UnescapeDataString(skus.Query));
+        var usages = Assert.Single(_arm.To(HttpMethod.Get, ComputeUsagesPath));
+        Assert.Contains("api-version=2026-04-01", usages.Query);
+        Assert.Equal(2, QuotaRequests.Count);
+    }
+
+    [Fact]
+    public async Task WhatIf_PolicyAndQuotaBothReturned()
+    {
+        var request = VmRequest(1, "Standard_D4s_v5");
+        // Each preflight answers only once the other has started: run one after the other, the
+        // first would wait out the budget and come back empty.
+        var policyStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var quotaStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _arm.Answer(HttpMethod.Post, PolicyPath, async (_, token) =>
+            {
+                policyStarted.TrySetResult();
+                await quotaStarted.Task.WaitAsync(token);
+                return new ScriptedAnswer(HttpStatusCode.OK, DenyAnswer);
+            })
+            .Answer(HttpMethod.Get, SkusPath, async (_, token) =>
+            {
+                quotaStarted.TrySetResult();
+                await policyStarted.Task.WaitAsync(token);
+                return new ScriptedAnswer(HttpStatusCode.OK, SkuList);
+            })
+            .Answer(HttpMethod.Get, ComputeUsagesPath, HttpStatusCode.OK, ComputeUsages(familyCurrent: 44));
+        var service = Service(new AmbientCredential());
+        service.PreflightBudget = TimeSpan.FromSeconds(10);
+
+        var response = await service.WhatIf(request, Me);
+
+        Assert.True(response.StatusCode == 200, response.ErrorMessage);
+        Assert.NotEqual("", response.WhatIfToken);
+        Assert.True(_gate.ValidateAndConsume(response.WhatIfToken, _subscription.ToString(), ResourceGroup, request.ArmTemplate, "{}").IsOk);
+
+        var policy = Assert.Single(response.PolicyFlags);
+        Assert.Equal((VmId("vm1"), "Deny"), (policy.ResourceId, policy.Verdict));
+        Assert.Equal(PolicyPreflight.Caveats, response.PolicyNotes);
+
+        // One D4s_v5: 44 + 4 of 50 is at least 90 % of the family's limit.
+        Assert.Equal(
+            [("westeurope", DSv5, "NearLimit", 44L, 50L, 4L), ("westeurope", "cores", "Ok", 10L, 100L, 4L)],
+            response.QuotaFlags.Select(f => (f.Location, f.QuotaName, f.Status, f.Current, f.Limit, f.Requested)));
+        Assert.Equal(QuotaPreflight.Caveats, response.QuotaNotes);
+    }
+
+    [Fact]
+    public async Task WhatIf_PreflightBudget_KeepsPartialResults()
+    {
+        var request = VmRequest(6, "Standard_D2s_v5");
+        // Policy: vm1..vm5 answer Deny, vm6 never answers. Quota: the SKUs answer, the compute usages never do.
+        _arm.Answer(HttpMethod.Post, PolicyPath, async (sent, token) =>
+            {
+                using var body = JsonDocument.Parse(sent.Body);
+                var name = body.RootElement.GetProperty("resourceDetails").GetProperty("resourceContent").GetProperty("name").GetString();
+                if (name == "vm6")
+                    await Task.Delay(Timeout.Infinite, token); // only the deadline ends this one
+                return new ScriptedAnswer(HttpStatusCode.OK, DenyAnswer);
+            })
+            .Answer(HttpMethod.Get, SkusPath, HttpStatusCode.OK, SkuList)
+            .Hold(HttpMethod.Get, ComputeUsagesPath, new TaskCompletionSource().Task);
+        var service = Service(new AmbientCredential());
+        service.PreflightBudget = TimeSpan.FromSeconds(1);
+
+        var response = await service.WhatIf(request, Me);
+
+        Assert.True(response.StatusCode == 200, response.ErrorMessage);
+        Assert.NotEqual("", response.WhatIfToken);
+        Assert.True(_gate.ValidateAndConsume(response.WhatIfToken, _subscription.ToString(), ResourceGroup, request.ArmTemplate, "{}").IsOk);
+        Assert.Equal((6, 0, 0), (response.Creates, response.Modifies, response.Deletes));
+
+        // The five that answered are kept; the sixth is a note, not a silent "no findings".
+        Assert.Equal(
+            [.. Enumerable.Range(1, 5).Select(i => (VmId($"vm{i}"), "Deny"))],
+            response.PolicyFlags.Select(f => (f.ResourceId, f.Verdict)));
+        Assert.Equal(["Policy check stopped at the time limit: 1 of 6 resources not checked.", .. PolicyPreflight.Caveats],
+            response.PolicyNotes);
+
+        // Six D2s_v5 ask 12 vCPUs; without the usages neither check can say Ok.
+        const string late = "the compute usages were not read within the time limit";
+        QuotaFlag[] expected =
+        [
+            new()
+            {
+                Location = "westeurope", QuotaName = "cores", DisplayName = "cores",
+                Current = 0, Limit = 0, Requested = 12, Status = "Unknown", VmSize = "", Detail = late,
+            },
+            new()
+            {
+                Location = "westeurope", QuotaName = DSv5, DisplayName = DSv5,
+                Current = 0, Limit = 0, Requested = 12, Status = "Unknown", VmSize = "Standard_D2s_v5", Detail = late,
+            },
+        ];
+        Assert.Equal(expected, response.QuotaFlags);
+        Assert.Equal(["Quota check stopped at the time limit: 1 of 2 quota reads did not finish.", .. QuotaPreflight.Caveats],
+            response.QuotaNotes);
     }
 }
 

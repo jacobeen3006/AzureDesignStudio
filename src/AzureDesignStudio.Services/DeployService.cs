@@ -504,10 +504,14 @@ namespace AzureDesignStudio.Services
                 response.PlanHash = plan.PlanHash;
                 response.WhatIfToken = token ?? "";
 
-                // Wave B2: advisory only, and only once the what-if has succeeded - it adds flags
-                // and notes, never touches the token, the plan hash or the status code.
-                await AddPolicyPreflightAsync(response, target, summary, http, credential,
-                    request.ArmTemplate, parametersJson, context.CancellationToken);
+                // Waves B2 and B4: advisory only, and only once the what-if has succeeded - they add
+                // flags and notes, never touch the token, the plan hash or the status code. They
+                // run at once, each on its own transport and within the same budget, and each fills
+                // only its own fields of the response.
+                await Task.WhenAll(
+                    AddPolicyPreflightAsync(response, target, summary, http, credential,
+                        request.ArmTemplate, parametersJson, context.CancellationToken),
+                    AddQuotaPreflightAsync(response, target, summary, http, credential, context.CancellationToken));
                 return response;
             }
             catch (WhatIfException ex)
@@ -587,6 +591,64 @@ namespace AzureDesignStudio.Services
             response.PolicyNotes.AddRange(PolicyPreflight.Caveats);
             _logger.LogInformation("Policy preflight: {Checked} checked, {NotChecked} not checked, {Findings} finding(s).",
                 result.Checked, result.NotChecked, result.Findings.Count);
+        }
+
+        private const string QuotaTargetNote = "Quota is not checked for management-group or tenant deployments.";
+        private const string QuotaFailedNote = "Quota was not checked: the check failed unexpectedly.";
+
+        /// <summary>
+        /// Wave B4 quota preflight over a successful what-if: counts the vCPUs and public IPs the
+        /// previewed batch asks for and checks them against the Resource SKUs and the usages of the
+        /// target's subscription, putting the findings in <c>quota_flags</c> (status = the
+        /// <see cref="QuotaStatus"/> name) and the engine's notes followed by its caveats in
+        /// <c>quota_notes</c>. It runs on its own <see cref="ArmTransport"/> (same "arm" HttpClient
+        /// and credential) beside the policy preflight. Management-group and tenant targets get a
+        /// note, not a check. Advisory: nothing it does changes the token, plan hash or status code;
+        /// only the caller's cancellation propagates.
+        /// </summary>
+        private async Task AddQuotaPreflightAsync(WhatIfResponse response, DeployTargetScope target, WhatIfSummary summary,
+            HttpClient http, Azure.Core.TokenCredential credential, CancellationToken ct)
+        {
+            if (target.Kind is DeployScopeKind.ManagementGroup or DeployScopeKind.Tenant)
+            {
+                response.QuotaNotes.Add(QuotaTargetNote);
+                return;
+            }
+
+            QuotaPreflightResult result;
+            try
+            {
+                var transport = new ArmTransport(http, credential, ArmEndpointSet.AzureCloud);
+                result = await new QuotaPreflight(transport).CheckAsync(target.SubscriptionId, summary.Changes,
+                    PreflightBudget, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // The engine turns every failure into a note; this only guards the review against a bug in it.
+                _logger.LogWarning(ex, "Quota preflight failed.");
+                response.QuotaNotes.Add(QuotaFailedNote);
+                return;
+            }
+
+            foreach (var finding in result.Findings)
+            {
+                response.QuotaFlags.Add(new QuotaFlag
+                {
+                    Location = finding.Location,
+                    QuotaName = finding.QuotaName,
+                    DisplayName = finding.DisplayName,
+                    Current = finding.Current,
+                    Limit = finding.Limit,
+                    Requested = finding.Requested,
+                    Status = finding.Status.ToString(),
+                    VmSize = finding.VmSize ?? "",
+                    Detail = finding.Detail ?? "",
+                });
+            }
+            response.QuotaNotes.AddRange(result.Notes);
+            response.QuotaNotes.AddRange(QuotaPreflight.Caveats);
+            _logger.LogInformation("Quota preflight: {Findings} finding(s), {NotOk} not Ok.",
+                result.Findings.Count, result.Findings.Count(f => f.Status != QuotaStatus.Ok));
         }
 
         /// <summary>

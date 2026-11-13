@@ -88,6 +88,11 @@ namespace AzureDesignStudio.Components.MenuDrawer
         // the rest; and the ids that would be denied, for the per-row tag (ids case-insensitive).
         private IReadOnlyList<PolicyFlag> _policyFlags = [];
         private HashSet<string> _policyDenied = new(StringComparer.OrdinalIgnoreCase);
+        // Quota preflight (advisory): the findings that need a look - Exceeds and SkuUnavailable,
+        // then NearLimit, then Unknown (and any status this client does not know) - and the Ok
+        // ones, which the review shows collapsed.
+        private IReadOnlyList<QuotaFlag> _quotaAttention = [];
+        private IReadOnlyList<QuotaFlag> _quotaOk = [];
         private bool _deployAsStack = false;
         private string _stackName = "ads-stack";
         // v2 12.3 closer: the review-screen stack probe (null = availability unknown), whether a
@@ -245,6 +250,8 @@ namespace AzureDesignStudio.Components.MenuDrawer
             _guardrailFlags = new(StringComparer.OrdinalIgnoreCase);
             _policyFlags = [];
             _policyDenied = new(StringComparer.OrdinalIgnoreCase);
+            _quotaAttention = [];
+            _quotaOk = [];
             // A new preview means new bytes and maybe a new scope: the old probe proves nothing.
             _stackProbe = null;
             _stackProbed = false;
@@ -270,6 +277,8 @@ namespace AzureDesignStudio.Components.MenuDrawer
                     _policyFlags = [.. response.PolicyFlags.OrderBy(f => PolicyRank(f.Verdict))];
                     _policyDenied = new(response.PolicyFlags.Where(f => PolicyRank(f.Verdict) == 0).Select(f => f.ResourceId),
                         StringComparer.OrdinalIgnoreCase);
+                    _quotaAttention = [.. response.QuotaFlags.Where(f => QuotaRank(f.Status) < QuotaOkRank).OrderBy(f => QuotaRank(f.Status))];
+                    _quotaOk = [.. response.QuotaFlags.Where(f => QuotaRank(f.Status) == QuotaOkRank)];
                 }
             }
             catch (Exception ex) when (ex is Grpc.Core.RpcException or InvalidOperationException or HttpRequestException)
@@ -321,6 +330,47 @@ namespace AzureDesignStudio.Components.MenuDrawer
             1 => "Audit",
             _ => "Check",
         };
+
+        private const int QuotaOkRank = 3;
+
+        /// <summary>Exceeds and SkuUnavailable 0, NearLimit 1, Ok 3, anything else (Unknown, or a
+        /// status this client does not know) 2 - never Ok by default.</summary>
+        private static int QuotaRank(string status) =>
+            string.Equals(status, "Exceeds", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "SkuUnavailable", StringComparison.OrdinalIgnoreCase) ? 0
+            : string.Equals(status, "NearLimit", StringComparison.OrdinalIgnoreCase) ? 1
+            : string.Equals(status, "Ok", StringComparison.OrdinalIgnoreCase) ? QuotaOkRank
+            : 2;
+
+        private static string QuotaTagColor(string status) => QuotaRank(status) switch
+        {
+            0 => "red",
+            1 => "orange",
+            _ => "default",
+        };
+
+        private static string QuotaTagText(string status) =>
+            string.Equals(status, "SkuUnavailable", StringComparison.OrdinalIgnoreCase) ? "Size unavailable"
+            : QuotaRank(status) switch
+            {
+                0 => "Exceeds",
+                1 => "Near limit",
+                _ => "Unknown",
+            };
+
+        /// <summary>"{DisplayName} in {location}: {current} used + {requested} requested of {limit}";
+        /// a size that cannot be deployed shows its detail instead (it names the location), and so
+        /// does an Unknown check, whose numbers were not (all) read.</summary>
+        private static string QuotaLine(QuotaFlag flag)
+        {
+            if (flag.Detail.Length > 0 && string.Equals(flag.Status, "SkuUnavailable", StringComparison.OrdinalIgnoreCase))
+                return $"{flag.DisplayName}: {flag.Detail}";
+            if (flag.Detail.Length > 0 && QuotaRank(flag.Status) == 2)
+                return $"{flag.DisplayName} in {flag.Location}: {flag.Detail}";
+            return $"{flag.DisplayName} in {flag.Location}: {flag.Current} used + {flag.Requested} requested of {flag.Limit}";
+        }
+
+        private string QuotaRoomSummary => _quotaOk.Count == 1 ? "1 quota has room" : $"{_quotaOk.Count} quotas have room";
 
         /// <summary>The name an ARM id ends with: a resource's name, a policy assignment's name.</summary>
         private static string LastSegment(string id)

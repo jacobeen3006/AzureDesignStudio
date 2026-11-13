@@ -109,6 +109,10 @@ message WhatIfResponse {
 	// status_code. policy_notes carries the engine's notes followed by its caveats.
 	repeated PolicyFlag policy_flags = 13;
 	repeated string policy_notes = 14;
+	// Quota preflight (Wave B4): advisory only, like the policy preflight - it never withholds the
+	// token or changes status_code. quota_notes carries the engine's notes followed by its caveats.
+	repeated QuotaFlag quota_flags = 15;
+	repeated string quota_notes = 16;
 }
 
 message GuardrailFlag {
@@ -125,6 +129,22 @@ message PolicyFlag {
 	string policy_definition_id = 5;
 	string policy_definition_reference_id = 6;
 	string reason = 7;
+}
+
+// One quota in one location for the previewed batch: a VM family's vCPUs, the regional total
+// "cores", a public IP quota, or a VM size that cannot be deployed there. status is the
+// QuotaStatus name (Ok, NearLimit, Exceeds, Unknown, SkuUnavailable); requested counts only the
+// increase; vm_size and detail are empty when the engine gave none.
+message QuotaFlag {
+	string location = 1;
+	string quota_name = 2;
+	string display_name = 3;
+	int64 current = 4;
+	int64 limit = 5;
+	int64 requested = 6;
+	string status = 7;
+	string vm_size = 8;
+	string detail = 9;
 }
 
 message GuardrailPolicyRequest {

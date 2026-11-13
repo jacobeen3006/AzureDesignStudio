@@ -134,6 +134,46 @@
                 }
             </div>
         }
+        @if (_whatIfResult.QuotaFlags.Count > 0 || _whatIfResult.QuotaNotes.Count > 0)
+        {
+            <div style="margin:8px 0">
+                <strong>Quota</strong>
+                <p style="margin:2px 0 4px 0"><em>Quota is checked again by Azure when you deploy.</em></p>
+                @if (_quotaAttention.Count > 0)
+                {
+                    <ul style="margin:0 0 6px 18px">
+                        @foreach (var quotaFlag in _quotaAttention)
+                        {
+                            <li title="@(quotaFlag.VmSize.Length > 0 ? quotaFlag.VmSize : null)">
+                                <Tag Color="@QuotaTagColor(quotaFlag.Status)">@QuotaTagText(quotaFlag.Status)</Tag>
+                                <span>@QuotaLine(quotaFlag)</span>
+                            </li>
+                        }
+                    </ul>
+                }
+                @if (_quotaOk.Count > 0)
+                {
+                    <details style="margin:0 0 6px 18px">
+                        <summary>@QuotaRoomSummary</summary>
+                        <ul style="margin:0 0 0 18px">
+                            @foreach (var quotaFlag in _quotaOk)
+                            {
+                                <li title="@(quotaFlag.VmSize.Length > 0 ? quotaFlag.VmSize : null)">@QuotaLine(quotaFlag)</li>
+                            }
+                        </ul>
+                    </details>
+                }
+                @if (_whatIfResult.QuotaNotes.Count > 0)
+                {
+                    <ul style="margin:0 0 6px 18px;color:var(--ads-text-muted)">
+                        @foreach (var quotaNote in _whatIfResult.QuotaNotes)
+                        {
+                            <li>@quotaNote</li>
+                        }
+                    </ul>
+                }
+            </div>
+        }
         @if (_whatIfResult.Deletes == 0 && !_whatIfResult.GuardrailBlocked && _whatIfChanges.Count == 0)
         {
             <p>No changes predicted for this template.</p>
