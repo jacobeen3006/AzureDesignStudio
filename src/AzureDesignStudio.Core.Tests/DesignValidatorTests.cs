@@ -258,6 +258,30 @@ namespace AzureDesignStudio.Core.Tests
         }
 
         [Fact]
+        public void ScaleSetSubnet_WithoutPath_WarnsAboutDefaultOutbound()
+        {
+            var vnet = new VirtualNetworkModel { Name = "vnet1" };
+            var subnet = vnet.AddSubnet(new SubnetModel { Name = "snet1" });
+            var set = new VirtualMachineScaleSetModel { Name = "vmss1" };
+            subnet.AddChild(set);
+            var issue = Assert.Single(Outbound(vnet, subnet, set));
+            Assert.Equal(ValidationSeverity.Warning, issue.Severity);
+            Assert.Contains("'snet1' relies on default outbound access", issue.Message);
+        }
+
+        [Fact]
+        public void MachineSubnet_Private_WithFirewallInSameNetwork_IsInfoNotWarning()
+        {
+            var (vnet, subnet, vm) = MachineSubnet();
+            subnet.PrivateSubnet = true;
+            var fwSubnet = vnet.AddSubnet(new SubnetModel { Name = "AzureFirewallSubnet" });
+            var fw = new AzureFirewallModel { Name = "fw1" };
+            fwSubnet.AddChild(fw);
+            var issue = Assert.Single(Outbound(vnet, subnet, vm, fwSubnet, fw));
+            Assert.Equal(ValidationSeverity.Info, issue.Severity);
+        }
+
+        [Fact]
         public void MachineSubnet_WithFirewallInPeeredNetwork_IsInfo()
         {
             var (vnet, subnet, vm) = MachineSubnet();
