@@ -666,6 +666,9 @@ public class PolicyPreflightTests
     [InlineData("")]
     [InlineData("[1,2]")]
     [InlineData("""{"contentEvaluationResult":{"policyEvaluations":{"not":"an array"}}}""")]
+    [InlineData("""{"contentEvaluationResult":{"policyEvaluations":[null]}}""")]
+    [InlineData("""{"contentEvaluationResult":{"policyEvaluations":[1]}}""")]
+    [InlineData("""{"contentEvaluationResult":{"policyEvaluations":["x"]}}""")]
     public void ParseResult_MalformedResponse_Throws_NeverNoFindings(string json)
     {
         Assert.ThrowsAny<JsonException>(() => PolicyPreflight.ParseResult(StorageId(1), json));
@@ -760,6 +763,7 @@ public class PolicyPreflightTests
     [InlineData(400, """{"error":{"code":"InvalidRequestContent","message":"bad content"}}""", "InvalidRequestContent")]
     [InlineData(429, "", "Throttled")]
     [InlineData(200, "this is not json", "MalformedResponse")]
+    [InlineData(200, """{"contentEvaluationResult":{"policyEvaluations":[null]}}""", "MalformedResponse")]
     public async Task Check_OneFailure_SkipsOnlyThatResource(int status, string failingBody, string code)
     {
         var handler = Answering(s => s.ContentName == "sa02" ? Json(failingBody, (HttpStatusCode)status) : Json(DenyResponse));
@@ -854,7 +858,9 @@ public class PolicyPreflightTests
         var changes = Enumerable.Range(1, 6).Select(Storage).ToList();
         var clock = Stopwatch.StartNew();
 
-        var result = await Engine(handler).CheckAsync(changes, EmptyTemplate, null, TimeSpan.FromMilliseconds(500), CancellationToken.None);
+        // Wide enough that the other five always finish on a loaded runner; sa01 still ends the
+        // run at the deadline, because only the deadline cancels it.
+        var result = await Engine(handler).CheckAsync(changes, EmptyTemplate, null, TimeSpan.FromSeconds(3), CancellationToken.None);
 
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(20), $"took {clock.Elapsed}");
         Assert.Equal(5, result.Checked);

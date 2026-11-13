@@ -562,7 +562,7 @@ public sealed class PolicyPreflight(ArmTransport transport)
         foreach (var evaluation in evaluations.EnumerateArray())
         {
             if (evaluation.ValueKind != JsonValueKind.Object)
-                continue;
+                throw new JsonException("A policyEvaluations entry is not a JSON object.");
             var info = ObjectMember(evaluation, "policyInfo");
             var effect = StringMember(ObjectMember(evaluation, "effectDetails"), "policyEffect") ?? "Unknown";
             var result = StringMember(evaluation, "evaluationResult");
