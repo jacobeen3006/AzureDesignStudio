@@ -7,7 +7,10 @@
     <FormItem>
         <RadioGroup @bind-Value="@context.Sku" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
             <Radio RadioButton Value="@("Standard")">Standard</Radio>
-            <Radio RadioButton Value="@("Basic")">Basic</Radio>
+            @if (context.Sku == "Basic")
+            {
+                <Radio RadioButton Value="@("Basic")" Disabled="true">Basic (retired)</Radio>
+            }
         </RadioGroup>
     </FormItem>
     <FormItem>

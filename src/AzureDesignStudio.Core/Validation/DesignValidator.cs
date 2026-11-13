@@ -124,6 +124,18 @@ namespace AzureDesignStudio.Core.Validation
                         break;
                 }
 
+                // SKUs Azure has retired.
+                var retired = node switch
+                {
+                    PublicIpModel pip => RetiredSkus.Match("Microsoft.Network/publicIPAddresses", pip.Sku),
+                    LoadBalancerModel lb => RetiredSkus.Match("Microsoft.Network/loadBalancers", lb.Sku),
+                    AppGatewayModel gateway => RetiredSkus.Match("Microsoft.Network/applicationGateways", gateway.Tier),
+                    _ => null,
+                };
+                if (retired is not null)
+                    issues.Add(new(ValidationSeverity.Error, "retired-sku", name,
+                        $"{azure.ServiceName} '{name}' uses the {retired.Sku} SKU, which Azure retired on {retired.RetiredOn:yyyy-MM-dd}. Use {retired.Replacement}."));
+
                 // SKU/region availability.
                 if (SkuRegionRules.TryGetValue(node.GetType(), out var skuRule))
                 {

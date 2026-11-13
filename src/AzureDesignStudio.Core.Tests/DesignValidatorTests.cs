@@ -309,5 +309,47 @@ namespace AzureDesignStudio.Core.Tests
             subnet.Delegation = "Microsoft.App/environments";
             Assert.Empty(Outbound(vnet, subnet, vm));
         }
+
+        private static ValidationIssue[] Retired(params NodeModel[] nodes) =>
+            Rules(Validate(nodes), "retired-sku");
+
+        [Fact]
+        public void BasicPublicIp_ProducesRetiredSkuError()
+        {
+            var issue = Assert.Single(Retired(new PublicIpModel { Name = "pip1", Sku = "Basic" }));
+            Assert.Equal(ValidationSeverity.Error, issue.Severity);
+            Assert.Contains("2025-09-30", issue.Message);
+            Assert.Contains("Standard", issue.Message);
+        }
+
+        [Fact]
+        public void BasicLoadBalancer_ProducesRetiredSkuError()
+        {
+            var issue = Assert.Single(Retired(new LoadBalancerModel { Name = "lb1", Sku = "basic" }));
+            Assert.Equal(ValidationSeverity.Error, issue.Severity);
+            Assert.Contains("2025-09-30", issue.Message);
+            Assert.Contains("Standard", issue.Message);
+        }
+
+        [Theory]
+        [InlineData("Standard", "Standard_v2")]
+        [InlineData("WAF", "WAF_v2")]
+        public void AppGatewayV1Tier_ProducesRetiredSkuError(string tier, string replacement)
+        {
+            var issue = Assert.Single(Retired(new AppGatewayModel { Name = "agw1", Tier = tier }));
+            Assert.Equal(ValidationSeverity.Error, issue.Severity);
+            Assert.Contains("2026-04-28", issue.Message);
+            Assert.Contains(replacement, issue.Message);
+        }
+
+        [Fact]
+        public void StandardSkus_ProduceNoRetiredSkuIssue()
+        {
+            Assert.Empty(Retired(
+                new PublicIpModel { Name = "pip1", Sku = "Standard" },
+                new LoadBalancerModel { Name = "lb1", Sku = "Standard" },
+                new AppGatewayModel { Name = "agw1" },
+                new AppGatewayModel { Name = "agw2", Tier = "WAF_v2" }));
+        }
     }
 }
