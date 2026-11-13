@@ -46,7 +46,7 @@ AzureDesignStudio/
 │   ├── AzureDesignStudio.Desktop/      # MAUI BlazorWebView host (reuses App.razor); runs Services in-process, no server
 │   │   └── Platforms/Windows|MacCatalyst/ # OS-only code: Credential Manager vs Keychain secret store, Mac paths/token cache
 │   └── BuildMacDmg.sh                  # macOS: universal Release build + ad-hoc/Developer ID signing + .dmg (artifacts/)
-├── .github/workflows/                  # build.yml (build+test+CodeQL), publish.yml (tag v*: WASM zip, Docker, MSIX), codeql-analysis.yml
+├── .github/workflows/                  # build.yml (build+test+CodeQL), publish.yml (tag v*: WASM zip, Docker, MSIX, macOS .dmg on a macos-26/Xcode 27 runner, `MACOS_RUNNER` var overrides), codeql-analysis.yml
 └── assets/ docs/                       # Screenshots, documentation
 ```
 

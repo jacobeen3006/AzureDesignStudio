@@ -117,7 +117,7 @@ The macOS app is the same desktop app built for Mac Catalyst: one universal buil
 
 #### Install from the disk image
 
-1. Open `AzureDesignStudio-<version>-macos-universal.dmg` and drag **Azure Design Studio** onto **Applications**.
+1. Download `AzureDesignStudio-<version>-macos-universal.dmg` from the GitHub release (or build it, below), open it and drag **Azure Design Studio** onto **Applications**.
 2. A build that is not signed with a Developer ID (the default, see below) is blocked by Gatekeeper on first launch. Right-click the app and choose **Open**, or clear the quarantine flag once:
 
    ```bash
@@ -137,6 +137,8 @@ src/BuildMacDmg.sh
 ```
 
 The image lands in `artifacts/`. Options: `--version 1.2.3`, `--arch arm64|x64` (default `universal`), `--sign "Developer ID Application: …"` to sign with your certificate and the hardened runtime, and `--notarize <keychain-profile>` to notarize and staple (`xcrun notarytool store-credentials` creates the profile). Without `--sign` the app is ad-hoc signed.
+
+Tagged releases (`v*`) build the same image in the `desktop-dmg` job of [`publish.yml`](.github/workflows/publish.yml) and attach it to the GitHub release. It is ad-hoc signed unless these repository secrets are set: `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD` and `MACOS_SIGN_IDENTITY` (a Developer ID Application certificate) to sign, plus `APPLE_ID`, `APPLE_TEAM_ID` and `APPLE_APP_PASSWORD` (an app-specific password) to notarize. The job needs a runner image with Xcode 27 (`macos-26` by default; the `MACOS_RUNNER` repository variable picks another).
 
 For development, build and run the app directly:
 
