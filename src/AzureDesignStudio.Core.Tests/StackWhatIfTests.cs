@@ -275,7 +275,8 @@ public class StackWhatIfTests
     }
 
     private static StackWhatIfClient Client(FakeHandler handler) =>
-        new(new ArmTransport(new HttpClient(handler), new FakeCredential(), ArmEndpointSet.AzureCloud, (_, _) => Task.CompletedTask));
+        new(new ArmTransport(new HttpClient(handler), new FakeCredential(), ArmEndpointSet.AzureCloud, (_, _) => Task.CompletedTask),
+            (_, _) => Task.CompletedTask);
 
     private static (string Json, string Hash) StackBody()
     {
@@ -334,6 +335,53 @@ public class StackWhatIfTests
         var error = await Assert.ThrowsAsync<WhatIfException>(() => Client(handler).RunAsync("s", "rg", "ads-stack", json, hash));
 
         Assert.Equal("InvalidTemplate", error.Code);
+        Assert.Equal(new[] { "PUT", "DELETE" }, handler.Methods);
+    }
+
+    [Fact]
+    public async Task Client_Run_PutAnswers200Initializing_PollsUntilSucceeded()
+    {
+        var (json, hash) = StackBody();
+        var handler = new FakeHandler((_, call) => call switch
+        {
+            0 => Json("""{"properties":{"provisioningState":"initializing"}}"""),
+            1 => Json("""{"properties":{"provisioningState":"initializing"}}"""),
+            2 => Json(Result(Change(Rg + "Microsoft.Storage/storageAccounts/sa1", "create"))),
+            _ => Json("", HttpStatusCode.OK),
+        });
+
+        var summary = await Client(handler).RunAsync("s", "rg", "ads-stack", json, hash);
+
+        Assert.Equal(new[] { "PUT", "GET", "GET", "DELETE" }, handler.Methods);
+        Assert.Equal(StackChangeKind.Create, Assert.Single(summary.Changes).Kind);
+        Assert.Null(summary.IndeterminacyReason);
+    }
+
+    [Fact]
+    public async Task Client_Run_NeverTerminal_ReturnsIndeterminateAfterTheBound()
+    {
+        var (json, hash) = StackBody();
+        var handler = new FakeHandler((_, call) => call <= 60
+            ? Json("""{"properties":{"provisioningState":"initializing"}}""")
+            : Json("", HttpStatusCode.OK));
+
+        var summary = await Client(handler).RunAsync("s", "rg", "ads-stack", json, hash);
+
+        Assert.NotNull(summary.IndeterminacyReason);
+        Assert.Equal(60, handler.Methods.Count(m => m == "GET"));
+        Assert.Equal("DELETE", handler.Methods[^1]);
+    }
+
+    [Fact]
+    public async Task Client_Run_PutThrows_StillAttemptsDelete()
+    {
+        var (json, hash) = StackBody();
+        var handler = new FakeHandler((_, call) => call == 0
+            ? Json("""{"error":{"code":"Boom","message":"nope"}}""", HttpStatusCode.BadRequest)
+            : Json("", HttpStatusCode.OK));
+
+        await Assert.ThrowsAnyAsync<Exception>(() => Client(handler).RunAsync("s", "rg", "ads-stack", json, hash));
+
         Assert.Equal(new[] { "PUT", "DELETE" }, handler.Methods);
     }
 }
