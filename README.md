@@ -45,6 +45,39 @@ The app runs entirely on your machine. There is no server to host: it calls Azur
 
 ---
 
+## See it in action
+
+### Design a landing zone
+Drag a gallery design onto the canvas, or build one from the palette. Click a resource to inspect it, and use the action buttons to validate, estimate cost, export, or save.
+
+![Hub-and-spoke design](docs/screenshots/canvas-hub-spoke.png)
+
+![Selected resource in the inspector](docs/screenshots/design-inspector.png)
+
+### Estimate the monthly cost
+Choose a region and currency, then press **Calculate**. Each resource gets one line:
+
+- **Computed**: priced from Azure's retail price list for the size you chose (for example a VM's SKU).
+- **UsageBased**: a flat hourly or per-unit rate, shown with its unit.
+- **Unavailable**: priced by usage (such as public IP traffic), so it is left out of the total.
+- **Free**: networks and subnets carry no charge of their own.
+
+The total and the breakdown by service update with every calculation.
+
+![Monthly cost estimate](docs/screenshots/cost-estimate.png)
+
+### Deploy safely
+1. **Export → ARM template** shows the generated template. Download it, or press **Deploy**.
+2. Choose the subscription and resource group. The app shows the parameters the template needs.
+3. **What-If** shows what would be created, modified, or deleted, before anything runs.
+4. **Approve & deploy** is enabled only when the What-If allows it. It is blocked if the plan deletes anything or touches a guardrailed resource, and it runs exactly the plan you reviewed.
+
+![What-If review before deployment](docs/screenshots/whatif-review.png)
+
+> Subscription IDs and resource names are redacted in these pictures.
+
+---
+
 ## Install
 
 ### Requirements
