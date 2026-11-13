@@ -375,5 +375,39 @@ namespace AzureDesignStudio.Core.Tests
         [Fact]
         public void OPS_NO_MONITORING_NoComputeNodes_DoesNotFire() =>
             Assert.Empty(ForRule(Lint(Create(AdsConstants.StorageAccount, "st1")), "OPS-NO-MONITORING"));
+
+        [Fact]
+        public void ValidationReport_For_RunsBoth()
+        {
+            var report = ValidationReport.For(new[] { Create(AdsConstants.PublicIp, "pip1"), Create(AdsConstants.VirtualMachine, "vm1") });
+            Assert.Equal(DesignValidator.Validate(new[] { Create(AdsConstants.PublicIp, "pip1"), Create(AdsConstants.VirtualMachine, "vm1") }), report.Issues);
+            Assert.NotEmpty(report.Findings);
+            Assert.Contains(report.Findings, f => f.NodeName == "vm1");
+        }
+
+        [Fact]
+        public void ValidationReport_RoundTripsThroughJson()
+        {
+            var report = new ValidationReport(
+                new[] { new ValidationIssue(ValidationSeverity.Error, "R1", "n1", "bad") },
+                new[] { new LintFinding("REL-X", LintPillar.OperationalExcellence, ValidationSeverity.Info, "n2", "advice", "https://learn.microsoft.com/x") });
+            var json = System.Text.Json.JsonSerializer.Serialize(report, ValidationJson.Options);
+            var back = ValidationReport.Parse(json);
+            Assert.Equal(report.Issues, back.Issues);
+            Assert.Equal(report.Findings, back.Findings);
+            Assert.Contains("OperationalExcellence", json);
+        }
+
+        [Fact]
+        public void ValidationReport_ParsesLegacyIssueArray()
+        {
+            var issues = new[] { new ValidationIssue(ValidationSeverity.Warning, "R1", "n1", "careful") };
+            var json = System.Text.Json.JsonSerializer.Serialize(issues, ValidationJson.Options);
+            var report = ValidationReport.Parse(json);
+            Assert.Equal(issues, report.Issues);
+            Assert.Empty(report.Findings);
+            Assert.Empty(ValidationReport.Parse("").Issues);
+            Assert.Empty(ValidationReport.Parse(null).Findings);
+        }
     }
 }
