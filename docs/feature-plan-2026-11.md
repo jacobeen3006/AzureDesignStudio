@@ -101,8 +101,8 @@ This is what competitors now lead with, and ADS can do it more honestly because 
 Ten rules in `Core/Validation/DesignLinter.cs`: REL-VM-SINGLE, REL-AVSET-ONE, REL-APPPLAN-TIER, REL-APPGW-INSTANCES, REL-SQL-BASIC, REL-STORAGE-LRS, SEC-APPGW-NO-WAF, SEC-NO-PRIVATE-ENDPOINT, SEC-NO-BASTION, OPS-NO-MONITORING.
 
 Scope decisions:
-- Rules use only data the design models hold. There are no zone, TLS, diagnostics or NSG rules until the models carry that data.
-- No rule duplicates a `DesignValidator` rule: the validator blocks deployment, the linter only advises.
+- Rules use only data the design models hold. There are no zone, TLS, diagnostics or NSG rules until the models carry that data (the models carry almost no zone data; `ContainerAppsEnvironmentModel.ZoneRedundant` is the exception).
+- No rule duplicates a `DesignValidator` rule: the validator reports issues (errors block deployment), the linter only advises.
 - No Performance or Cost rules yet.
 - Tenant-scan linting is not included; the linter runs on designs only.
 - The linter never returns Error severity (Warning and Info only).

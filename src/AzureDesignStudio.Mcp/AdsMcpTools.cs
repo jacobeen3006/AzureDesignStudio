@@ -188,7 +188,7 @@ public sealed class AdsMcpTools(AdsWorkspace workspace, ILogger<AdsMcpTools> log
     }
 
     [McpServerTool(Name = "ads_design_lint", ReadOnly = true)]
-    [Description("Checks one saved design offline: deploy-blocking validation issues and Well-Architected advice (rule id, pillar, severity, resource name, message, Microsoft Learn link). Deterministic; reads only the local workspace; never contacts Azure.")]
+    [Description("Checks one saved design offline: validation issues (errors block deployment) and Well-Architected advice (rule id, pillar, severity, resource name, message, Microsoft Learn link). Deterministic; reads only the local workspace; never contacts Azure.")]
     public async Task<DesignLintView> AdsDesignLint([Description("The stored design id (exact).")] string designId)
     {
         var design = await workspace.GetDesignAsync(designId);
