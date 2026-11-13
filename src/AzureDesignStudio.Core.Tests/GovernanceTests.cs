@@ -493,6 +493,59 @@ public class GovernanceTests
         Assert.Empty(GovernanceNormalizer.Dedupe([]));
     }
 
+    // ---------- stored rows (drawer and MCP read the workspace through one mapping) ----------
+
+    [Theory]
+    [InlineData("Advisor", "High", GovernanceSource.Advisor, GovernanceSeverity.High)]
+    [InlineData("advisor", "high", GovernanceSource.Advisor, GovernanceSeverity.High)]
+    [InlineData(" POLICY ", " medium ", GovernanceSource.Policy, GovernanceSeverity.Medium)]
+    [InlineData("Defender", "LOW", GovernanceSource.Defender, GovernanceSeverity.Low)]
+    public void Stored_SourceAndSeverity_MatchByNameInAnyCase(string source, string severity,
+        GovernanceSource expectedSource, GovernanceSeverity expectedSeverity)
+    {
+        var finding = GovernanceNormalizer.FromStored(source, "/state/1", Storage, SubA, severity, "Policy",
+            "Deny public IP addresses", "storage-public-access", Assignment, Definition);
+
+        Assert.Equal(new GovernanceFinding(expectedSource, "/state/1", Storage, SubA, expectedSeverity, "Policy",
+            "Deny public IP addresses", "storage-public-access", Assignment, Definition), finding);
+    }
+
+    [Fact]
+    public void Stored_OptionalColumns_StayAbsent()
+    {
+        var finding = GovernanceNormalizer.FromStored("Defender", AssessmentId, Vm, SubA, "High", "Security",
+            "Install endpoint protection", null, null, null);
+
+        Assert.NotNull(finding);
+        Assert.Null(finding.Detail);
+        Assert.Null(finding.PolicyAssignmentId);
+        Assert.Null(finding.PolicyDefinitionId);
+    }
+
+    [Theory]
+    [InlineData("AttackPath", "High")]     // a source a newer version may store
+    [InlineData("Advisor", "Critical")]    // a severity this build does not know
+    [InlineData("1", "High")]              // Enum.TryParse would take a number...
+    [InlineData("Advisor", "2")]
+    [InlineData("Advisor", "High, Low")]   // ...or a flags list
+    [InlineData("Advisor, Policy", "High")]
+    [InlineData("", "High")]
+    [InlineData(null, "High")]
+    [InlineData("Advisor", null)]
+    public void Stored_UnknownSourceOrSeverity_IsNull_ForTheCallerToCountAsMalformed(string? source, string? severity)
+    {
+        Assert.Null(GovernanceNormalizer.FromStored(source, "/rec/1", Vm, SubA, severity, "Security", "Title", null, null, null));
+    }
+
+    [Fact]
+    public void ByName_MatchesMemberNamesOnly()
+    {
+        Assert.Equal(GovernanceSeverity.Medium, GovernanceNormalizer.ByName<GovernanceSeverity>(" MEDIUM "));
+        Assert.Null(GovernanceNormalizer.ByName<GovernanceSeverity>("0"));
+        Assert.Null(GovernanceNormalizer.ByName<GovernanceSource>("Advisor,Defender"));
+        Assert.Null(GovernanceNormalizer.ByName<GovernanceSource>(null));
+    }
+
     // ---------- fixtures ----------
 
     private static GovernanceFinding PolicyFinding(string resourceId, string recordId) =>

@@ -54,8 +54,9 @@ public sealed class TenantScanSession(
 
     /// <summary>
     /// The governance findings stored with one scan (Wave B3). A row whose source or severity is
-    /// not a known name is skipped and counted in <c>Malformed</c>. Zero findings is not "none
-    /// found": the scan manifest's source states say whether each source was collected.
+    /// not a known name is skipped and counted in <c>Malformed</c>
+    /// (<see cref="GovernanceNormalizer.FromStored"/>, the mapping MCP uses too). Zero findings is
+    /// not "none found": the scan manifest's source states say whether each source was collected.
     /// </summary>
     public async Task<(IReadOnlyList<GovernanceFinding> Findings, int Malformed)> GetGovernanceAsync(string scanId)
     {
@@ -64,27 +65,13 @@ public sealed class TenantScanSession(
         var malformed = 0;
         foreach (var r in rows)
         {
-            if (ByName<GovernanceSource>(r.Source) is not { } source
-                || ByName<GovernanceSeverity>(r.Severity) is not { } severity)
-            {
+            if (GovernanceNormalizer.FromStored(r.Source, r.RecordId, r.ResourceId, r.SubscriptionId, r.Severity,
+                    r.Category, r.Title, r.Detail, r.PolicyAssignmentId, r.PolicyDefinitionId) is { } finding)
+                findings.Add(finding);
+            else
                 malformed++;
-                continue;
-            }
-            findings.Add(new GovernanceFinding(source, r.RecordId, r.ResourceId, r.SubscriptionId, severity,
-                r.Category, r.Title, r.Detail, r.PolicyAssignmentId, r.PolicyDefinitionId));
         }
         return (findings, malformed);
-    }
-
-    /// <summary>The enum member with this name (any case). Matched by name, never Enum.TryParse:
-    /// that would also accept "2" or "High, Low".</summary>
-    private static T? ByName<T>(string? value) where T : struct, Enum
-    {
-        var name = value?.Trim();
-        foreach (var member in Enum.GetValues<T>())
-            if (string.Equals(member.ToString(), name, StringComparison.OrdinalIgnoreCase))
-                return member;
-        return null;
     }
 
     /// <summary>Starts (or resumes) a scan in the background; false when one is already running.

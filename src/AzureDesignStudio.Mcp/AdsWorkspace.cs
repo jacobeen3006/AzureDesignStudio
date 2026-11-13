@@ -98,7 +98,8 @@ public sealed class AdsWorkspace
     /// The governance findings stored with one scan (Wave B3). A database the desktop app has not
     /// upgraded yet has no GovernanceFindings table: that answers empty with
     /// <see cref="StoredGovernance.TableMissing"/> set, never an exception. A row whose source or
-    /// severity is not a known name is skipped and counted in <see cref="StoredGovernance.Malformed"/>.
+    /// severity is not a known name is skipped and counted in <see cref="StoredGovernance.Malformed"/>
+    /// (<see cref="GovernanceNormalizer.FromStored"/>, the mapping the desktop drawer uses too).
     /// </summary>
     public async Task<StoredGovernance> ListGovernanceAsync(string scanId)
     {
@@ -111,27 +112,13 @@ public sealed class AdsWorkspace
         var malformed = 0;
         foreach (var r in records)
         {
-            if (ByName<GovernanceSource>(r.Source) is not { } source
-                || ByName<GovernanceSeverity>(r.Severity) is not { } severity)
-            {
+            if (GovernanceNormalizer.FromStored(r.Source, r.RecordId, r.ResourceId, r.SubscriptionId, r.Severity,
+                    r.Category, r.Title, r.Detail, r.PolicyAssignmentId, r.PolicyDefinitionId) is { } finding)
+                findings.Add(finding);
+            else
                 malformed++;
-                continue;
-            }
-            findings.Add(new GovernanceFinding(source, r.RecordId, r.ResourceId, r.SubscriptionId, severity,
-                r.Category, r.Title, r.Detail, r.PolicyAssignmentId, r.PolicyDefinitionId));
         }
         return new StoredGovernance(findings, malformed, TableMissing: false);
-    }
-
-    /// <summary>The enum member with this name (any case). Matched by name, never Enum.TryParse:
-    /// that would also accept "2" or "High, Low".</summary>
-    private static T? ByName<T>(string? value) where T : struct, Enum
-    {
-        var name = value?.Trim();
-        foreach (var member in Enum.GetValues<T>())
-            if (string.Equals(member.ToString(), name, StringComparison.OrdinalIgnoreCase))
-                return member;
-        return null;
     }
 
     public async Task<DecomWindowModel?> GetDecomWindowAsync(string subscriptionId, string windowId)

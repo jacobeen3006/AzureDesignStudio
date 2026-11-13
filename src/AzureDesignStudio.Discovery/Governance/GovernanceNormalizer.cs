@@ -111,6 +111,34 @@ public static class GovernanceNormalizer
     }
 
     /// <summary>
+    /// A finding read back from the workspace, which stores the source and severity by name
+    /// (<see cref="GovernanceSource"/> and <see cref="GovernanceSeverity"/> member names, any
+    /// case). Null when either is not a member name - a row this build cannot read, such as one a
+    /// newer version wrote - which the caller counts as malformed. The scan drawer and MCP's
+    /// <c>ads_governance</c> both read stored rows through this, so they agree on which rows are
+    /// malformed.
+    /// </summary>
+    public static GovernanceFinding? FromStored(string? source, string recordId, string resourceId, string subscriptionId,
+        string? severity, string category, string title, string? detail, string? policyAssignmentId, string? policyDefinitionId)
+    {
+        if (ByName<GovernanceSource>(source) is not { } known || ByName<GovernanceSeverity>(severity) is not { } level)
+            return null;
+        return new GovernanceFinding(known, recordId, resourceId, subscriptionId, level,
+            category, title, detail, policyAssignmentId, policyDefinitionId);
+    }
+
+    /// <summary>The enum member with this name (any case, surrounding white space ignored), else
+    /// null. Matched by name, never Enum.TryParse: that would also accept "2" or "High, Low".</summary>
+    public static T? ByName<T>(string? value) where T : struct, Enum
+    {
+        var name = value?.Trim();
+        foreach (var member in Enum.GetValues<T>())
+            if (string.Equals(member.ToString(), name, StringComparison.OrdinalIgnoreCase))
+                return member;
+        return null;
+    }
+
+    /// <summary>
     /// One finding per (Source, ResourceId, Title, PolicyAssignmentId, PolicyDefinitionId,
     /// Detail) - ids case-insensitive - ordered by ResourceId, Source, Severity descending and
     /// Title. Of duplicates the most severe is kept (then the lowest RecordId), so the result
