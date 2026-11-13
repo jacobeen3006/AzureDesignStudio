@@ -66,16 +66,18 @@ Decisions made during implementation:
 
 Check before building: open each retirement page for the exact date (the research has several from search snippets only); confirm the stacks what-if api-version against the REST reference.
 
-### Wave B: review a design before it is deployed
+### Wave B: review a design before it is deployed - DONE
+
+B1 to B4 are implemented; B2-B4 on `feat/wave-b2-b4-governance-preflight` (see "B1 as shipped" and "B2-B4 as shipped" below). B2-B4 are tested offline against fixtures built from the Microsoft Learn REST shapes; the first live runs of `checkPolicyRestrictions`, the quota reads and the three governance tables still need a subscription. Do them by hand from the Desktop app before release.
 
 This is what competitors now lead with, and ADS can do it more honestly because it also has the live tenant.
 
 | # | Item | Size | Notes |
 |---|---|---|---|
 | B1 | Offline architecture linter, grouped by Well-Architected pillar (POST-03 pulled forward). First rule sets: A1/A2, zone redundancy from the resiliency support matrix, public exposure, missing private endpoints, missing diagnostics | L | **Shipped.** Deterministic rules only, each with a Learn link. Same results in the validation drawer and one MCP tool (`ads_design_lint`). See "B1 as shipped" below |
-| B2 | Policy preflight per node via `checkPolicyRestrictions` (N33) | M | State the management-group limitation in the UI; what-if stays the authority |
-| B3 | Advisor, policy-compliance and attack-path overlays on the scanned topology from the three ARG tables | M | New scan query groups; a missing Defender plan must show as "no data", not "no findings" |
-| B4 | Capacity and quota preflight (N34) | M | Unchanged from v3 |
+| B2 | Policy preflight per node via `checkPolicyRestrictions` (N33) | M | **Shipped.** Runs in the deployment review after a successful what-if; advisory, the management-group limitation is a caveat in the review, what-if stays the authority. See "B2-B4 as shipped" below |
+| B3 | Advisor, policy-compliance and attack-path overlays on the scanned topology from the three ARG tables | M | **Shipped without attack paths.** New scan query groups ("sources"); a source not collected, and Defender plans not read, show as "no data", not "no findings". Drawer tab, topology badges, both reports and `ads_governance`. See "B2-B4 as shipped" below |
+| B4 | Capacity and quota preflight (N34) | M | **Shipped.** vCPUs and public IPs against Resource SKUs and usages, beside the policy preflight in the review. See "B2-B4 as shipped" below |
 
 ### Wave C: more ways out to infrastructure as code
 
@@ -108,6 +110,26 @@ Scope decisions:
 - The linter never returns Error severity (Warning and Info only).
 - The bundled gallery designs produce no Warnings: hub-spoke runs a scale set in each spoke, and aks-baseline and apim-landingzone use the WAF_v2 application gateway tier. The remaining findings are Info (no monitoring in hub-spoke; registry and vaults without a private endpoint). `GalleryDesigns_LintFindingsArePinned` pins them.
 - The MCP tool is read-only: it loads a saved design from the workspace and never contacts Azure.
+
+### B2-B4 as shipped
+
+B2 and B4 run inside the `WhatIf` RPC once ARM what-if has succeeded (`Discovery/Preflight/PolicyPreflight.cs`, `QuotaPreflight.cs`, wired in `Services/DeployService.cs`). They read the what-if `after` payloads, which ARM has already resolved, and their results ride on new `WhatIfResponse` fields (`policy_flags`/`policy_notes`, `quota_flags`/`quota_notes`). B3 adds governance sources to tenant scans (`Discovery/Governance/`, `Scan/ScanEngine.cs`, `Scan/ScanManifest.cs`).
+
+What shipped:
+- **Policy (B2):** one `checkPolicyRestrictions` call (api-version 2024-10-01, audit effects included) per resource the batch creates or modifies, at most 50 per review and 3 at a time. Verdicts come only from `policyEvaluations` (Deny, Audit or Other, by `policyEffect`); `fieldRestrictions` describe pending fields and are not findings. The review has a Policy section, and denied rows are tagged "Policy: denied".
+- **Quota (B4):** the vCPU demand of VMs, scale sets, AKS clusters and agent pools, per SKU family and as the regional total, and public IPs, checked against Resource SKUs (2021-07-01) and the compute (2026-04-01) and network (2026-01-01) usages of each location. A Modify counts only the increase. Rows are Exceeds, Near limit (90%), Size unavailable or Unknown; the quotas with room are collapsed. An unknown size, instance count or vCPU count, or a read that failed, gives Unknown, never Ok.
+- **Governance (B3):** open Advisor recommendations, non-compliant policy states, unhealthy Defender for Cloud assessments and the Defender plan tiers, from `advisorresources`, `policyresources` and `securityresources`, one query per source and subscription group. A checkbox on the scan tab (on by default) requests them. They are stored per scan in the workspace table `GovernanceFindings` and shown in a Governance tab of the scan drawer, as badges on the topology, in the Markdown report, in report.html/report.json/controls-audit.csv and through the MCP tool `ads_governance` (the server now has 15 tools). The scan manifest became one public type, `ScanManifest`, that all of these read.
+
+Scope decisions:
+- Preflights are advisory. The token and approval logic do not change, and ARM still enforces policy and quota at deployment; the review says so.
+- Preflights cover only what the plain what-if covered: the batch at the target scope for staged plans. Management-group and tenant targets get a note, not a check. The stack what-if RPC is not changed; the drawer runs the plain what-if first in stack mode, so the results still appear.
+- A preflight that cannot run (no permission, throttled, network failure, the 30-second budget, a malformed answer) keeps the what-if result and its token as they were, keeps the findings already gathered and adds one plain note. It never turns into "no findings".
+- Secrets never go to Azure Policy. Secure parameter values, secret-bearing members (`adminPassword`, `protectedSettings`, `customData`, connection strings, app-setting and environment-variable values), string fields with secret names and strings that look like a key, SAS signature or PEM block are removed before sending. Booleans such as `disablePasswordAuthentication` are kept. Key Vault secrets and keys, site config and API Management named values are not sent at all, and deployment parameters are never sent.
+- Quota covers vCPUs for VMs, scale sets, AKS clusters and agent pools, plus public IPs. Spot (and low-priority), App Service workers, Container Apps and Container Instances are not checked and say so in a note; zone restrictions are a note too.
+- Governance covers Advisor, Policy (non-compliant only), Defender assessments (unhealthy only) and Defender plan tiers. **Attack paths are out of scope**: they need Defender CSPM plus agentless scanning, and their entities are not ARM ids.
+- A governance source that fails marks only that source unavailable. The scan stays Completed and its content hash and resource count do not change. A resumed scan does not re-run completed source groups, and a retry that succeeds clears "unavailable".
+- "Not collected" is not "no findings": a scan taken before this change, a source that was not requested, one that is incomplete and one that failed each read differently from "collected, zero findings" in the drawer, both reports and MCP.
+- No permission probes were added to `PermissionPreflight`.
 
 ## 3. Not proposed
 
