@@ -35,16 +35,57 @@ namespace AzureDesignStudio.Core.Tests
             Assert.Equal(direct.Issues.Count, report.Issues.Count);
         }
 
-        // The MCP host serializes the report with default options; agents read names, not numbers.
+        // Agents read enum names, not numbers: the [JsonConverter] attributes keep that true under any options.
         [Fact]
-        public async Task Report_SerializesEnumsAsNamesWithDefaultOptions()
+        public async Task Report_SerializesEnumsAsNames()
         {
             var stored = JsonSerializer.Serialize(await DataModelFactory.SaveDiagramToDto(GalleryDesignTests.Builders["hub-spoke"](), Mapper));
+            var report = DesignCheck.Run(stored);
+            Assert.NotEmpty(report.Findings);
+            Assert.NotEmpty(report.Issues);
 
-            var json = JsonSerializer.Serialize(DesignCheck.Run(stored).Findings);
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(report));
 
-            Assert.Contains("\"Pillar\":\"Reliability\"", json);
-            Assert.Contains("\"Severity\":\"Warning\"", json);
+            // Property casing is the host's business; only the value kind matters here.
+            static JsonElement Prop(JsonElement o, string name) =>
+                o.EnumerateObject().Single(p => p.Name.Equals(name, System.StringComparison.OrdinalIgnoreCase)).Value;
+
+            foreach (var finding in Prop(doc.RootElement, "findings").EnumerateArray())
+            {
+                Assert.Equal(JsonValueKind.String, Prop(finding, "pillar").ValueKind);
+                Assert.Equal(JsonValueKind.String, Prop(finding, "severity").ValueKind);
+            }
+            foreach (var issue in Prop(doc.RootElement, "issues").EnumerateArray())
+                Assert.Equal(JsonValueKind.String, Prop(issue, "severity").ValueKind);
+        }
+
+        [Fact]
+        public async Task Run_UnknownGroupType_ThrowsInvalidData()
+        {
+            var stored = JsonSerializer.Serialize(await DataModelFactory.SaveDiagramToDto(GalleryDesignTests.Builders["hub-spoke"](), Mapper));
+            var root = System.Text.Json.Nodes.JsonNode.Parse(stored)!;
+            var groups = root["Groups"]!.AsArray();
+            Assert.NotEmpty(groups);
+            // A copy of a stored group that no link points at, as a newer build's group type would look.
+            var unknown = groups[0]!.DeepClone();
+            unknown["Id"] = "unknown-group-1";
+            unknown["GroupId"] = null;
+            unknown["TypeKey"] = "no-such-group-type";
+            groups.Add(unknown);
+
+            var ex = Assert.Throws<InvalidDataException>(() => DesignCheck.Run(root.ToJsonString()));
+            Assert.Contains("group", ex.Message);
+            Assert.Contains("no-such-group-type", ex.Message);
+        }
+
+        [Theory]
+        [InlineData("hub-spoke")]
+        [InlineData("aks-baseline")]
+        [InlineData("apim-landingzone")]
+        public async Task Run_GalleryDesigns_StillLoadCompletely(string key)
+        {
+            var stored = JsonSerializer.Serialize(await DataModelFactory.SaveDiagramToDto(GalleryDesignTests.Builders[key](), Mapper));
+            DesignCheck.Run(stored);
         }
 
         [Fact]
