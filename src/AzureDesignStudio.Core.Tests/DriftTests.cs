@@ -102,6 +102,17 @@ public class DriftTests
     }
 
     [Fact]
+    public void Diff_SkuCapturedOnlyAfter_OnEmptyProperties_IsNotDrift()
+    {
+        var before = new[] { Item(Vm, "microsoft.network/publicipaddresses", "pip", "{}") };
+        var after = new[] { Item(Vm, "microsoft.network/publicipaddresses", "pip", """{"sku":{"name":"Standard"}}""") };
+
+        var diff = new ScanDiffer().Diff(before, after);
+        Assert.Equal(0, diff.ChangedResources);
+        Assert.True(diff.IsEmpty);
+    }
+
+    [Fact]
     public void Diff_SkuOnBothSides_ReportsRealSkuChange()
     {
         var before = new[] { Item(Vm, "microsoft.network/publicipaddresses", "pip", """{"sku":{"name":"Basic"}}""") };

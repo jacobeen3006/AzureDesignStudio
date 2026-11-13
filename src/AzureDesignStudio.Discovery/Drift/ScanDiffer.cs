@@ -98,6 +98,11 @@ public sealed class ScanDiffer
         if (!HasSku(old) && HasSku(@new))
         {
             foreach (var path in afterFlat.Keys.Where(IsSkuPath).ToList()) afterFlat.Remove(path);
+            // A baseline whose properties were empty flattens to the single leaf "properties": "{}";
+            // when the newer side holds nothing but the SKU, that leaf is not a removal.
+            if (beforeFlat.TryGetValue("properties", out var empty) && empty == "{}"
+                && !afterFlat.Keys.Any(k => k.StartsWith("properties", StringComparison.Ordinal)))
+                beforeFlat.Remove("properties");
         }
 
         foreach (var (path, value) in beforeFlat)
