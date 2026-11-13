@@ -131,7 +131,6 @@ The macOS app is the same desktop app built for Mac Catalyst: one universal buil
 | **Operating system** | macOS 14 or later, with Xcode 27 |
 | **.NET SDK** | .NET 10 SDK (10.0.4xx or later) |
 | **Workloads** | `dotnet workload install maui-maccatalyst` (run it outside the repository folder, or `dotnet workload restore` inside it, so it matches `global.json`) |
-| **Rosetta** | On Apple silicon: `softwareupdate --install-rosetta`. The repository's `protoc` (from Grpc.Tools) is an Intel binary. |
 
 ```bash
 src/BuildMacDmg.sh
