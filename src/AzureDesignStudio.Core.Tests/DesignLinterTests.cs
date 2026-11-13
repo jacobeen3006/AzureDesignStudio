@@ -6,6 +6,10 @@ using AzureDesignStudio.Core.SQL;
 using AzureDesignStudio.Core.Storage;
 using AzureDesignStudio.Core.Web;
 using AzureDesignStudio.Core.Validation;
+using AzureDesignStudio.Core.Insights;
+using AzureDesignStudio.Core.OperationalInsights;
+using Blazor.Diagrams;
+using Blazor.Diagrams.Core.Anchors;
 using Blazor.Diagrams.Core.Models;
 using System.Collections.Generic;
 using System.Linq;
@@ -67,8 +71,9 @@ namespace AzureDesignStudio.Core.Tests
         {
             var findings = Lint(Create(AdsConstants.VirtualMachine, "vm-b"), Create(AdsConstants.VirtualMachine, "vm-a"),
                 Create(AdsConstants.VirtualMachine, "vm-c"));
-            Assert.Equal(["vm-a", "vm-b", "vm-c"], findings.Select(f => f.NodeName));
-            Assert.All(findings, f => Assert.Equal("REL-VM-SINGLE", f.RuleId));
+            Assert.Equal(
+                ["REL-VM-SINGLE:vm-a", "REL-VM-SINGLE:vm-b", "REL-VM-SINGLE:vm-c", "SEC-NO-BASTION:design", "OPS-NO-MONITORING:design"],
+                findings.Select(f => f.RuleId + ":" + f.NodeName));
         }
 
         private static LintFinding[] ForRule(LintFinding[] findings, string id) =>
@@ -231,5 +236,135 @@ namespace AzureDesignStudio.Core.Tests
             var fn = Create(AdsConstants.FunctionApp, "fn1");
             Assert.Empty(ForRule(Lint(st, fn), "REL-STORAGE-LRS"));
         }
+
+        private static void Link(NodeModel a, NodeModel b) =>
+            new BlazorDiagram().Links.Add(new LinkModel(new SinglePortAnchor(a.Ports[1]), new SinglePortAnchor(b.Ports[0])));
+
+        [Fact]
+        public void SEC_APPGW_NO_WAF_Fires_ForStandardV2()
+        {
+            var gw = (AppGatewayModel)Create(AdsConstants.AppGateway, "gw1");
+            gw.Tier = "Standard_v2";
+            var f = Assert.Single(ForRule(Lint(gw), "SEC-APPGW-NO-WAF"));
+            Assert.Equal(LintPillar.Security, f.Pillar);
+            Assert.Equal(ValidationSeverity.Warning, f.Severity);
+            Assert.Equal("gw1", f.NodeName);
+            Assert.Equal("Application gateway 'gw1' has no web application firewall. Use the WAF v2 tier for internet-facing applications.", f.Message);
+            Assert.Equal("https://learn.microsoft.com/en-us/azure/web-application-firewall/ag/ag-overview", f.LearnUrl);
+        }
+
+        [Fact]
+        public void SEC_APPGW_NO_WAF_DoesNotFire_ForWafV2()
+        {
+            var gw = (AppGatewayModel)Create(AdsConstants.AppGateway, "gw1");
+            gw.Tier = "WAF_v2";
+            Assert.Empty(ForRule(Lint(gw), "SEC-APPGW-NO-WAF"));
+        }
+
+        private static NodeModel Vnet() => Create(AdsConstants.VirtualNetwork, "vnet1");
+
+        [Fact]
+        public void SEC_NO_PRIVATE_ENDPOINT_Fires_ForAStorageAccountInAVnetDesign()
+        {
+            var f = Assert.Single(ForRule(Lint(Vnet(), Create(AdsConstants.StorageAccount, "st1")), "SEC-NO-PRIVATE-ENDPOINT"));
+            Assert.Equal(ValidationSeverity.Info, f.Severity);
+            Assert.Equal("st1", f.NodeName);
+            Assert.Equal("Storage Account 'st1' is reachable only over its public endpoint. Add a private endpoint to keep traffic on the virtual network.", f.Message);
+            Assert.Equal("https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-overview", f.LearnUrl);
+        }
+
+        [Fact]
+        public void SEC_NO_PRIVATE_ENDPOINT_Fires_ForAWebApp_ButNotForASqlDatabase()
+        {
+            var findings = ForRule(Lint(Vnet(), Create(AdsConstants.WebApp, "app1"), Create(AdsConstants.SqlDatabase, "db1")), "SEC-NO-PRIVATE-ENDPOINT");
+            Assert.Equal("app1", Assert.Single(findings).NodeName);
+        }
+
+        [Fact]
+        public void SEC_NO_PRIVATE_ENDPOINT_Fires_ForASqlServer()
+        {
+            var findings = ForRule(Lint(Vnet(), Create(AdsConstants.SqlServer, "sql1")), "SEC-NO-PRIVATE-ENDPOINT");
+            var f = Assert.Single(findings);
+            Assert.Equal("Azure SQL Server 'sql1' is reachable only over its public endpoint. Add a private endpoint to keep traffic on the virtual network.", f.Message);
+        }
+
+        [Fact]
+        public void SEC_NO_PRIVATE_ENDPOINT_NoVirtualNetwork_DoesNotFire() =>
+            Assert.Empty(ForRule(Lint(Create(AdsConstants.StorageAccount, "st1")), "SEC-NO-PRIVATE-ENDPOINT"));
+
+        [Fact]
+        public void SEC_NO_PRIVATE_ENDPOINT_EndpointTypedById_CountsAsCovered()
+        {
+            var st = (StorageAccountModel)Create(AdsConstants.StorageAccount, "st1");
+            var pe = (PrivateEndpointModel)Create(AdsConstants.PrivateEndpoint, "pe1");
+            pe.TargetResourceId = st.ResourceId.ToUpperInvariant();
+            Assert.Empty(ForRule(Lint(Vnet(), st, pe), "SEC-NO-PRIVATE-ENDPOINT"));
+        }
+
+        [Fact]
+        public void SEC_NO_PRIVATE_ENDPOINT_LinkedEndpoint_CountsAsCovered()
+        {
+            var st = Create(AdsConstants.StorageAccount, "st1");
+            var other = Create(AdsConstants.StorageAccount, "st2");
+            var pe = Create(AdsConstants.PrivateEndpoint, "pe1");
+            Link(pe, st);
+            var findings = ForRule(Lint(Vnet(), st, other, pe), "SEC-NO-PRIVATE-ENDPOINT");
+            Assert.Equal("st2", Assert.Single(findings).NodeName);
+        }
+
+        [Fact]
+        public void SupportsPrivateLink_KnowsTheSupportedTypes()
+        {
+            Assert.True(PrivateEndpointModel.SupportsPrivateLink("microsoft.storage/storageaccounts"));
+            Assert.False(PrivateEndpointModel.SupportsPrivateLink("Microsoft.Sql/servers/databases"));
+            Assert.False(PrivateEndpointModel.SupportsPrivateLink(""));
+        }
+
+        [Fact]
+        public void SEC_NO_BASTION_FiresOncePerDesign()
+        {
+            var findings = ForRule(Lint(Create(AdsConstants.VirtualMachine, "vm1"), Create(AdsConstants.VirtualMachine, "vm2"),
+                Create(AdsConstants.VirtualMachine, "vm3")), "SEC-NO-BASTION");
+            var f = Assert.Single(findings);
+            Assert.Equal(ValidationSeverity.Info, f.Severity);
+            Assert.Equal("design", f.NodeName);
+            Assert.Equal("The design has virtual machines but no Azure Bastion. Plan how administrators reach them without public IP addresses.", f.Message);
+            Assert.Equal("https://learn.microsoft.com/en-us/azure/bastion/bastion-overview", f.LearnUrl);
+        }
+
+        [Fact]
+        public void SEC_NO_BASTION_Fires_ForAScaleSet_AndNotWithABastionOrNoMachines()
+        {
+            Assert.Single(ForRule(Lint(Create(AdsConstants.VirtualMachineScaleSet, "vmss1")), "SEC-NO-BASTION"));
+            Assert.Empty(ForRule(Lint(Create(AdsConstants.VirtualMachine, "vm1"), Create(AdsConstants.Bastions, "bas1")), "SEC-NO-BASTION"));
+            Assert.Empty(ForRule(Lint(Create(AdsConstants.StorageAccount, "st1")), "SEC-NO-BASTION"));
+        }
+
+        [Theory]
+        [InlineData(AdsConstants.VirtualMachine)]
+        [InlineData(AdsConstants.VirtualMachineScaleSet)]
+        [InlineData(AdsConstants.WebApp)]
+        [InlineData(AdsConstants.FunctionApp)]
+        [InlineData(AdsConstants.ContainerApp)]
+        [InlineData(AdsConstants.AKSCluster)]
+        public void OPS_NO_MONITORING_Fires_ForComputeWithoutMonitoring(string key)
+        {
+            var f = Assert.Single(ForRule(Lint(Create(key, "w1")), "OPS-NO-MONITORING"));
+            Assert.Equal(LintPillar.OperationalExcellence, f.Pillar);
+            Assert.Equal(ValidationSeverity.Info, f.Severity);
+            Assert.Equal("design", f.NodeName);
+            Assert.Equal("The design has no Log Analytics workspace or Application Insights. Add one so the workload can be observed.", f.Message);
+            Assert.Equal("https://learn.microsoft.com/en-us/azure/well-architected/operational-excellence/observability", f.LearnUrl);
+        }
+
+        [Theory]
+        [InlineData(AdsConstants.LogAnalyticsWorkspace)]
+        [InlineData(AdsConstants.ApplicationInsights)]
+        public void OPS_NO_MONITORING_WorkspacePresent_DoesNotFire(string monitoringKey) =>
+            Assert.Empty(ForRule(Lint(Create(AdsConstants.WebApp, "app1"), Create(monitoringKey, "mon1")), "OPS-NO-MONITORING"));
+
+        [Fact]
+        public void OPS_NO_MONITORING_NoComputeNodes_DoesNotFire() =>
+            Assert.Empty(ForRule(Lint(Create(AdsConstants.StorageAccount, "st1")), "OPS-NO-MONITORING"));
     }
 }

@@ -1,7 +1,11 @@
 // Licensed under the MIT License. See LICENSE in the project root for license information.
+using AzureDesignStudio.Core.AKS;
+using AzureDesignStudio.Core.App;
 using AzureDesignStudio.Core.Compute;
+using AzureDesignStudio.Core.Insights;
 using AzureDesignStudio.Core.Models;
 using AzureDesignStudio.Core.Network;
+using AzureDesignStudio.Core.OperationalInsights;
 using AzureDesignStudio.Core.SQL;
 using AzureDesignStudio.Core.Storage;
 using AzureDesignStudio.Core.Web;
@@ -38,6 +42,18 @@ namespace AzureDesignStudio.Core.Validation
             (new LintRule("REL-STORAGE-LRS", LintPillar.Reliability, ValidationSeverity.Info,
                 "Locally redundant storage",
                 Learn + "storage/common/storage-redundancy"), StorageLrs),
+            (new LintRule("SEC-APPGW-NO-WAF", LintPillar.Security, ValidationSeverity.Warning,
+                "Application gateway without a web application firewall",
+                Learn + "web-application-firewall/ag/ag-overview"), AppGwNoWaf),
+            (new LintRule("SEC-NO-PRIVATE-ENDPOINT", LintPillar.Security, ValidationSeverity.Info,
+                "Service reachable only over its public endpoint",
+                Learn + "private-link/private-endpoint-overview"), NoPrivateEndpoint),
+            (new LintRule("SEC-NO-BASTION", LintPillar.Security, ValidationSeverity.Info,
+                "Virtual machines without Azure Bastion",
+                Learn + "bastion/bastion-overview"), NoBastion),
+            (new LintRule("OPS-NO-MONITORING", LintPillar.OperationalExcellence, ValidationSeverity.Info,
+                "No monitoring resource",
+                Learn + "well-architected/operational-excellence/observability"), NoMonitoring),
         ];
 
         public static IReadOnlyList<LintRule> Rules { get; } = Table.Select(t => t.Rule).ToList();
@@ -127,6 +143,80 @@ namespace AzureDesignStudio.Core.Validation
                 yield return Finding("REL-STORAGE-LRS", name,
                     $"Storage account '{name}' uses locally redundant storage: three copies in one datacenter. Consider zone-redundant or geo-redundant storage for data that must survive a datacenter outage.");
             }
+        }
+
+        private static IEnumerable<LintFinding> AppGwNoWaf(List<NodeModel> nodes)
+        {
+            foreach (var gw in nodes.OfType<AppGatewayModel>().Where(g => string.Equals(g.Tier, "Standard_v2", StringComparison.OrdinalIgnoreCase)))
+            {
+                var name = NameOf(gw);
+                yield return Finding("SEC-APPGW-NO-WAF", name,
+                    $"Application gateway '{name}' has no web application firewall. Use the WAF v2 tier for internet-facing applications.");
+            }
+        }
+
+        // Nodes that export an ARM resource; models without one (unknown stencils) throw on the type.
+        private static string? ArmTypeOf(NodeModel node)
+        {
+            try
+            {
+                return node switch
+                {
+                    AzureNodeBase n => n.ArmResourceType,
+                    AzureGroupBase g => g.ArmResourceType,
+                    _ => null,
+                };
+            }
+            catch (NotImplementedException)
+            {
+                return null;
+            }
+        }
+
+        private static IEnumerable<LintFinding> NoPrivateEndpoint(List<NodeModel> nodes)
+        {
+            if (!nodes.OfType<VirtualNetworkModel>().Any())
+                yield break;
+
+            var endpoints = nodes.OfType<PrivateEndpointModel>().ToList();
+            var targetIds = endpoints.Select(e => e.EffectiveTargetId).Where(id => id.Length > 0).ToList();
+
+            foreach (var node in nodes)
+            {
+                if (node is not (AzureNodeBase or AzureGroupBase) || node is UnknownNodeModel)
+                    continue;
+                var type = ArmTypeOf(node);
+                if (type is null || !PrivateEndpointModel.SupportsPrivateLink(type))
+                    continue;
+
+                var resource = (IAzureResource)node;
+                var covered = endpoints.Any(e => ReferenceEquals(e.LinkedTarget, node))
+                    || (resource.ResourceId.Length > 0
+                        && targetIds.Any(id => string.Equals(id, resource.ResourceId, StringComparison.OrdinalIgnoreCase)));
+                if (covered)
+                    continue;
+
+                var name = NameOf(node);
+                yield return Finding("SEC-NO-PRIVATE-ENDPOINT", name,
+                    $"{((IAzureNode)node).ServiceName} '{name}' is reachable only over its public endpoint. Add a private endpoint to keep traffic on the virtual network.");
+            }
+        }
+
+        private static IEnumerable<LintFinding> NoBastion(List<NodeModel> nodes)
+        {
+            if (nodes.Any(n => n is VirtualMachineModel or VirtualMachineScaleSetModel) && !nodes.OfType<BastionsModel>().Any())
+                yield return Finding("SEC-NO-BASTION", "design",
+                    "The design has virtual machines but no Azure Bastion. Plan how administrators reach them without public IP addresses.");
+        }
+
+        private static IEnumerable<LintFinding> NoMonitoring(List<NodeModel> nodes)
+        {
+            var hasWorkload = nodes.Any(n => n is VirtualMachineModel or VirtualMachineScaleSetModel or WebAppModel
+                or ContainerAppModel or AksClusterModel);
+            var hasMonitoring = nodes.Any(n => n is LogAnalyticsWorkspaceModel or ApplicationInsightsModel);
+            if (hasWorkload && !hasMonitoring)
+                yield return Finding("OPS-NO-MONITORING", "design",
+                    "The design has no Log Analytics workspace or Application Insights. Add one so the workload can be observed.");
         }
     }
 }
