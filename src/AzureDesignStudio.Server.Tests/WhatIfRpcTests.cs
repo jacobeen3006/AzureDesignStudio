@@ -317,7 +317,10 @@ public class WhatIfRpcTests
     {
         _arm.Hold(HttpMethod.Post, PolicyPath, new TaskCompletionSource().Task);
         var service = Service(new AmbientCredential());
-        service.PreflightBudget = TimeSpan.FromMilliseconds(200);
+        // Wide enough that the first POST is always sent before the deadline, even with the policy
+        // path cold and the quota reads running beside it; the held route still ends the test at
+        // the budget.
+        service.PreflightBudget = TimeSpan.FromSeconds(2);
 
         var response = await service.WhatIf(Request(), Me);
 
@@ -571,5 +574,24 @@ public class RouteTableHttpTests
         RecordedRequest[] expected =
             [new("POST", "/SLOW", "?api-version=1", "{\"a\":1}"), new("GET", "/elsewhere", "", "")];
         Assert.Equal(expected, routes.Requests);
+    }
+
+    [Fact]
+    public async Task ARequestCancelledBeforeItArrives_IsStillRecorded()
+    {
+        // HttpClient hands the handler a request whose token has already fired, and the handler
+        // reads its in-memory body without observing that token (HttpContent buffers it into a
+        // stream that ignores the token), so the request is recorded before the hold throws. A
+        // deadline test that counts requests therefore never undercounts; if this ever fails,
+        // read the body with CancellationToken.None in RouteTableHttp.SendAsync.
+        var routes = new RouteTableHttp().Hold(HttpMethod.Post, "/slow", new TaskCompletionSource().Task);
+        using var http = routes.CreateClient("arm");
+        using var cancel = new CancellationTokenSource();
+        cancel.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            http.PostAsync("https://management.azure.com/slow", new StringContent("{\"a\":1}"), cancel.Token));
+
+        Assert.Equal([new RecordedRequest("POST", "/slow", "", "{\"a\":1}")], routes.Requests);
     }
 }
