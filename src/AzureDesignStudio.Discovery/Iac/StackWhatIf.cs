@@ -38,7 +38,8 @@ public sealed record StackWhatIfSummary(
     public bool HasDelete => Changes.Any(c => c.Kind == StackChangeKind.Delete);
 
     /// <summary>Non-null when the result cannot be trusted as complete: a state other than
-    /// "succeeded", an error-level diagnostic, any Unsupported change or any Potential change.
+    /// "succeeded", an error-level diagnostic, any Unsupported change, a delete or detach without an id, or any Potential
+    /// change (a missing or unknown changeCertainty counts as potential).
     /// A result with no <c>changes</c> member carries an error diagnostic, so it lands here too.</summary>
     public string? IndeterminacyReason
     {
@@ -51,6 +52,8 @@ public sealed record StackWhatIfSummary(
             if (Changes.FirstOrDefault(c => c.Kind == StackChangeKind.Unsupported) is { } unsupported)
                 return $"stack what-if cannot evaluate {unsupported.Id}"
                     + (string.IsNullOrEmpty(unsupported.UnsupportedReason) ? "" : $": {unsupported.UnsupportedReason}");
+            if (Changes.FirstOrDefault(c => c.Kind is StackChangeKind.Delete or StackChangeKind.Detach && c.Id.Length == 0) is { } anonymous)
+                return $"stack what-if reports a {anonymous.Kind.ToString().ToLowerInvariant()} without a resource id";
             if (Changes.FirstOrDefault(c => c.Potential) is { } potential)
                 return $"stack what-if is only potentially sure about {potential.Id}";
             return null;
@@ -152,7 +155,8 @@ public static class StackWhatIf
                         ReadString(item, "id") ?? string.Empty,
                         ReadString(item, "type") ?? string.Empty,
                         MapKind(ReadString(item, "changeType")),
-                        string.Equals(ReadString(item, "changeCertainty"), "potential", StringComparison.OrdinalIgnoreCase),
+                        // Fail closed: only the literal "definite" is definite; a missing or unknown value is potential.
+                        !string.Equals(ReadString(item, "changeCertainty"), "definite", StringComparison.OrdinalIgnoreCase),
                         ReadNested(item, "managementStatusChange", "before"),
                         ReadNested(item, "managementStatusChange", "after"),
                         ReadNested(item, "denyStatusChange", "before"),

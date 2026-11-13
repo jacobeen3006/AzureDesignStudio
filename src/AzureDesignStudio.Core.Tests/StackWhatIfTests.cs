@@ -108,6 +108,40 @@ public class StackWhatIfTests
         Assert.NotNull(summary.IndeterminacyReason);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData(",\"changeCertainty\":\"maybe\"")]
+    [InlineData(",\"changeCertainty\":7")]
+    public void Parse_MissingOrUnknownCertainty_IsPotentialAndIndeterminate(string certaintyMember)
+    {
+        var raw = "{\"id\":\"" + Rg + "a/1\",\"type\":\"Microsoft.Storage/storageAccounts\",\"changeType\":\"modify\"" + certaintyMember + "}";
+        var summary = StackWhatIf.Parse(Result(raw));
+        Assert.True(Assert.Single(summary.Changes).Potential);
+        Assert.NotNull(summary.IndeterminacyReason);
+    }
+
+    [Fact]
+    public void Parse_DefiniteCertainty_IsCaseInsensitive()
+    {
+        var summary = StackWhatIf.Parse(Result(Change(Rg + "a/1", "modify", "DEFINITE")));
+        Assert.False(Assert.Single(summary.Changes).Potential);
+        Assert.Null(summary.IndeterminacyReason);
+    }
+
+    [Theory]
+    [InlineData("delete")]
+    [InlineData("detach")]
+    public void Parse_DeleteOrDetachWithoutId_IsIndeterminate(string changeType)
+    {
+        var missing = "{\"type\":\"Microsoft.Storage/storageAccounts\",\"changeType\":\"" + changeType + "\",\"changeCertainty\":\"definite\"}";
+        var summary = StackWhatIf.Parse(Result(missing));
+        Assert.NotNull(summary.IndeterminacyReason);
+        Assert.Contains(changeType, summary.IndeterminacyReason);
+
+        var empty = StackWhatIf.Parse(Result(Change("", changeType)));
+        Assert.NotNull(empty.IndeterminacyReason);
+    }
+
     [Fact]
     public void Parse_ErrorDiagnostic_IsIndeterminate_ButWarningIsNot()
     {
