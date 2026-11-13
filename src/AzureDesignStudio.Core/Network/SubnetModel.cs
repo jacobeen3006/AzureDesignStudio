@@ -75,6 +75,21 @@ namespace AzureDesignStudio.Core.Network
             set => _delegation = value;
         }
         private string _delegation = string.Empty;
+
+        /// <summary>True when the subnet has no default outbound access (no implicit public IP).
+        /// Off by default so a design saved before this option behaves as it always did.</summary>
+        [MapToDto]
+        [DisplayName("Private subnet (no default outbound access)")]
+        public bool PrivateSubnet { get; set; }
+
+        /// <summary>Azure accepts <c>defaultOutboundAccess</c> only on a subnet with no
+        /// delegation (including the App Service one added for a plan placed here) and not on
+        /// a reserved-name subnet.</summary>
+        public bool SupportsPrivateSubnet =>
+            string.IsNullOrEmpty(Delegation)
+            && !Children.OfType<AppServicePlanModel>().Any()
+            && !DedicatedSubnets.IsReserved(Name);
+
         private static void PopulateServiceEndpoints(NodeModel node, IList<ServiceEndpointPropertiesFormat> serviceEndpoints)
         {
             foreach (var port in node.Ports)
@@ -194,6 +209,8 @@ namespace AzureDesignStudio.Core.Network
             {
                 _subnet.Properties.NatGateway = null;
             }
+
+            _subnet.Properties.DefaultOutboundAccess = SupportsPrivateSubnet ? !PrivateSubnet : null;
 
             // Don't include them in the serialization if they are empty. 
             if (_subnet.Properties.ServiceEndpoints.Count == 0)

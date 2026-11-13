@@ -17,6 +17,13 @@
             </SelectOptions>
         </SimpleSelect>
     </FormItem>
+    @if (subnet.SupportsPrivateSubnet)
+    {
+        <FormItem Label="Private subnet">
+            <Switch @bind-Value="subnet.PrivateSubnet" Size="@InputSize.Small" />
+            <span class="ant-form-item-extra">No default outbound access (no implicit public IP).</span>
+        </FormItem>
+    }
     <FormItem WrapperCol="@(new ColLayoutParam { Span = 24 })">
         <Alert Type="@AlertType.Info" ShowIcon
                Message="Azure Firewall needs a subnet named AzureFirewallSubnet. Azure Bastion needs AzureBastionSubnet." />

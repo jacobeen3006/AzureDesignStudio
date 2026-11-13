@@ -30,6 +30,10 @@ namespace AzureDesignStudio.Core.Network
 
         public static bool Is(SubnetModel? subnet, string dedicatedName) => Is(subnet?.Name, dedicatedName);
 
+        /// <summary>True when the name is one Azure reserves for a particular service.</summary>
+        public static bool IsReserved(string? subnetName) =>
+            Reserved.Any(reserved => Is(subnetName, reserved));
+
         /// <summary>The documented spelling of a reserved name, or the name unchanged.</summary>
         public static string Canonical(string subnetName) =>
             Reserved.FirstOrDefault(reserved => Is(subnetName, reserved)) ?? subnetName;
