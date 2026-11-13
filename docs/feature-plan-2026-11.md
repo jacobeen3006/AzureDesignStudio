@@ -44,15 +44,17 @@ ADS's edge is unchanged: live tenant truth plus gated execution, offline, on the
 
 ## 2. Proposed order
 
-### Wave A: keep exports correct (do first)
+### Wave A: keep exports correct (do first) - DONE
+
+A1, A2 and A3 are implemented on `feat/wave-a-export-correctness` (see the table below). The first live run of the stacks what-if still needs a subscription where the caller has `deploymentStacksWhatIfResults/write`; do it by hand from the Desktop app before release.
 
 Azure moved under the exporter. These are small and protect the claim that an exported template deploys.
 
 | # | Item | Size | Where |
 |---|---|---|---|
-| A1 | Write `defaultOutboundAccess` explicitly on exported subnets; validation rule for a VM/VMSS subnet with no outbound path (NAT gateway, LB outbound rule, public IP, UDR to an appliance) | S-M | `Core/Network/`, `ValidationDrawerTemplate`, golden templates |
-| A2 | Extend `DeprecationCatalog` from resource types to SKUs: App Gateway v1, Basic public IP, Basic LB, Front Door classic, CDN classic. Apply to designs as well as scans | S | `Discovery/Analysis/DeprecationCatalog.cs` |
-| A3 | Move stacks to `2025-07-01` (`validationLevel`, `resourcesWithoutDeleteSupport`), and use stacks what-if in the deploy gate for stack deployments | M | `Discovery/Iac/DeploymentStack.cs`, `Services/DeployService`. The plan hash binds the body, so old approvals must be invalidated |
+| A1 (done) | Write `defaultOutboundAccess` explicitly on exported subnets; validation rule for a VM/VMSS subnet with no outbound path (NAT gateway, LB outbound rule, public IP, UDR to an appliance) | S-M | `Core/Network/`, `ValidationDrawerTemplate`, golden templates |
+| A2 (done) | Extend `DeprecationCatalog` from resource types to SKUs: App Gateway v1, Basic public IP, Basic LB, Front Door classic, CDN classic. Apply to designs as well as scans | S | `Discovery/Analysis/DeprecationCatalog.cs` |
+| A3 (done) | Move stacks to `2025-07-01` (`validationLevel`, `resourcesWithoutDeleteSupport`), and use stacks what-if in the deploy gate for stack deployments | M | `Discovery/Iac/DeploymentStack.cs`, `Services/DeployService`. The plan hash binds the body, so old approvals must be invalidated |
 
 Check before building: open each retirement page for the exact date (the research has several from search snippets only); confirm the stacks what-if api-version against the REST reference.
 

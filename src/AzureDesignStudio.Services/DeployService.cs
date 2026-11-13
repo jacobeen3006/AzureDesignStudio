@@ -990,73 +990,52 @@ namespace AzureDesignStudio.Services
                 location: batches[0].Kind == DeployScopeKind.ResourceGroup && target.Kind == DeployScopeKind.ResourceGroup ? null : location,
                 targetScope: target.ScopePath);
         }
-        /// <summary>
-        /// v2 plan 12.3: deploy the design as a deployment-stack under the same double gate as
-        /// CreateDeployment - a fresh what-if token plus a named principal's approval bound to the
-        /// canonical scope+template+parameters identity. The stack name and unmanage policy ride
-        /// beside the hash (the revert-plan convention), are validated fail-closed by the engine
-        /// before anything is sent, and land in the append-only apply trail keyed by stack name.
-        /// </summary>
-        public override async Task<CreateStackResponse> CreateStack(CreateStackRequest request, ServerCallContext context)
-        {
-            var response = new CreateStackResponse();
+        /// <summary>Everything CreateStack and StackWhatIf validate identically before the gate.</summary>
+        private sealed record StackPlan(string UserIdClaim, Guid SubscriptionId, Azure.Core.TokenCredential Credential,
+            string ParametersJson, string PlanHash, DeploymentStackBody Body, GuardrailPolicy Guardrails);
 
+        /// <summary>
+        /// The request validation and guardrail-policy load shared by CreateStack and StackWhatIf:
+        /// template and scope checks, wire-form stack policy, caller, subscription, credential, the
+        /// plan identity, the stack body (the engine refuses a delete policy here) and the
+        /// do-not-touch list. Every local refusal comes before the one ARM call it makes, the
+        /// resource-group lookup, so a refused request touches nothing in Azure.
+        /// </summary>
+        private async Task<(StackPlan? Plan, int StatusCode, string Error)> PrepareStackAsync(
+            CreateStackRequest request, ServerCallContext context)
+        {
             if (string.IsNullOrWhiteSpace(request.ArmTemplate))
-            {
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "Template is empty.";
-                return response;
-            }
+                return (null, StatusCodes.Status400BadRequest, "Template is empty.");
 
             if (ArmTemplateValidator.TryFindBlockingErrors(request.ArmTemplate, request.Parameters, out var validationErrors))
             {
                 _logger.LogWarning("Template blocked before stack deploy: {Errors}", validationErrors);
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = validationErrors;
-                return response;
+                return (null, StatusCodes.Status400BadRequest, validationErrors);
             }
 
             if (DeployScopePlanner.TryStageForApply(request.ArmTemplate, request.SubscriptionId, request.ResourceGroupName,
                     out _, out var scopeErrors))
             {
                 _logger.LogWarning("Staged plan blocked before stack deploy: {Errors}", scopeErrors);
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = scopeErrors;
-                return response;
+                return (null, StatusCodes.Status400BadRequest, scopeErrors);
             }
 
             // Wire-form policy before anything is spent: unknown values answer 400, never a surprise
             // mid-apply. Blank optional slots mean detach; resources_action is required.
             if (!DeploymentStack.TryParseAction(request.ResourcesAction, out var resourcesAction))
-            {
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "resources_action must be detach (delete is disabled until the decommissioning gates ship).";
-                return response;
-            }
+                return (null, StatusCodes.Status400BadRequest, "resources_action must be detach (delete is disabled until the decommissioning gates ship).");
             var resourceGroupsAction = StackUnmanageAction.Detach;
             if (!string.IsNullOrWhiteSpace(request.ResourceGroupsAction) && !DeploymentStack.TryParseAction(request.ResourceGroupsAction, out resourceGroupsAction))
-            {
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "resource_groups_action must be detach or delete when set.";
-                return response;
-            }
+                return (null, StatusCodes.Status400BadRequest, "resource_groups_action must be detach or delete when set.");
             var managementGroupsAction = StackUnmanageAction.Detach;
             if (!string.IsNullOrWhiteSpace(request.ManagementGroupsAction) && !DeploymentStack.TryParseAction(request.ManagementGroupsAction, out managementGroupsAction))
-            {
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "management_groups_action must be detach or delete when set.";
-                return response;
-            }
+                return (null, StatusCodes.Status400BadRequest, "management_groups_action must be detach or delete when set.");
             StackDenySettings? denySettings = null;
             if (!string.IsNullOrWhiteSpace(request.DenyMode) || request.DenyApplyToChildScopes)
             {
                 var denyMode = StackDenyMode.None;
                 if (!string.IsNullOrWhiteSpace(request.DenyMode) && !DeploymentStack.TryParseDenyMode(request.DenyMode, out denyMode))
-                {
-                    response.StatusCode = StatusCodes.Status400BadRequest;
-                    response.ErrorMessage = "deny_mode must be none, denyDelete or denyWriteAndDelete.";
-                    return response;
-                }
+                    return (null, StatusCodes.Status400BadRequest, "deny_mode must be none, denyDelete or denyWriteAndDelete.");
                 denySettings = new StackDenySettings(denyMode, request.DenyApplyToChildScopes);
             }
 
@@ -1064,9 +1043,7 @@ namespace AzureDesignStudio.Services
             if (string.IsNullOrWhiteSpace(userIdClaim))
             {
                 _logger.LogWarning("Access denied. userIdClaim is empty.");
-                response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
-                return response;
+                return (null, StatusCodes.Status401Unauthorized, "Access denied.");
             }
             var userId = new Guid(userIdClaim);
 
@@ -1078,29 +1055,14 @@ namespace AzureDesignStudio.Services
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Exception occurred.");
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "Bad request.";
-                return response;
+                return (null, StatusCodes.Status400BadRequest, "Bad request.");
             }
 
             var credential = await GetCredentialAsync(userId, subscriptionId);
             if (credential == null)
             {
                 _logger.LogWarning("No subscription is found.");
-                response.StatusCode = StatusCodes.Status404NotFound;
-                response.ErrorMessage = "No subscription is found.";
-                return response;
-            }
-
-            // The stack lives in the resource group's region - the same honest ArmClient lookup
-            // the WhatIf path uses; a stack location is never guessed or defaulted.
-            var armClient = new ArmClient(credential, subscriptionId.ToString());
-            var (rg, rgStatus, rgError) = await FindResourceGroupAsync(armClient, request.ResourceGroupName, context.CancellationToken);
-            if (rg == null)
-            {
-                response.StatusCode = rgStatus;
-                response.ErrorMessage = rgError;
-                return response;
+                return (null, StatusCodes.Status404NotFound, "No subscription is found.");
             }
 
             var parametersJson = string.IsNullOrWhiteSpace(request.Parameters) ? "{}" : request.Parameters;
@@ -1115,10 +1077,201 @@ namespace AzureDesignStudio.Services
             catch (Exception ex) when (ex is System.Text.Json.JsonException or ArgumentException)
             {
                 _logger.LogWarning(ex, "Stack payload is not canonicalizable.");
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "Template or parameters are not valid JSON.";
+                return (null, StatusCodes.Status400BadRequest, "Template or parameters are not valid JSON.");
+            }
+
+            // Engine validation before any single-use token is spent: refuse-with-diagnostics, never warn.
+            var body = DeploymentStack.Build(request.StackName,
+                request.ArmTemplate, new StackPolicy(resourcesAction, resourceGroupsAction, managementGroupsAction, denySettings),
+                parametersJson, bypassOutOfSyncError: request.BypassOutOfSync);
+            if (!body.Success)
+            {
+                var errors = string.Join(" ", body.Diagnostics
+                    .Where(d => d.Severity == ArmDiagnosticSeverity.Error).Select(d => $"{d.Code}: {d.Message}"));
+                _logger.LogWarning("Stack body refused: {Errors}", errors);
+                return (null, StatusCodes.Status400BadRequest, errors);
+            }
+
+            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(context.CancellationToken);
+            if (guardrailPolicy is null)
+                return (null, StatusCodes.Status400BadRequest, policyError ?? "The guardrail policy could not be read.");
+
+            // The stack lives in the resource group's region - the same honest lookup the WhatIf
+            // path uses; a stack location is never guessed or defaulted. It rides the shared
+            // "arm" HttpClient so the host's handler (and a test's) sees it.
+            var armClient = new ArmClient(credential, subscriptionId.ToString(),
+                new ArmClientOptions { Transport = new Azure.Core.Pipeline.HttpClientTransport(_httpClientFactory.CreateClient("arm")) });
+            var (rg, rgStatus, rgError) = await FindResourceGroupAsync(armClient, request.ResourceGroupName, context.CancellationToken);
+            if (rg == null)
+                return (null, rgStatus, rgError);
+
+            return (new StackPlan(userIdClaim, subscriptionId, credential, parametersJson, planHash, body, guardrailPolicy),
+                StatusCodes.Status200OK, string.Empty);
+        }
+
+        /// <summary>
+        /// Deployment-stacks what-if: the preview that gates <see cref="CreateStack"/>. It runs the
+        /// request validation and guardrail-policy load CreateStack runs (one shared method), asks ARM for the
+        /// stack's predicted resource changes (nothing is deployed; the temporary result is deleted),
+        /// and issues a stack token bound to the exact stack body. The result also makes the
+        /// scope+template+parameters plan hash approvable. No token is issued when the prediction
+        /// cannot be trusted (<c>indeterminacy_reason</c>) or a guardrail protects a touched
+        /// resource: the reason comes back so the review can show it, but nothing is deployable.
+        /// </summary>
+        public override async Task<StackWhatIfResponse> StackWhatIf(StackWhatIfRequest request, ServerCallContext context)
+        {
+            var response = new StackWhatIfResponse();
+
+            var (prepared, prepareStatus, prepareError) = await PrepareStackAsync(new CreateStackRequest
+            {
+                SubscriptionId = request.SubscriptionId,
+                ResourceGroupName = request.ResourceGroupName,
+                StackName = request.StackName,
+                ArmTemplate = request.ArmTemplate,
+                Parameters = request.Parameters,
+                ResourcesAction = request.ResourcesAction,
+                ResourceGroupsAction = request.ResourceGroupsAction,
+                ManagementGroupsAction = request.ManagementGroupsAction,
+                BypassOutOfSync = request.BypassOutOfSync,
+                DenyMode = request.DenyMode,
+                DenyApplyToChildScopes = request.DenyApplyToChildScopes,
+            }, context);
+            if (prepared is null)
+            {
+                response.StatusCode = prepareStatus;
+                response.ErrorMessage = prepareError;
                 return response;
             }
+
+            StackWhatIfSummary summary;
+            try
+            {
+                var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), prepared.Credential, ArmEndpointSet.AzureCloud);
+                summary = await new StackWhatIfClient(transport).RunAsync(prepared.SubscriptionId.ToString(),
+                    request.ResourceGroupName, request.StackName, prepared.Body.Json, prepared.Body.PlanHash, context.CancellationToken);
+            }
+            catch (WhatIfException ex)
+            {
+                _logger.LogWarning(ex, "Stack what-if failed.");
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = $"{ex.Code}: {ex.Message}";
+                return response;
+            }
+            catch (ResourceGraphException ex)
+            {
+                _logger.LogWarning(ex, "Stack what-if ARM call failed.");
+                response.StatusCode = ex.StatusCode == 0 ? StatusCodes.Status502BadGateway : ex.StatusCode;
+                response.ErrorMessage = $"{ex.Code}: {ex.Message}";
+                return response;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or AuthenticationFailedException)
+            {
+                _logger.LogWarning(ex, "Stack what-if could not reach Azure.");
+                response.StatusCode = StatusCodes.Status502BadGateway;
+                response.ErrorMessage = "Azure could not be reached for the stack what-if; nothing was deployed.";
+                return response;
+            }
+
+            // Guardrails: the stack what-if rows carry ids and types, never tags. Scope and type rules
+            // judge exactly as for a plain what-if; a tag rule cannot be judged, so any row that touches
+            // an EXISTING resource (modify, detach, delete) is held back while tag rules exist.
+            var targets = summary.Changes.Where(c => c.Id.Length > 0)
+                .Select(c => new GuardrailTarget(c.Id, GuardrailEnforcement.TypeFromArmId(c.Id),
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase))).ToList();
+            var flags = GuardrailEnforcement.EvaluateTargets(prepared.Guardrails, targets).ToList();
+            var tagRules = prepared.Guardrails.ProtectedTags.Count > 0;
+            if (tagRules)
+            {
+                foreach (var touched in summary.Changes.Where(c => c.Id.Length > 0
+                             && c.Kind is StackChangeKind.Modify or StackChangeKind.Detach or StackChangeKind.Delete)
+                             .Select(c => c.Id).Distinct(StringComparer.OrdinalIgnoreCase))
+                    if (!flags.Any(f => string.Equals(f.ResourceId, touched, StringComparison.OrdinalIgnoreCase)))
+                        flags.Add(new GuardrailFinding(touched, "tag guardrails cannot be checked against a stack what-if (it carries no tags)"));
+            }
+
+            var reason = summary.IndeterminacyReason;
+            string? token = null;
+            if (flags.Count > 0)
+            {
+                response.GuardrailBlocked = true;
+                foreach (var finding in flags)
+                    response.GuardrailFlags.Add(new GuardrailFlag { ResourceId = finding.ResourceId, Reason = finding.Reason });
+                _logger.LogWarning("Stack plan blocked by guardrails: {Count} protected resource(s), hash={PlanHash}",
+                    flags.Count, prepared.PlanHash);
+            }
+            else if (reason is null)
+            {
+                var plan = DeployPlanArtifact.Create(prepared.SubscriptionId.ToString(), request.ResourceGroupName,
+                    request.ArmTemplate, prepared.ParametersJson);
+                token = _whatIfGate.IssueForStack(prepared.SubscriptionId.ToString(), request.ResourceGroupName,
+                    prepared.Body.PlanHash, summary.HasDelete, summary.DeleteResourceIds,
+                    plan.PlanHash, plan.CanonicalJson, targets);
+            }
+            else
+                _logger.LogWarning("Stack what-if is indeterminate; no token issued: {Reason}", reason);
+
+            response.StatusCode = StatusCodes.Status200OK;
+            response.Creates = summary.Changes.Count(c => c.Kind == StackChangeKind.Create);
+            response.Modifies = summary.Changes.Count(c => c.Kind == StackChangeKind.Modify);
+            response.Detaches = summary.Changes.Count(c => c.Kind == StackChangeKind.Detach);
+            response.Deletes = summary.Changes.Count(c => c.Kind == StackChangeKind.Delete);
+            response.ChangesJson = JsonSerializer.Serialize(
+                summary.Changes.Where(c => c.Kind != StackChangeKind.NoChange).Select(c => new
+                {
+                    changeType = c.Kind.ToString().ToLowerInvariant(),
+                    resourceId = c.Id,
+                    type = c.Type,
+                    managementBefore = c.ManagementBefore,
+                    managementAfter = c.ManagementAfter,
+                    denyBefore = c.DenyBefore,
+                    denyAfter = c.DenyAfter,
+                    potential = c.Potential,
+                    unsupportedReason = c.UnsupportedReason,
+                }), new JsonSerializerOptions(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
+            if (reason is not null)
+            {
+                response.IndeterminacyReason = reason;
+                response.Caveats.Add($"This stack what-if cannot be trusted ({reason}); no review token was issued, so nothing can be deployed from it.");
+            }
+            if (summary.DenyModeBefore != summary.DenyModeAfter && (summary.DenyModeBefore ?? summary.DenyModeAfter) is not null)
+                response.Caveats.Add($"Deny settings: {summary.DenyModeBefore ?? "(none)"} -> {summary.DenyModeAfter ?? "(none)"}.");
+            foreach (var diagnostic in summary.Diagnostics.Where(d => d.Severity != ArmDiagnosticSeverity.Error))
+                response.Caveats.Add($"{diagnostic.Code}: {diagnostic.Message}");
+            response.Caveats.Add("The stack what-if lists resource-level changes only; property-level changes are not shown.");
+            if (tagRules)
+                response.Caveats.Add("Tag-based guardrails cannot be checked against a stack what-if; changes to existing resources are held back while such rules exist.");
+            if (response.GuardrailBlocked)
+                response.Caveats.Add($"Guardrails: {flags.Count} protected resource(s) - this plan is not deployable until the do-not-touch policy changes.");
+            response.PlanHash = prepared.PlanHash;
+            response.WhatIfToken = token ?? "";
+            return response;
+        }
+
+        /// <summary>
+        /// v2 plan 12.3: deploy the design as a deployment-stack under the same double gate as
+        /// CreateDeployment - a fresh token plus a named principal's approval bound to the
+        /// canonical scope+template+parameters identity. The token must come from <see cref="StackWhatIf"/>
+        /// (the deployment-stacks what-if) and binds the exact stack body; a plain WhatIf token is
+        /// refused. The stack name and unmanage policy ride
+        /// beside the hash (the revert-plan convention), are validated fail-closed by the engine
+        /// before anything is sent, and land in the append-only apply trail keyed by stack name.
+        /// </summary>
+        public override async Task<CreateStackResponse> CreateStack(CreateStackRequest request, ServerCallContext context)
+        {
+            var response = new CreateStackResponse();
+
+            var (prepared, prepareStatus, prepareError) = await PrepareStackAsync(request, context);
+            if (prepared is null)
+            {
+                response.StatusCode = prepareStatus;
+                response.ErrorMessage = prepareError;
+                return response;
+            }
+            var userIdClaim = prepared.UserIdClaim;
+            var subscriptionId = prepared.SubscriptionId;
+            var credential = prepared.Credential;
+            var planHash = prepared.PlanHash;
+            var body = prepared.Body;
 
             if (!string.Equals(request.PlanHash, planHash, StringComparison.OrdinalIgnoreCase))
             {
@@ -1152,30 +1305,12 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            // Engine validation before the single-use token burns: refuse-with-diagnostics, never warn.
-            var body = DeploymentStack.Build(request.StackName,
-                request.ArmTemplate, new StackPolicy(resourcesAction, resourceGroupsAction, managementGroupsAction, denySettings),
-                parametersJson, bypassOutOfSyncError: request.BypassOutOfSync);
-            if (!body.Success)
-            {
-                var errors = string.Join(" ", body.Diagnostics
-                    .Where(d => d.Severity == ArmDiagnosticSeverity.Error).Select(d => $"{d.Code}: {d.Message}"));
-                _logger.LogWarning("Stack body refused: {Errors}", errors);
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = errors;
-                return response;
-            }
-
-            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(context.CancellationToken);
-            if (guardrailPolicy is null)
-            {
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = policyError;
-                return response;
-            }
-            var whatIfCheck = _whatIfGate.ValidateAndConsume(request.WhatIfToken, subscriptionId.ToString(),
-                request.ResourceGroupName, request.ArmTemplate, parametersJson,
-                targets => GuardrailVeto(guardrailPolicy, targets));
+            // The token must be a stack what-if token bound to this exact stack body (template,
+            // parameters, policy, bypass flag, stack name): a plain What-If token, or a stack one
+            // from before the policy changed, is refused here without being spent.
+            var whatIfCheck = _whatIfGate.ValidateAndConsumeForStack(request.WhatIfToken, subscriptionId.ToString(),
+                request.ResourceGroupName, body.PlanHash,
+                targets => GuardrailVeto(prepared.Guardrails, targets));
             if (!whatIfCheck.IsOk)
             {
                 _logger.LogWarning("Stack deploy blocked by what-if gate: {Code}", whatIfCheck.Code);

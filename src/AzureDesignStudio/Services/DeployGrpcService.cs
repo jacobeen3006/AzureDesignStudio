@@ -127,8 +127,8 @@ namespace AzureDesignStudio.Services
             return await _deployClient.SetGuardrailPolicyAsync(new GuardrailPolicyRequest { Json = json });
         }
 
-        /// <summary>Deploys the reviewed payload as a deployment-stack (v2 12.3): same what-if token
-        /// and plan hash the review produced; resources the stack stops managing are detached
+        /// <summary>Deploys the reviewed payload as a deployment-stack (v2 12.3): the stack what-if token
+        /// (<see cref="StackWhatIfAsync"/>) and plan hash the review produced; resources the stack stops managing are detached
         /// (kept in Azure) - delete is refused server-side until the Phase 13 gates ship. <paramref name="bypassOutOfSync"/> is
         /// the review-gated out-of-sync override, only ever sent after the review screen showed
         /// the managed list and the user ticked the box.</summary>
@@ -154,6 +154,31 @@ namespace AzureDesignStudio.Services
             catch (Exception ex) when (ex is Grpc.Core.RpcException or InvalidOperationException or HttpRequestException)
             {
                 // A transport break never proves what ARM did: the server audit carries the truth.
+                return null;
+            }
+        }
+
+        /// <summary>Deployment-stacks what-if: the preview whose token (and plan hash, which the approval
+        /// binds) <see cref="CreateStackAsync"/> needs. Same stack fields as the create call; nothing is
+        /// deployed. Null on a transport break - the review then has no token and cannot deploy.</summary>
+        public async Task<StackWhatIfResponse?> StackWhatIfAsync(string subscriptionId, string rgName, string stackName,
+            string armTemplate, string parameters, string resourcesAction = "detach", bool bypassOutOfSync = false)
+        {
+            try
+            {
+                return await _deployClient.StackWhatIfAsync(new StackWhatIfRequest
+                {
+                    SubscriptionId = subscriptionId,
+                    ResourceGroupName = rgName,
+                    StackName = stackName,
+                    ArmTemplate = armTemplate,
+                    Parameters = parameters,
+                    ResourcesAction = resourcesAction,
+                    BypassOutOfSync = bypassOutOfSync,
+                });
+            }
+            catch (Exception ex) when (ex is Grpc.Core.RpcException or InvalidOperationException or HttpRequestException)
+            {
                 return null;
             }
         }

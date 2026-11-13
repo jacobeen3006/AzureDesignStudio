@@ -73,7 +73,7 @@
 
 <Modal Title="Review what will change (What-If)" Visible="@_showWhatIfReview" MaskClosable="@false"
        OkText="@(GuardrailBlocked ? "Blocked by guardrails" : _deployAsStack ? "Approve & deploy as stack" : "Approve & deploy")" OnOk="@ApproveAndDeployAsync" OnCancel="@CancelWhatIf"
-       OkButtonProps="@(new ButtonProps { Disabled = _whatIfLoading || !WhatIfDeployAllowed })">
+       OkButtonProps="@(new ButtonProps { Disabled = _whatIfLoading || !ReviewDeployAllowed })">
     @if (_retryTemplate is not null)
     {
         <Alert Type="@AlertType.Info" Message="Targeted retry: only the failed resources will be previewed and deployed - not the full template." ShowIcon="true" Style="margin-bottom:8px" />
@@ -192,9 +192,81 @@
                         <div style="color:#d48806">@stackDiagnostic</div>
                     }
                     <label style="display:flex;gap:6px;align-items:center;margin-top:6px">
-                        <input type="checkbox" @bind="_bypassOutOfSync" />
+                        <input type="checkbox" @bind="_bypassOutOfSync" @bind:after="RunStackWhatIfAsync" />
                         <span>bypass out-of-sync (redeploy the same template first per ARM guidance)</span>
                     </label>
+                }
+                @if (_stackWhatIfLoading)
+                {
+                    <p style="margin-top:6px"><Icon Type="loading" Theme="@IconThemeType.Outline" /> Running the deployment-stack what-if against @TargetLabel. This can take a minute...</p>
+                }
+                else if (_stackWhatIfError is not null)
+                {
+                    <Alert Type="@AlertType.Error" Message="@_stackWhatIfError" ShowIcon="true" Style="margin-top:6px" />
+                }
+                else if (_stackWhatIf is not null)
+                {
+                    <p style="margin-top:6px">
+                        <strong>Stack what-if</strong>
+                        <Tag Color="@("green")">@_stackWhatIf.Creates create</Tag>
+                        <Tag Color="@("blue")">@_stackWhatIf.Modifies modify</Tag>
+                        <Tag Color="@(_stackWhatIf.Detaches > 0 ? "orange" : "default")">@_stackWhatIf.Detaches detach</Tag>
+                        <Tag Color="@(_stackWhatIf.Deletes > 0 ? "red" : "default")">@_stackWhatIf.Deletes delete</Tag>
+                    </p>
+                    @if (_stackWhatIf.Deletes > 0)
+                    {
+                        <Alert Type="@AlertType.Error" Message="The stack what-if predicts deletes. This version never deploys delete-bearing plans." ShowIcon="true" Banner="true" />
+                    }
+                    @if (_stackWhatIf.IndeterminacyReason.Length > 0)
+                    {
+                        <Alert Type="@AlertType.Warning" Message="@($"The stack what-if cannot be trusted: {_stackWhatIf.IndeterminacyReason}. No review token was issued, so this stack cannot be deployed from it.")" ShowIcon="true" Banner="true" />
+                    }
+                    @if (_stackWhatIf.GuardrailBlocked)
+                    {
+                        <Alert Type="@AlertType.Warning" Message="@($"{_stackWhatIf.GuardrailFlags.Count} resource(s) protected by do-not-touch guardrails. This stack cannot be approved or deployed until the guardrail policy changes.")" ShowIcon="true" Banner="true" />
+                    }
+                    @if (_stackChanges.Count == 0 && _stackWhatIf.IndeterminacyReason.Length == 0)
+                    {
+                        <p>No resource changes predicted for this stack.</p>
+                    }
+                    <ul style="margin:0 0 6px 18px">
+                        @foreach (var change in _stackChanges)
+                        {
+                            <li>
+                                <strong>@change.ChangeType</strong> @change.ResourceId
+                                @if (change.ChangeType == "detach")
+                                {
+                                    <span> · the stack stops managing it; it stays in Azure</span>
+                                }
+                                @if (change.ManagementBefore is not null || change.ManagementAfter is not null)
+                                {
+                                    <span> · management: @(change.ManagementBefore ?? "-") → @(change.ManagementAfter ?? "-")</span>
+                                }
+                                @if (change.DenyBefore is not null || change.DenyAfter is not null)
+                                {
+                                    <span> · deny: @(change.DenyBefore ?? "-") → @(change.DenyAfter ?? "-")</span>
+                                }
+                                @if (change.Potential)
+                                {
+                                    <Tag Color="@("orange")">potential</Tag>
+                                }
+                                @if (change.UnsupportedReason is not null)
+                                {
+                                    <Tag Color="@("red")">cannot evaluate: @change.UnsupportedReason</Tag>
+                                }
+                                @if (change.ResourceId is not null && _guardrailFlags.TryGetValue(change.ResourceId, out var stackProtectReason))
+                                {
+                                    <Tag Color="@("orange")">protected: @stackProtectReason</Tag>
+                                }
+                            </li>
+                        }
+                    </ul>
+                    <ul>
+                        @foreach (var stackCaveat in _stackWhatIf.Caveats)
+                        {
+                            <li><em>@stackCaveat</em></li>
+                        }
+                    </ul>
                 }
                 <p style="margin-top:6px"><em>Resources the stack later stops managing are detached, never deleted. The plan hash, approval and audit trail are identical to a plain deploy.</em></p>
             }

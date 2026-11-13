@@ -347,6 +347,15 @@ public class DeployGrpcServiceTests
         public override AsyncUnaryCall<PlanApprovalResponse> ApprovePlanAsync(PlanApprovalRequest request, CallOptions options) =>
             FakeCalls.Unary(() => Guard(() => new PlanApprovalResponse { StatusCode = Status }));
 
+        public List<StackWhatIfRequest> StackWhatIfs { get; } = [];
+
+        public override AsyncUnaryCall<StackWhatIfResponse> StackWhatIfAsync(StackWhatIfRequest request, CallOptions options) =>
+            FakeCalls.Unary(() => Guard(() =>
+            {
+                StackWhatIfs.Add(request);
+                return new StackWhatIfResponse { StatusCode = Status, WhatIfToken = "stack-token" };
+            }));
+
         public override AsyncServerStreamingCall<DeploymentResponse> CreateDeployment(DeploymentRequest request, CallOptions options) =>
             Failure is null
                 ? new AsyncServerStreamingCall<DeploymentResponse>(new Reader(Stream, StreamFault),
@@ -440,6 +449,19 @@ public class DeployGrpcServiceTests
 
         Assert.Equal(503, await Service.LinkAzureSubscription(new SubscriptionInfo()));
         Assert.Null(await Service.ApprovePlanAsync("sha256:abc"));
+    }
+
+    [Fact]
+    public async Task StackWhatIfSendsTheStackFieldsAndAnswersNullWhenTheCallBreaks()
+    {
+        var response = await Service.StackWhatIfAsync("s1", "rg", "stack1", "{}", "{}", bypassOutOfSync: true);
+
+        Assert.Equal("stack-token", response!.WhatIfToken);
+        var sent = Assert.Single(_server.StackWhatIfs);
+        Assert.Equal(("s1", "rg", "stack1", "detach", true), (sent.SubscriptionId, sent.ResourceGroupName, sent.StackName, sent.ResourcesAction, sent.BypassOutOfSync));
+
+        _server.Failure = FakeCalls.Rpc(StatusCode.Unavailable);
+        Assert.Null(await Service.StackWhatIfAsync("s1", "rg", "stack1", "{}", "{}"));
     }
 
     // --- deployment stream ---

@@ -48,7 +48,7 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
 
     private sealed record Entry(string PayloadHash, DateTimeOffset Expires, bool HasDelete,
         IReadOnlyList<string> DeleteResourceIds, string CanonicalPlanJson, string PlanHash, string? RevertPlanJson,
-        IReadOnlyList<Unmanaged.GuardrailTarget>? GuardrailTargets);
+        IReadOnlyList<Unmanaged.GuardrailTarget>? GuardrailTargets, bool IsStack = false);
 
     /// <summary>
     /// Record a completed what-if review; returns the token the later deploy must present.
@@ -100,8 +100,10 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
     {
         lock (_sync)
         {
-            var hit = _tokens.Values.FirstOrDefault(e => e.Expires > Now
-                && string.Equals(e.PlanHash, planHash, StringComparison.OrdinalIgnoreCase));
+            // A deployment preview wins over a stack preview of the same plan: it carries the revert plan.
+            var hit = _tokens.Values.Where(e => e.Expires > Now
+                    && string.Equals(e.PlanHash, planHash, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(e => e.IsStack ? 1 : 0).FirstOrDefault();
             canonicalPlanJson = hit?.CanonicalPlanJson ?? string.Empty;
             revertPlanJson = hit?.RevertPlanJson;
             return hit is not null;
@@ -135,6 +137,9 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
                 return new WhatIfTokenCheck(WhatIfTokenStatus.Stale, $"What-If review expired after {(int)ttl.TotalMinutes} minutes; run What-If again.");
             }
 
+            if (entry.IsStack)
+                return new WhatIfTokenCheck(WhatIfTokenStatus.PayloadChanged, "This review token belongs to a deployment-stack what-if, not a plain deployment; run What-If again.");
+
             if (!string.Equals(entry.PayloadHash, Hash(scope, armTemplate, parameters), StringComparison.OrdinalIgnoreCase))
                 return new WhatIfTokenCheck(WhatIfTokenStatus.PayloadChanged, "The template, parameters, or target changed after the What-If review; run What-If again.");
             if (entry.HasDelete)
@@ -149,6 +154,77 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
             _tokens.Remove(token);
             return new WhatIfTokenCheck(WhatIfTokenStatus.Ok, null, Targets: targets);
         }
+    }
+
+    /// <summary>
+    /// Record a completed deployment-stacks what-if. A stack token is a different kind from a
+    /// deployment token: it binds the exact stack body (<paramref name="stackPlanHash"/> =
+    /// <c>DeploymentStackBody.PlanHash</c>: template, parameters, policy, bypass flag, stack name)
+    /// under the resource group, and only <see cref="ValidateAndConsumeForStack"/> accepts it.
+    /// <paramref name="approvalPlanHash"/> and <paramref name="canonicalPlanJson"/> make the
+    /// scope+template+parameters plan hash approvable (<see cref="TryPeekPlan(string, out string)"/>).
+    /// The caller decides whether an indeterminate result earns a token; this method does not see the summary.
+    /// </summary>
+    public string IssueForStack(string subscriptionId, string resourceGroupName, string stackPlanHash,
+        bool hasDelete, IReadOnlyList<string> deleteIds, string? approvalPlanHash = null,
+        string? canonicalPlanJson = null, IReadOnlyList<Unmanaged.GuardrailTarget>? guardrailTargets = null)
+    {
+        var token = Guid.NewGuid().ToString("N");
+        var entry = new Entry(StackHash(subscriptionId, resourceGroupName, stackPlanHash), Now.Add(ttl), hasDelete,
+            deleteIds, canonicalPlanJson ?? string.Empty, approvalPlanHash ?? string.Empty, null, guardrailTargets, IsStack: true);
+
+        lock (_sync)
+        {
+            _tokens[token] = entry;
+            foreach (var key in _tokens.Where(kv => kv.Value.Expires <= Now).Select(kv => kv.Key).ToList())
+                _tokens.Remove(key);
+        }
+
+        return token;
+    }
+
+    /// <summary>Validate and consume a stack token: same rules as the deployment overload (a failed
+    /// check never burns it, a passed one is single-use, delete refuses, the guardrail veto runs on the
+    /// bound targets), but a deployment token is refused with <see cref="WhatIfTokenStatus.PayloadChanged"/>.</summary>
+    public WhatIfTokenCheck ValidateAndConsumeForStack(string? token, string subscriptionId, string resourceGroupName,
+        string stackPlanHash, Func<IReadOnlyList<Unmanaged.GuardrailTarget>, string?>? guardrailVeto = null)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return new WhatIfTokenCheck(WhatIfTokenStatus.Missing, "Run the stack What-If on this exact template, parameters and stack policy before deploying.");
+
+        lock (_sync)
+        {
+            if (!_tokens.TryGetValue(token, out var entry))
+                return new WhatIfTokenCheck(WhatIfTokenStatus.Stale, "What-If token is unknown or already used; run What-If again.");
+
+            if (entry.Expires <= Now)
+            {
+                _tokens.Remove(token);
+                return new WhatIfTokenCheck(WhatIfTokenStatus.Stale, $"What-If review expired after {(int)ttl.TotalMinutes} minutes; run What-If again.");
+            }
+
+            if (!entry.IsStack)
+                return new WhatIfTokenCheck(WhatIfTokenStatus.PayloadChanged, "This review token belongs to a plain deployment what-if; a stack deployment needs the stack What-If.");
+            if (!string.Equals(entry.PayloadHash, StackHash(subscriptionId, resourceGroupName, stackPlanHash), StringComparison.OrdinalIgnoreCase))
+                return new WhatIfTokenCheck(WhatIfTokenStatus.PayloadChanged, "The template, parameters, stack policy or stack name changed after the What-If review; run What-If again.");
+            if (entry.HasDelete)
+                return new WhatIfTokenCheck(WhatIfTokenStatus.HasDelete,
+                    "Stack What-If predicts delete-bearing changes, which this version never deploys: " + string.Join(", ", entry.DeleteResourceIds),
+                    HasDelete: true, DeleteResourceIds: entry.DeleteResourceIds);
+
+            var targets = entry.GuardrailTargets ?? [];
+            if (guardrailVeto is not null && guardrailVeto(targets) is { } vetoDetail)
+                return new WhatIfTokenCheck(WhatIfTokenStatus.GuardrailProtected, vetoDetail, Targets: targets);
+
+            _tokens.Remove(token);
+            return new WhatIfTokenCheck(WhatIfTokenStatus.Ok, null, Targets: targets);
+        }
+    }
+
+    private static string StackHash(string subscriptionId, string resourceGroupName, string stackPlanHash)
+    {
+        var payload = $"stack\n{DeployTargetScope.ResourceGroupScope(subscriptionId, resourceGroupName).ScopePath}\n{stackPlanHash}";
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
     }
 
     private static string Hash(DeployTargetScope scope, string armTemplate, string parameters)
