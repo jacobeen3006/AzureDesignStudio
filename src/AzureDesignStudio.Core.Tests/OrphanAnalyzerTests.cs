@@ -246,6 +246,15 @@ public class OrphanAnalyzerTests
     }
 
     [Fact]
+    public void Watch_FlagsClassicFrontDoor()
+    {
+        // Classic Front Door (Microsoft.Network/frontDoors) has no sku at all.
+        var watch = DeprecationCatalog.Seed.Watch([ArgRow("Microsoft.Network/frontDoors", "fd1", null)]);
+        var hit = Assert.Single(watch);
+        Assert.Equal("review_due", hit.Entry.Status);
+    }
+
+    [Fact]
     public void Watch_ItemWithoutRaw_MatchesTypeOnlyEntries()
     {
         var catalog = DeprecationCatalog.Seed;

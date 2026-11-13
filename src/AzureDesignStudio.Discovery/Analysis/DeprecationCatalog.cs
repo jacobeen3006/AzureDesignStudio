@@ -118,7 +118,7 @@ public sealed class DeprecationCatalog
             new("Microsoft.Network/loadBalancers", "retired", new DateTimeOffset(2025, 9, 30, 0, 0, 0, TimeSpan.Zero), "Basic load balancers retired; use Standard.", "Basic"),
             new("Microsoft.Network/applicationGateways", "retired", new DateTimeOffset(2026, 4, 28, 0, 0, 0, TimeSpan.Zero), "Application Gateway v1 (Standard) retired; use Standard_v2.", "Standard"),
             new("Microsoft.Network/applicationGateways", "retired", new DateTimeOffset(2026, 4, 28, 0, 0, 0, TimeSpan.Zero), "Application Gateway v1 (WAF) retired; use WAF_v2.", "WAF"),
-            new("Microsoft.Network/frontDoors", "review_due", null, "Classic tier; confirm the retirement date on Microsoft Learn.", "Standard_Microsoft"),
+            new("Microsoft.Network/frontDoors", "review_due", null, "Classic tier; confirm the retirement date on Microsoft Learn."),
             new("Microsoft.Cdn/profiles", "review_due", null, "Classic tier; confirm the retirement date on Microsoft Learn.", "Standard_Microsoft"),
             new("Microsoft.ClassicRestoreLocation/locations", "review_due", null, "Verify current retirement status before reporting."),
         ],
