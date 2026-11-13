@@ -71,7 +71,7 @@ public sealed class PolicyPreflight(ArmTransport transport)
         "protectedSettings", "customData", "sharedKey", "secureValue", "connectionString", "connectionStrings", "adminPassword",
     };
 
-    /// <summary>A string leaf whose key contains one of these is dropped (rule 3).</summary>
+    /// <summary>A string leaf whose key, or any key above it, contains one of these is dropped (rule 3).</summary>
     private static readonly string[] SecretNameParts = ["password", "secret", "connectionstring", "accountkey", "accesskey", "token", "sas"];
 
     /// <summary>A string leaf containing one of these is dropped (rule 4).</summary>
@@ -500,62 +500,83 @@ public sealed class PolicyPreflight(ArmTransport transport)
 
     /// <summary>
     /// A copy of <paramref name="resourceContent"/> with every secret removed (Global
-    /// Constraints, rules 1-4): string leaves holding a secure parameter value; the members
-    /// <c>protectedSettings</c>, <c>customData</c>, <c>sharedKey</c>, <c>secureValue</c>,
-    /// <c>connectionString(s)</c> and <c>adminPassword</c>; the <c>value</c> of every
-    /// <c>{ name, value }</c> array item (app settings, environment variables); string leaves
-    /// under a password/secret/connectionstring/accountkey/accesskey/token/sas key; string leaves
-    /// carrying a key, SAS signature or PEM block. Booleans and numbers are never removed.
+    /// Constraints, rules 1-4):
+    /// <list type="bullet">
+    /// <item>string leaves holding a secure parameter value, and members whose name holds one;</item>
+    /// <item>the members <c>protectedSettings</c>, <c>customData</c>, <c>sharedKey</c>,
+    /// <c>secureValue</c>, <c>connectionString(s)</c> and <c>adminPassword</c>, whatever they hold;</item>
+    /// <item>the <c>value</c> of every <c>{ name, value }</c> array item (app settings, environment
+    /// variables), and the <c>value</c> and <c>defaultValue</c> of every object whose <c>type</c> is
+    /// SecureString or SecureObject (Data Factory linked services), at any depth and under any key;</item>
+    /// <item>every string leaf held by, or nested at any depth under, a key containing password,
+    /// secret, connectionstring, accountkey, accesskey, token or sas (an array item takes its
+    /// array's key);</item>
+    /// <item>string leaves carrying a key, SAS signature or PEM block.</item>
+    /// </list>
+    /// The value, name and pattern rules take string leaves only: booleans and numbers stay.
     /// Secret-bearing types (rule 5) are refused by <see cref="BuildRequest"/> before this.
     /// </summary>
     public static JsonObject Scrub(JsonObject resourceContent, IReadOnlySet<string> secureValues)
     {
         var copy = (JsonObject)resourceContent.DeepClone();
-        ScrubObject(copy, secureValues);
+        ScrubObject(copy, secureValues, underSecretName: false);
         return copy;
     }
 
-    private static void ScrubObject(JsonObject obj, IReadOnlySet<string> secureValues)
+    private static void ScrubObject(JsonObject obj, IReadOnlySet<string> secureValues, bool underSecretName)
     {
+        if (IsSecureDeclaration(obj))
+            RemoveMembers(obj, "value", "defaultValue");
         foreach (var (key, value) in obj.ToList())
         {
-            if (SecretContainers.Contains(key) || HoldsSecureValue(key, secureValues) || !Keep(value, key, secureValues))
+            if (SecretContainers.Contains(key) || HoldsSecureValue(key, secureValues)
+                || !Keep(value, underSecretName || HasSecretName(key), secureValues))
                 obj.Remove(key);
         }
     }
 
-    private static void ScrubArray(JsonArray array, string key, IReadOnlySet<string> secureValues)
+    private static void ScrubArray(JsonArray array, IReadOnlySet<string> secureValues, bool underSecretName)
     {
         for (var i = array.Count - 1; i >= 0; i--)
         {
             if (array[i] is JsonObject item && Member(item, "name") is not null)
-            {
-                foreach (var valueKey in item.Where(p => p.Key.Equals("value", StringComparison.OrdinalIgnoreCase)).Select(p => p.Key).ToList())
-                    item.Remove(valueKey);
-            }
-            // A string in an array is judged under the array's key.
-            if (!Keep(array[i], key, secureValues))
+                RemoveMembers(item, "value");
+            // An array item is judged under the array's key.
+            if (!Keep(array[i], underSecretName, secureValues))
                 array.RemoveAt(i);
         }
     }
 
-    /// <summary>Scrubs containers in place; false when a string leaf must go.</summary>
-    private static bool Keep(JsonNode? node, string key, IReadOnlySet<string> secureValues)
+    /// <summary>Scrubs containers in place; false when a string leaf must go.
+    /// <paramref name="underSecretName"/>: the leaf's key, or a key above it, names a secret.</summary>
+    private static bool Keep(JsonNode? node, bool underSecretName, IReadOnlySet<string> secureValues)
     {
         switch (node)
         {
             case JsonObject obj:
-                ScrubObject(obj, secureValues);
+                ScrubObject(obj, secureValues, underSecretName);
                 return true;
             case JsonArray array:
-                ScrubArray(array, key, secureValues);
+                ScrubArray(array, secureValues, underSecretName);
                 return true;
             case JsonValue value when value.GetValueKind() == JsonValueKind.String:
                 var text = value.GetValue<string>();
-                return !HasSecretName(key) && !HoldsSecureValue(text, secureValues) && !HasSecretPattern(text);
+                return !underSecretName && !HoldsSecureValue(text, secureValues) && !HasSecretPattern(text);
             default:
                 return true; // numbers, booleans, null
         }
+    }
+
+    /// <summary><c>{ "type": "SecureString" | "SecureObject", "value": ... }</c>: a secret
+    /// whatever key holds it (<c>servicePrincipalKey</c> matches no name rule).</summary>
+    private static bool IsSecureDeclaration(JsonObject obj) =>
+        StringMember(obj, "type") is { } type
+        && (type.Equals("SecureString", StringComparison.OrdinalIgnoreCase) || type.Equals("SecureObject", StringComparison.OrdinalIgnoreCase));
+
+    private static void RemoveMembers(JsonObject obj, params string[] names)
+    {
+        foreach (var key in obj.Select(p => p.Key).Where(k => names.Any(n => k.Equals(n, StringComparison.OrdinalIgnoreCase))).ToList())
+            obj.Remove(key);
     }
 
     private static bool HasSecretName(string key) =>

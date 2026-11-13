@@ -75,11 +75,20 @@ public class PolicyPreflightTests
     private static PolicyHandler Answering(Func<Sent, HttpResponseMessage> respond) =>
         new((sent, _) => Task.FromResult(respond(sent)));
 
-    private static PolicyPreflight Engine(PolicyHandler handler) =>
-        new(new ArmTransport(new HttpClient(handler), new FakeCredential(), ArmEndpointSet.AzureCloud, (_, _) => Task.CompletedTask));
+    private static PolicyPreflight Engine(PolicyHandler handler, TimeSpan? httpTimeout = null)
+    {
+        var http = new HttpClient(handler);
+        if (httpTimeout is { } timeout)
+            http.Timeout = timeout;
+        return new(new ArmTransport(http, new FakeCredential(), ArmEndpointSet.AzureCloud, (_, _) => Task.CompletedTask));
+    }
 
     private static string ArmError(string code, string message) =>
         JsonSerializer.Serialize(new { error = new { code, message } });
+
+    private static HttpResponseMessage Forbidden() =>
+        Json(ArmError("AuthorizationFailed",
+            "The client does not have authorization to perform action 'Microsoft.PolicyInsights/checkPolicyRestrictions/read'."), HttpStatusCode.Forbidden);
 
     // ---------- fixtures (shapes from "Facts verified on Microsoft Learn") ----------
 
@@ -358,9 +367,10 @@ public class PolicyPreflightTests
         var properties = Content(body)["properties"]!;
         var provider = properties["addonProfiles"]!["azureKeyvaultSecretsProvider"]!;
         Assert.True(provider["enabled"]!.GetValue<bool>());
-        // Name-based removal takes string leaves only: the rotation flag is a string here.
+        // Name-based removal takes string leaves only, at any depth under the secret name (the
+        // provider's own name holds "Secret"): both config strings go, the boolean stays.
         Assert.False(provider["config"]!.AsObject().ContainsKey("enableSecretRotation"));
-        Assert.Equal("2m", provider["config"]!["rotationPollInterval"]!.GetValue<string>());
+        Assert.False(provider["config"]!.AsObject().ContainsKey("rotationPollInterval"));
         Assert.Equal(3, properties["agentPoolProfiles"]![0]!["count"]!.GetValue<int>());
         Assert.True(properties["windowsProfile"]!["enableCSIProxy"]!.GetValue<bool>());
 
@@ -372,6 +382,65 @@ public class PolicyPreflightTests
         Assert.Equal(90, limits["accessKeyRotationDays"]!.GetValue<int>());
         Assert.Equal(2, limits["accountKeyCount"]!.GetValue<int>());
         Assert.True(limits["connectionStringPooling"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void Scrub_DataFactorySecureStringValues_Removed_WhereverTheySit()
+    {
+        // A Data Factory linked service holds its secrets as { "type": "SecureString", "value": ... }:
+        // under a secret name (password), under a name no key rule knows (servicePrincipalKey), as a
+        // SecureString parameter's default, and as a SecureObject inside an array.
+        var linked = Change($"{Rg}/providers/Microsoft.DataFactory/factories/adf1/linkedservices/AzureSqlDb",
+            "Microsoft.DataFactory/factories/linkedservices", "2018-06-01", """
+            {
+              "type": "AzureSqlDatabase",
+              "connectVia": { "referenceName": "AutoResolveIntegrationRuntime", "type": "IntegrationRuntimeReference" },
+              "parameters": { "spnDefault": { "type": "SecureString", "defaultValue": "adf-param-default-3" } },
+              "annotations": [ { "type": "SecureObject", "value": { "note": "adf-object-leaf-4" } }, "team-data" ],
+              "typeProperties": {
+                "server": "sql1.database.windows.net",
+                "database": "db1",
+                "authenticationType": "ServicePrincipal",
+                "userName": "adfuser",
+                "password": { "type": "SecureString", "value": "Adf-P@ss-1" },
+                "servicePrincipalId": "11111111-2222-3333-4444-555555555555",
+                "servicePrincipalKey": { "type": "securestring", "value": "adf-spn-key-2" },
+                "tenant": "contoso.onmicrosoft.com"
+              }
+            }
+            """);
+
+        var body = Build(linked);
+
+        AssertAbsent(body, "Adf-P@ss-1", "adf-spn-key-2", "adf-param-default-3", "adf-object-leaf-4");
+        var properties = Content(body)["properties"]!;
+        var typeProperties = properties["typeProperties"]!;
+        Assert.Equal("AzureSqlDatabase", properties["type"]!.GetValue<string>());
+        Assert.Equal("sql1.database.windows.net", typeProperties["server"]!.GetValue<string>());
+        Assert.Equal("adfuser", typeProperties["userName"]!.GetValue<string>());
+        Assert.Equal("11111111-2222-3333-4444-555555555555", typeProperties["servicePrincipalId"]!.GetValue<string>());
+        Assert.Equal("securestring", typeProperties["servicePrincipalKey"]!["type"]!.GetValue<string>());
+        Assert.Equal("AutoResolveIntegrationRuntime", properties["connectVia"]!["referenceName"]!.GetValue<string>());
+        Assert.Equal("IntegrationRuntimeReference", properties["connectVia"]!["type"]!.GetValue<string>());
+        Assert.Equal("team-data", properties["annotations"]![1]!.GetValue<string>());
+    }
+
+    [Theory]
+    // Container Instances secret volume: file name -> base64 content, under "secret".
+    [InlineData("""{ "kept": "plain-value", "volumes": [ { "name": "certs", "secret": { "tls.key": "nested-secret-1", "count": 2, "enabled": true } } ] }""")]
+    [InlineData("""{ "kept": "plain-value", "secrets": { "db": "nested-secret-1", "count": 2, "enabled": true } }""")]
+    [InlineData("""{ "kept": "plain-value", "accountKey": { "primary": { "current": [ "nested-secret-1" ], "count": 2, "enabled": true } } }""")]
+    public void Scrub_StringsAtAnyDepthUnderASecretName_Removed(string properties)
+    {
+        var group = Change($"{Rg}/providers/Microsoft.ContainerInstance/containerGroups/aci1", "Microsoft.ContainerInstance/containerGroups",
+            "2023-05-01", properties);
+
+        var body = Build(group);
+
+        AssertAbsent(body, "nested-secret-1");
+        Assert.Equal("plain-value", Content(body)["properties"]!["kept"]!.GetValue<string>());
+        Assert.Contains("\"count\":2", body, StringComparison.Ordinal);
+        Assert.Contains("\"enabled\":true", body, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -657,8 +726,7 @@ public class PolicyPreflightTests
     [Fact]
     public async Task Check_Forbidden_StopsWithOneNote()
     {
-        var handler = Answering(_ => Json(ArmError("AuthorizationFailed",
-            "The client does not have authorization to perform action 'Microsoft.PolicyInsights/checkPolicyRestrictions/read'."), HttpStatusCode.Forbidden));
+        var handler = Answering(_ => Forbidden());
         var changes = Enumerable.Range(1, 8).Select(Storage).ToList();
 
         var result = await Engine(handler).CheckAsync(changes, EmptyTemplate, null, TimeSpan.FromMinutes(1), CancellationToken.None);
@@ -668,6 +736,23 @@ public class PolicyPreflightTests
         Assert.Equal(0, result.Checked);
         Assert.Equal(8, result.NotChecked);
         Assert.True(handler.Sent.Count <= PolicyPreflight.MaxConcurrency, $"{handler.Sent.Count} calls after the first 403");
+    }
+
+    [Fact]
+    public async Task Check_ForbiddenAfterFindings_KeepsThem()
+    {
+        // Ids are checked in order, so sa01-sa03 are always asked before any 403 can stop the run.
+        var handler = Answering(s => s.ContentName is "sa01" or "sa02" or "sa03" ? Json(DenyResponse) : Forbidden());
+        var changes = Enumerable.Range(1, 8).Select(Storage).ToList();
+
+        var result = await Engine(handler).CheckAsync(changes, EmptyTemplate, null, TimeSpan.FromMinutes(1), CancellationToken.None);
+
+        Assert.Equal(3, result.Checked);
+        Assert.Equal(5, result.NotChecked);
+        Assert.Equal(Enumerable.Range(1, 3).Select(StorageId), result.Findings.Select(f => f.ResourceId));
+        Assert.All(result.Findings, f => Assert.Equal(PolicyVerdict.Deny, f.Verdict));
+        Assert.Equal(ForbiddenNote, Assert.Single(result.Notes));
+        Assert.True(handler.Sent.Count <= 3 + PolicyPreflight.MaxConcurrency, $"{handler.Sent.Count} calls in all");
     }
 
     [Theory]
@@ -680,6 +765,34 @@ public class PolicyPreflightTests
         var handler = Answering(s => s.ContentName == "sa02" ? Json(failingBody, (HttpStatusCode)status) : Json(DenyResponse));
 
         var result = await Engine(handler).CheckAsync([Storage(1), Storage(2), Storage(3)], EmptyTemplate, null,
+            TimeSpan.FromMinutes(1), CancellationToken.None);
+
+        Assert.Equal(2, result.Checked);
+        Assert.Equal(1, result.NotChecked);
+        Assert.Equal([StorageId(1), StorageId(3)], result.Findings.Select(f => f.ResourceId));
+        var note = Assert.Single(result.Notes);
+        Assert.Contains(StorageId(2), note);
+        Assert.Contains(code, note);
+    }
+
+    [Theory]
+    [InlineData("network", "NetworkError")]
+    [InlineData("httpTimeout", "Timeout")]
+    public async Task Check_NetworkFailureOrHttpTimeout_SkipsOnlyThatResource(string failure, string code)
+    {
+        var handler = new PolicyHandler(async (sent, token) =>
+        {
+            if (sent.ContentName == "sa02")
+            {
+                if (failure == "network")
+                    throw new HttpRequestException("No such host is known. (management.azure.com:443)");
+                await Task.Delay(Timeout.Infinite, token); // only HttpClient.Timeout ends this one
+            }
+            return Json(DenyResponse);
+        });
+        var engine = Engine(handler, httpTimeout: failure == "httpTimeout" ? TimeSpan.FromMilliseconds(500) : null);
+
+        var result = await engine.CheckAsync([Storage(1), Storage(2), Storage(3)], EmptyTemplate, null,
             TimeSpan.FromMinutes(1), CancellationToken.None);
 
         Assert.Equal(2, result.Checked);
