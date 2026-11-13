@@ -9,7 +9,8 @@ namespace AzureDesignStudio.Core.Validation
     {
         public static ValidationReport For(IEnumerable<NodeModel> nodes)
         {
-            var list = nodes as IReadOnlyCollection<NodeModel> ?? nodes.ToList();
+            // Groups first, so every caller gets the same result whatever order it collected nodes in.
+            var list = nodes.OrderBy(n => n is GroupModel ? 0 : 1).ToList();
             return new ValidationReport(DesignValidator.Validate(list), DesignLinter.Lint(list));
         }
 

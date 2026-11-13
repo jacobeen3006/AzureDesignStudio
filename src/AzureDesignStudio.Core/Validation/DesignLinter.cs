@@ -66,6 +66,7 @@ namespace AzureDesignStudio.Core.Validation
                 .OrderBy(f => f.Pillar)
                 .ThenBy(f => f.RuleId, StringComparer.Ordinal)
                 .ThenBy(f => f.NodeName, StringComparer.Ordinal)
+                .ThenBy(f => f.Message, StringComparer.Ordinal)
                 .ToList();
         }
 
@@ -179,8 +180,7 @@ namespace AzureDesignStudio.Core.Validation
 
                 var resource = (IAzureResource)node;
                 var covered = endpoints.Any(e => ReferenceEquals(e.LinkedTarget, node))
-                    || (resource.ResourceId.Length > 0
-                        && targetIds.Any(id => string.Equals(id, resource.ResourceId, StringComparison.OrdinalIgnoreCase)));
+                    || targetIds.Any(id => IdTargets(id, resource, type));
                 if (covered)
                     continue;
 
@@ -189,6 +189,19 @@ namespace AzureDesignStudio.Core.Validation
                     $"{((IAzureNode)node).ServiceName} '{name}' is reachable only over its public endpoint. Add a private endpoint to keep traffic on the virtual network.");
             }
         }
+
+        /// <summary>A typed target id is either the node's own template expression (spacing aside) or
+        /// a full ARM id that ends in <c>/providers/{type}/{name}</c>.</summary>
+        private static bool IdTargets(string id, IAzureResource resource, string armType)
+        {
+            if (resource.ResourceId.Length > 0 && StripWhitespace(id).Equals(StripWhitespace(resource.ResourceId), StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (string.IsNullOrEmpty(resource.Name))
+                return false;
+            return id.TrimEnd('/').EndsWith($"/providers/{armType}/{resource.Name}", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string StripWhitespace(string value) => string.Concat(value.Where(c => !char.IsWhiteSpace(c)));
 
         private static IEnumerable<LintFinding> NoBastion(List<NodeModel> nodes)
         {

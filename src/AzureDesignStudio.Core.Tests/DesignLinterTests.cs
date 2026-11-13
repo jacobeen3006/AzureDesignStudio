@@ -63,7 +63,8 @@ namespace AzureDesignStudio.Core.Tests
         {
             var unknown = Create("no-such-key", "mystery");
             Assert.IsType<UnknownNodeModel>(unknown);
-            Assert.Empty(Lint(unknown));
+            // With a virtual network the private-endpoint rule really evaluates the unknown node.
+            Assert.Empty(Lint(Vnet(), unknown));
         }
 
         [Fact]
@@ -308,6 +309,65 @@ namespace AzureDesignStudio.Core.Tests
             var pe = (PrivateEndpointModel)Create(AdsConstants.PrivateEndpoint, "pe1");
             pe.TargetResourceId = st.ResourceId.ToUpperInvariant();
             Assert.Empty(ForRule(Lint(Vnet(), st, pe), "SEC-NO-PRIVATE-ENDPOINT"));
+        }
+
+        private static PrivateEndpointModel EndpointTo(string id)
+        {
+            var pe = (PrivateEndpointModel)Create(AdsConstants.PrivateEndpoint, "pe1");
+            pe.TargetResourceId = id;
+            return pe;
+        }
+
+        [Fact]
+        public void SEC_NO_PRIVATE_ENDPOINT_EndpointTypedByFullArmId_CountsAsCovered()
+        {
+            var st = Create(AdsConstants.StorageAccount, "st1");
+            var pe = EndpointTo("/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/ST1/");
+            Assert.Empty(ForRule(Lint(Vnet(), st, pe), "SEC-NO-PRIVATE-ENDPOINT"));
+        }
+
+        [Fact]
+        public void SEC_NO_PRIVATE_ENDPOINT_SqlServerTypedByFullArmId_CountsAsCovered()
+        {
+            var sql = Create(AdsConstants.SqlServer, "sql1");
+            var pe = EndpointTo("/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Sql/servers/sql1");
+            Assert.Empty(ForRule(Lint(Vnet(), sql, pe), "SEC-NO-PRIVATE-ENDPOINT"));
+        }
+
+        [Fact]
+        public void SEC_NO_PRIVATE_ENDPOINT_ExpressionWithoutSpaces_CountsAsCovered()
+        {
+            var st = (StorageAccountModel)Create(AdsConstants.StorageAccount, "st1");
+            var pe = EndpointTo(st.ResourceId.Replace(" ", string.Empty));
+            Assert.Empty(ForRule(Lint(Vnet(), st, pe), "SEC-NO-PRIVATE-ENDPOINT"));
+        }
+
+        [Fact]
+        public void SEC_NO_PRIVATE_ENDPOINT_IdOfAnotherResource_DoesNotCover()
+        {
+            var st = Create(AdsConstants.StorageAccount, "st1");
+            var otherName = EndpointTo("/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/st2");
+            Assert.Equal("st1", Assert.Single(ForRule(Lint(Vnet(), st, otherName), "SEC-NO-PRIVATE-ENDPOINT")).NodeName);
+
+            var otherType = EndpointTo("/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Sql/servers/st1");
+            Assert.Equal("st1", Assert.Single(ForRule(Lint(Vnet(), st, otherType), "SEC-NO-PRIVATE-ENDPOINT")).NodeName);
+        }
+
+        [Fact]
+        public void Lint_SameInputInAnyOrder_GivesTheSameFindings()
+        {
+            var nodes = new[]
+            {
+                Vnet(), Create(AdsConstants.VirtualMachine, "vm-b"), Create(AdsConstants.VirtualMachine, "vm-a"),
+                Create(AdsConstants.StorageAccount, "st1"), Create(AdsConstants.StorageAccount, "st2"),
+                Create(AdsConstants.WebApp, "app1"),
+            };
+            static string[] Key(LintFinding[] f) => f.Select(x => $"{x.RuleId}|{x.NodeName}|{x.Message}").ToArray();
+
+            var forward = Key(Lint(nodes));
+            Assert.NotEmpty(forward);
+            Assert.Equal(forward, Key(Lint(nodes.Reverse().ToArray())));
+            Assert.Equal(forward, Key(Lint(nodes.OrderBy(n => ((IAzureResource)n).Name, System.StringComparer.Ordinal).ToArray())));
         }
 
         [Fact]
