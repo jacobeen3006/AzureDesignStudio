@@ -2,6 +2,9 @@ using AzureDesignStudio.Core.Common;
 using AzureDesignStudio.Core.Compute;
 using AzureDesignStudio.Core.Models;
 using AzureDesignStudio.Core.Network;
+using AzureDesignStudio.Core.SQL;
+using AzureDesignStudio.Core.Storage;
+using AzureDesignStudio.Core.Web;
 using AzureDesignStudio.Core.Validation;
 using Blazor.Diagrams.Core.Models;
 using System.Collections.Generic;
@@ -66,6 +69,167 @@ namespace AzureDesignStudio.Core.Tests
                 Create(AdsConstants.VirtualMachine, "vm-c"));
             Assert.Equal(["vm-a", "vm-b", "vm-c"], findings.Select(f => f.NodeName));
             Assert.All(findings, f => Assert.Equal("REL-VM-SINGLE", f.RuleId));
+        }
+
+        private static LintFinding[] ForRule(LintFinding[] findings, string id) =>
+            findings.Where(f => f.RuleId == id).ToArray();
+
+        [Fact]
+        public void REL_VM_SINGLE_Fires_ForAVmOutsideAnAvailabilitySet()
+        {
+            var f = Assert.Single(ForRule(Lint(Create(AdsConstants.VirtualMachine, "vm1")), "REL-VM-SINGLE"));
+            Assert.Equal(LintPillar.Reliability, f.Pillar);
+            Assert.Equal(ValidationSeverity.Warning, f.Severity);
+            Assert.Equal("vm1", f.NodeName);
+            Assert.Equal("Virtual machine 'vm1' is a single instance outside an availability set. Use an availability set or a scale set so maintenance or a host failure does not take the workload down.", f.Message);
+            Assert.Equal("https://learn.microsoft.com/en-us/azure/well-architected/service-guides/virtual-machines", f.LearnUrl);
+        }
+
+        [Fact]
+        public void REL_VM_SINGLE_DoesNotFire_ForVmsInAnAvailabilitySet()
+        {
+            var set = (AvailabilitySetModel)Create(AdsConstants.AvailabilitySet, "avset");
+            var a = Create(AdsConstants.VirtualMachine, "vm1");
+            var b = Create(AdsConstants.VirtualMachine, "vm2");
+            set.AddChild(a);
+            set.AddChild(b);
+            Assert.Empty(ForRule(Lint(set, a, b), "REL-VM-SINGLE"));
+        }
+
+        [Fact]
+        public void REL_AVSET_ONE_Fires_ForOneMachine()
+        {
+            var set = (AvailabilitySetModel)Create(AdsConstants.AvailabilitySet, "avset");
+            var a = Create(AdsConstants.VirtualMachine, "vm1");
+            set.AddChild(a);
+            var f = Assert.Single(ForRule(Lint(set, a), "REL-AVSET-ONE"));
+            Assert.Equal(ValidationSeverity.Warning, f.Severity);
+            Assert.Equal("avset", f.NodeName);
+            Assert.Equal("Availability set 'avset' holds one virtual machine. It needs at least two to protect against a host failure.", f.Message);
+            Assert.Equal("https://learn.microsoft.com/en-us/azure/virtual-machines/availability-set-overview", f.LearnUrl);
+        }
+
+        [Fact]
+        public void REL_AVSET_ONE_DoesNotFire_ForTwoOrZeroMachines()
+        {
+            var two = (AvailabilitySetModel)Create(AdsConstants.AvailabilitySet, "avset");
+            two.AddChild(Create(AdsConstants.VirtualMachine, "vm1"));
+            two.AddChild(Create(AdsConstants.VirtualMachine, "vm2"));
+            var empty = Create(AdsConstants.AvailabilitySet, "empty");
+            Assert.Empty(ForRule(Lint(two, empty), "REL-AVSET-ONE"));
+        }
+
+        private static AppServicePlanModel PlanWithApp(string tier, string appKey = AdsConstants.WebApp)
+        {
+            var plan = (AppServicePlanModel)Create(AdsConstants.AppServicePlan, "plan1");
+            plan.SkuTier = tier;
+            plan.AddChild(Create(appKey, "app1"));
+            return plan;
+        }
+
+        [Theory]
+        [InlineData("Free")]
+        [InlineData("shared")]
+        [InlineData("Basic")]
+        public void REL_APPPLAN_TIER_Fires_ForLowTiers(string tier)
+        {
+            var plan = PlanWithApp(tier);
+            var f = Assert.Single(ForRule(Lint(plan), "REL-APPPLAN-TIER"));
+            Assert.Equal(ValidationSeverity.Warning, f.Severity);
+            Assert.Equal("plan1", f.NodeName);
+            Assert.Equal($"App service plan 'plan1' is on the {tier} tier, which cannot scale out automatically. Use Standard or higher for production workloads.", f.Message);
+            Assert.Equal("https://learn.microsoft.com/en-us/azure/well-architected/service-guides/app-service-web-apps", f.LearnUrl);
+        }
+
+        [Fact]
+        public void REL_APPPLAN_TIER_DoesNotFire_ForStandardOrAnEmptyPlan()
+        {
+            Assert.Empty(ForRule(Lint(PlanWithApp("Standard")), "REL-APPPLAN-TIER"));
+            var empty = (AppServicePlanModel)Create(AdsConstants.AppServicePlan, "plan2");
+            empty.SkuTier = "Basic";
+            Assert.Empty(ForRule(Lint(empty), "REL-APPPLAN-TIER"));
+        }
+
+        [Theory]
+        [InlineData("consumption")]
+        [InlineData("premium")]
+        public void REL_APPPLAN_TIER_SkipsFunctionReTieredPlans(string hosting)
+        {
+            var plan = PlanWithApp("Basic", AdsConstants.FunctionApp);
+            ((FunctionAppModel)plan.Children.Single()).HostingPlan = hosting;
+            Assert.Empty(ForRule(Lint(plan), "REL-APPPLAN-TIER"));
+        }
+
+        [Fact]
+        public void REL_APPPLAN_TIER_Fires_ForADedicatedFunctionPlanOnBasic()
+        {
+            var plan = PlanWithApp("Basic", AdsConstants.FunctionApp);
+            ((FunctionAppModel)plan.Children.Single()).HostingPlan = "dedicated";
+            Assert.Single(ForRule(Lint(plan), "REL-APPPLAN-TIER"));
+        }
+
+        [Fact]
+        public void REL_APPGW_INSTANCES_Fires_ForOneFixedInstance()
+        {
+            var gw = (AppGatewayModel)Create(AdsConstants.AppGateway, "gw1");
+            gw.Autoscaling = false;
+            gw.InstanceCount = 1;
+            var f = Assert.Single(ForRule(Lint(gw), "REL-APPGW-INSTANCES"));
+            Assert.Equal(ValidationSeverity.Warning, f.Severity);
+            Assert.Equal("gw1", f.NodeName);
+            Assert.Equal("Application gateway 'gw1' runs a single fixed instance. Use at least two instances or turn on autoscaling.", f.Message);
+            Assert.Equal("https://learn.microsoft.com/en-us/azure/well-architected/service-guides/azure-application-gateway", f.LearnUrl);
+        }
+
+        [Fact]
+        public void REL_APPGW_INSTANCES_DoesNotFire_WithAutoscalingOrTwoInstances()
+        {
+            var auto = (AppGatewayModel)Create(AdsConstants.AppGateway, "gw1");
+            auto.Autoscaling = true;
+            auto.InstanceCount = 1;
+            var two = (AppGatewayModel)Create(AdsConstants.AppGateway, "gw2");
+            two.InstanceCount = 2;
+            Assert.Empty(ForRule(Lint(auto, two), "REL-APPGW-INSTANCES"));
+        }
+
+        [Fact]
+        public void REL_SQL_BASIC_Fires_ForBasic()
+        {
+            var db = (SqlDatabaseModel)Create(AdsConstants.SqlDatabase, "db1");
+            db.SkuTier = "basic";
+            var f = Assert.Single(ForRule(Lint(db), "REL-SQL-BASIC"));
+            Assert.Equal(ValidationSeverity.Info, f.Severity);
+            Assert.Equal("db1", f.NodeName);
+            Assert.Equal("SQL database 'db1' is on the Basic tier, intended for development and small workloads.", f.Message);
+            Assert.Equal("https://learn.microsoft.com/en-us/azure/well-architected/service-guides/azure-sql-database", f.LearnUrl);
+        }
+
+        [Fact]
+        public void REL_SQL_BASIC_DoesNotFire_ForGeneralPurpose()
+        {
+            var db = (SqlDatabaseModel)Create(AdsConstants.SqlDatabase, "db1");
+            Assert.Empty(ForRule(Lint(db), "REL-SQL-BASIC"));
+        }
+
+        [Fact]
+        public void REL_STORAGE_LRS_Fires_ForLrs()
+        {
+            var st = (StorageAccountModel)Create(AdsConstants.StorageAccount, "st1");
+            st.SkuName = "Standard_LRS";
+            var f = Assert.Single(ForRule(Lint(st), "REL-STORAGE-LRS"));
+            Assert.Equal(ValidationSeverity.Info, f.Severity);
+            Assert.Equal("st1", f.NodeName);
+            Assert.Equal("Storage account 'st1' uses locally redundant storage: three copies in one datacenter. Consider zone-redundant or geo-redundant storage for data that must survive a datacenter outage.", f.Message);
+            Assert.Equal("https://learn.microsoft.com/en-us/azure/storage/common/storage-redundancy", f.LearnUrl);
+        }
+
+        [Fact]
+        public void REL_STORAGE_LRS_DoesNotFire_ForZrs_OrAFunctionsEmbeddedAccount()
+        {
+            var st = (StorageAccountModel)Create(AdsConstants.StorageAccount, "st1");
+            st.SkuName = "Standard_ZRS";
+            var fn = Create(AdsConstants.FunctionApp, "fn1");
+            Assert.Empty(ForRule(Lint(st, fn), "REL-STORAGE-LRS"));
         }
     }
 }
