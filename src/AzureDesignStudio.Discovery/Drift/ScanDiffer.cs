@@ -93,6 +93,13 @@ public sealed class ScanDiffer
         var afterFlat = Flatten(@new);
         var diffs = new List<PropertyDiff>(MaxPropertyDiffs);
 
+        // A baseline stored before SKUs were captured has no sku member at all; the first
+        // rescan would otherwise report every SKU-bearing resource as changed.
+        if (!HasSku(old) && HasSku(@new))
+        {
+            foreach (var path in afterFlat.Keys.Where(IsSkuPath).ToList()) afterFlat.Remove(path);
+        }
+
         foreach (var (path, value) in beforeFlat)
         {
             if (diffs.Count >= MaxPropertyDiffs) break;
@@ -111,6 +118,13 @@ public sealed class ScanDiffer
 
         return diffs;
     }
+
+    private static bool HasSku(InventoryItem item) =>
+        item.Raw is { ValueKind: JsonValueKind.Object } raw && raw.TryGetProperty("sku", out _);
+
+    private static bool IsSkuPath(string path) =>
+        path.StartsWith("properties.sku", StringComparison.Ordinal)
+        && (path.Length == 14 || path[14] is '.' or '[');
 
     /// <summary>Stable, sorted leaf map (path → raw JSON), incl. location + tags drift.</summary>
     internal static SortedDictionary<string, string> Flatten(InventoryItem item)
