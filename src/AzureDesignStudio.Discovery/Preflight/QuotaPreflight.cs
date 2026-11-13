@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using AzureDesignStudio.Discovery.Arm;
 using AzureDesignStudio.Discovery.Iac.WhatIf;
-using AzureDesignStudio.Discovery.ResourceGraph;
+using static AzureDesignStudio.Discovery.Preflight.PreflightSupport;
 
 namespace AzureDesignStudio.Discovery.Preflight;
 
@@ -501,21 +501,14 @@ public sealed class QuotaPreflight(ArmTransport transport)
             var items = await transport.GetListAsync(url, "value", requestToken).ConfigureAwait(false);
             return new ReadOutcome(ReadKind.Read, items, null);
         }
-        catch (OperationCanceledException e) when (ct.IsCancellationRequested)
-        {
-            throw new OperationCanceledException(e.Message, e, ct);
-        }
-        catch (OperationCanceledException) when (deadlineToken.IsCancellationRequested)
-        {
-            return ReadOutcome.TimedOut;
-        }
-        catch (ResourceGraphException e) when (e.StatusCode == 403)
-        {
-            return ReadOutcome.Forbidden;
-        }
         catch (Exception e)
         {
-            return new ReadOutcome(ReadKind.Failed, [], CodeOf(e));
+            return Classify(e, deadlineToken, ct) switch
+            {
+                RequestFailure.TimedOut => ReadOutcome.TimedOut,
+                RequestFailure.Forbidden => ReadOutcome.Forbidden,
+                _ => new ReadOutcome(ReadKind.Failed, [], CodeOf(e)),
+            };
         }
     }
 
@@ -545,22 +538,6 @@ public sealed class QuotaPreflight(ArmTransport transport)
 
     private static string? JoinDetails(params string?[] details) =>
         details.Where(d => d is not null).ToList() is { Count: > 0 } present ? string.Join("; ", present) : null;
-
-    private static string CodeOf(Exception e) => e switch
-    {
-        ResourceGraphException arm => arm.Code,
-        JsonException => "MalformedResponse",
-        HttpRequestException => "NetworkError",
-        OperationCanceledException => "Timeout",
-        _ => e.GetType().Name,
-    };
-
-    /// <summary>The internal deadline: a negative budget is none at all; anything beyond what a
-    /// timer can hold is no limit.</summary>
-    private static TimeSpan DeadlineOf(TimeSpan budget) =>
-        budget == Timeout.InfiniteTimeSpan || budget.TotalMilliseconds >= int.MaxValue ? Timeout.InfiniteTimeSpan
-        : budget < TimeSpan.Zero ? TimeSpan.Zero
-        : budget;
 
     private static bool CountsForQuota(WhatIfChange change)
     {
@@ -918,40 +895,9 @@ public sealed class QuotaPreflight(ArmTransport transport)
     private static string NormalizeLocation(string location) =>
         string.Concat(location.Where(c => !char.IsWhiteSpace(c))).ToLowerInvariant();
 
-    private static string[] Segments(string resourceId) => resourceId.Split('/', StringSplitOptions.RemoveEmptyEntries);
-
     private static string? SubscriptionOf(string? resourceId) =>
         resourceId is not null && Segments(resourceId) is { Length: >= 2 } segments
         && segments[0].Equals("subscriptions", StringComparison.OrdinalIgnoreCase)
             ? segments[1]
             : null;
-
-    /// <summary>The resource type an ARM id names: the namespace after the last
-    /// <c>providers</c> segment plus every type segment after it.</summary>
-    private static string? TypeOf(string? resourceId)
-    {
-        if (resourceId is null)
-            return null;
-        var segments = Segments(resourceId);
-        var providers = Array.FindLastIndex(segments, s => s.Equals("providers", StringComparison.OrdinalIgnoreCase));
-        if (providers < 0 || providers + 2 >= segments.Length)
-            return null;
-        var parts = new List<string> { segments[providers + 1] };
-        for (var i = providers + 2; i < segments.Length; i += 2)
-            parts.Add(segments[i]);
-        return string.Join('/', parts);
-    }
-
-    /// <summary>A child resource's parent id (the id without its last two segments), else null.</summary>
-    private static string? ParentOf(string resourceId)
-    {
-        var segments = Segments(resourceId);
-        var providers = Array.FindLastIndex(segments, s => s.Equals("providers", StringComparison.OrdinalIgnoreCase));
-        if (providers < 0 || segments.Length - (providers + 2) < 4)
-            return null;
-        var id = resourceId.TrimEnd('/');
-        for (var drop = 0; drop < 2; drop++)
-            id = id[..id.LastIndexOf('/')];
-        return id;
-    }
 }

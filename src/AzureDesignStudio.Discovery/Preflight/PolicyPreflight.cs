@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using AzureDesignStudio.Discovery.Arm;
 using AzureDesignStudio.Discovery.Iac.WhatIf;
-using AzureDesignStudio.Discovery.ResourceGraph;
+using static AzureDesignStudio.Discovery.Preflight.PreflightSupport;
 
 namespace AzureDesignStudio.Discovery.Preflight;
 
@@ -193,39 +193,16 @@ public sealed class PolicyPreflight(ArmTransport transport)
             var json = await transport.PostAsync(EndpointOf(resourceId), body, requestToken).ConfigureAwait(false);
             return new Outcome(OutcomeKind.Checked, ParseResult(resourceId, json), null);
         }
-        catch (OperationCanceledException e) when (ct.IsCancellationRequested)
-        {
-            throw new OperationCanceledException(e.Message, e, ct);
-        }
-        catch (OperationCanceledException) when (deadlineToken.IsCancellationRequested)
-        {
-            return new Outcome(OutcomeKind.TimedOut, [], null);
-        }
-        catch (ResourceGraphException e) when (e.StatusCode == 403)
-        {
-            return new Outcome(OutcomeKind.Forbidden, [], null);
-        }
         catch (Exception e)
         {
-            return new Outcome(OutcomeKind.Failed, [], $"{resourceId} was not checked against Azure Policy: the check failed ({CodeOf(e)}).");
+            return Classify(e, deadlineToken, ct) switch
+            {
+                RequestFailure.TimedOut => new Outcome(OutcomeKind.TimedOut, [], null),
+                RequestFailure.Forbidden => new Outcome(OutcomeKind.Forbidden, [], null),
+                _ => new Outcome(OutcomeKind.Failed, [], $"{resourceId} was not checked against Azure Policy: the check failed ({CodeOf(e)})."),
+            };
         }
     }
-
-    private static string CodeOf(Exception e) => e switch
-    {
-        ResourceGraphException arm => arm.Code,
-        JsonException => "MalformedResponse",
-        HttpRequestException => "NetworkError",
-        OperationCanceledException => "Timeout",
-        _ => e.GetType().Name,
-    };
-
-    /// <summary>The internal deadline: a negative budget is none at all; anything beyond what a
-    /// timer can hold is no limit.</summary>
-    private static TimeSpan DeadlineOf(TimeSpan budget) =>
-        budget == Timeout.InfiniteTimeSpan || budget.TotalMilliseconds >= int.MaxValue ? Timeout.InfiniteTimeSpan
-        : budget < TimeSpan.Zero ? TimeSpan.Zero
-        : budget;
 
     private static bool IsCandidate(WhatIfChange? change)
     {
@@ -246,8 +223,6 @@ public sealed class PolicyPreflight(ArmTransport transport)
             : $"/subscriptions/{Uri.EscapeDataString(segments[1])}";
         return $"{transport.Endpoints.ManagementEndpoint}{scope}/providers/Microsoft.PolicyInsights/checkPolicyRestrictions?api-version={ApiVersion}";
     }
-
-    private static string[] Segments(string resourceId) => resourceId.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
     // ---------- secure parameter values ----------
 
@@ -363,7 +338,7 @@ public sealed class PolicyPreflight(ArmTransport transport)
             return null;
         }
 
-        var idType = TypeOf(resourceId);
+        var idType = TypeOf(resourceId, resourceGroups: true);
         var type = StringMember(after, "type") ?? idType;
         if ((type is not null && SecretTypes.Contains(type)) || (idType is not null && SecretTypes.Contains(idType)))
         {
@@ -397,6 +372,7 @@ public sealed class PolicyPreflight(ArmTransport transport)
             ["resourceContent"] = Scrub(content, secureValues),
             ["apiVersion"] = apiVersion,
         };
+        // A child resource (two or more type/name pairs after the namespace) is checked in its parent's scope.
         if (ParentOf(resourceId) is { } parent)
             details["scope"] = parent;
 
@@ -418,38 +394,6 @@ public sealed class PolicyPreflight(ArmTransport transport)
 
     private static string? StringMember(JsonObject obj, string name) =>
         Member(obj, name)?.Value is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s) ? s : null;
-
-    /// <summary>The resource type an ARM id names: the namespace after the last
-    /// <c>providers</c> segment plus every type segment after it.</summary>
-    private static string? TypeOf(string resourceId)
-    {
-        var segments = Segments(resourceId);
-        var providers = Array.FindLastIndex(segments, s => s.Equals("providers", StringComparison.OrdinalIgnoreCase));
-        if (providers < 0 || providers + 2 >= segments.Length)
-        {
-            if (segments.Length == 4 && segments[2].Equals("resourceGroups", StringComparison.OrdinalIgnoreCase))
-                return "Microsoft.Resources/resourceGroups";
-            return null;
-        }
-        var parts = new List<string> { segments[providers + 1] };
-        for (var i = providers + 2; i < segments.Length; i += 2)
-            parts.Add(segments[i]);
-        return string.Join('/', parts);
-    }
-
-    /// <summary>A child resource (two or more type/name pairs after the namespace) is checked
-    /// in its parent's scope: the id without its last two segments, casing kept.</summary>
-    private static string? ParentOf(string resourceId)
-    {
-        var segments = Segments(resourceId);
-        var providers = Array.FindLastIndex(segments, s => s.Equals("providers", StringComparison.OrdinalIgnoreCase));
-        if (providers < 0 || segments.Length - (providers + 2) < 4)
-            return null;
-        var id = resourceId.TrimEnd('/');
-        for (var drop = 0; drop < 2; drop++)
-            id = id[..id.LastIndexOf('/')];
-        return id;
-    }
 
     private static string? TemplateApiVersion(string? templateJson, string type)
     {
