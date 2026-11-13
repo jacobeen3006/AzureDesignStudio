@@ -225,6 +225,27 @@ namespace AzureDesignStudio.Core.Tests
                 "The pre-deploy check refuses the export: " + blocking);
         }
 
+        // What the design linter says about the designs a new user opens first. A rule change
+        // that floods or silences them shows up here as a diff.
+        [Fact]
+        public void GalleryDesigns_LintFindingsArePinned()
+        {
+            var expected = new Dictionary<string, string[]>
+            {
+                ["hub-spoke"] = ["REL-VM-SINGLE:vm-spoke-1", "REL-VM-SINGLE:vm-spoke-2", "OPS-NO-MONITORING:design"],
+                ["aks-baseline"] = ["SEC-APPGW-NO-WAF:agw-aks", "SEC-NO-PRIVATE-ENDPOINT:acraksbaseline", "SEC-NO-PRIVATE-ENDPOINT:kv-aks-baseline"],
+                ["apim-landingzone"] = ["SEC-APPGW-NO-WAF:agw-apim", "SEC-NO-PRIVATE-ENDPOINT:kv-apim-landingzone"],
+            };
+
+            foreach (var (key, pinned) in expected)
+            {
+                var diagram = Builders[key]();
+                var findings = DesignLinter.Lint(diagram.Groups.Cast<NodeModel>().Concat(diagram.Nodes).ToList());
+                Assert.True(pinned.SequenceEqual(findings.Select(f => $"{f.RuleId}:{f.NodeName}")),
+                    $"{key}: " + string.Join(", ", findings.Select(f => $"{f.RuleId}:{f.NodeName}")));
+            }
+        }
+
         [Theory]
         [MemberData(nameof(GalleryEntries))]
         public void EveryGalleryEntryHasADesign(string key, string path)
