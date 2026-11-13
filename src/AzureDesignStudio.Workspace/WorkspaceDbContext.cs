@@ -18,6 +18,7 @@ public class WorkspaceDbContext(DbContextOptions<WorkspaceDbContext> options) : 
     public DbSet<NodePositionRecord> NodePositions => Set<NodePositionRecord>();
     public DbSet<ChangeFeedRecord> ChangeFeed => Set<ChangeFeedRecord>();
     public DbSet<DecomWindowModel> DecomWindows => Set<DecomWindowModel>();
+    public DbSet<GovernanceFindingRecord> GovernanceFindings => Set<GovernanceFindingRecord>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -67,6 +68,11 @@ public class WorkspaceDbContext(DbContextOptions<WorkspaceDbContext> options) : 
         {
             e.HasKey(w => w.WindowId);
             e.HasIndex(w => new { w.SubscriptionId, w.WindowId });
+        });
+        model.Entity<GovernanceFindingRecord>(e =>
+        {
+            e.HasKey(g => new { g.ScanId, g.Source, g.RecordId });
+            e.HasIndex(g => new { g.ScanId, g.ResourceId });
         });
     }
 }
@@ -158,6 +164,21 @@ public sealed class WorkspaceDb
                 "UpdatedAtUtc" TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS "IX_DecomWindows_SubscriptionId_WindowId" ON "DecomWindows" ("SubscriptionId", "WindowId");
+            CREATE TABLE IF NOT EXISTS "GovernanceFindings" (
+                "ScanId" TEXT NOT NULL,
+                "Source" TEXT NOT NULL,
+                "RecordId" TEXT NOT NULL,
+                "ResourceId" TEXT NOT NULL,
+                "SubscriptionId" TEXT NOT NULL,
+                "Severity" TEXT NOT NULL,
+                "Category" TEXT NOT NULL,
+                "Title" TEXT NOT NULL,
+                "Detail" TEXT NULL,
+                "PolicyAssignmentId" TEXT NULL,
+                "PolicyDefinitionId" TEXT NULL,
+                CONSTRAINT "PK_GovernanceFindings" PRIMARY KEY ("ScanId", "Source", "RecordId")
+            );
+            CREATE INDEX IF NOT EXISTS "IX_GovernanceFindings_ScanId_ResourceId" ON "GovernanceFindings" ("ScanId", "ResourceId");
             """;
         cmd.ExecuteNonQuery();
         conn.Close();
