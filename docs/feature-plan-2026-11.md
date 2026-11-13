@@ -106,7 +106,7 @@ Scope decisions:
 - No Performance or Cost rules yet.
 - Tenant-scan linting is not included; the linter runs on designs only.
 - The linter never returns Error severity (Warning and Info only).
-- The bundled gallery designs currently produce Warnings: hub-spoke (two single VMs outside an availability set), aks-baseline and apim-landingzone (Standard_v2 application gateway without WAF). `GalleryDesigns_LintFindingsArePinned` pins them.
+- The bundled gallery designs produce no Warnings: hub-spoke runs a scale set in each spoke, and aks-baseline and apim-landingzone use the WAF_v2 application gateway tier. The remaining findings are Info (no monitoring in hub-spoke; registry and vaults without a private endpoint). `GalleryDesigns_LintFindingsArePinned` pins them.
 - The MCP tool is read-only: it loads a saved design from the workspace and never contacts Azure.
 
 ## 3. Not proposed

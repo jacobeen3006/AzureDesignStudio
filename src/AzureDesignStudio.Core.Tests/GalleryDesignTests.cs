@@ -99,7 +99,8 @@ namespace AzureDesignStudio.Core.Tests
         }
 
         /// <summary>Hub and spoke: shared firewall, bastion and gateway subnet in the hub; two
-        /// workload networks peered to it.</summary>
+        /// workload networks peered to it, each running a scale set (a single machine would
+        /// be the linter's first reliability warning).</summary>
         private static BlazorDiagram HubSpoke()
         {
             var canvas = new Canvas();
@@ -117,11 +118,11 @@ namespace AzureDesignStudio.Core.Tests
 
             var spoke1 = Network(canvas, "vnet-spoke-1", "10.1.0.0/16", 60, 220);
             var workload1 = canvas.Subnet(spoke1, "snet-workload", "10.1.1.0/24", 90, 260);
-            canvas.Add<NodeModel>("virtual-machine", "vm-spoke-1", 120, 290, workload1);
+            canvas.Add<NodeModel>("virtual-machine-scale-set", "vmss-spoke-1", 120, 290, workload1);
 
             var spoke2 = Network(canvas, "vnet-spoke-2", "10.2.0.0/16", 1080, 220);
             var workload2 = canvas.Subnet(spoke2, "snet-workload", "10.2.1.0/24", 1110, 260);
-            canvas.Add<NodeModel>("virtual-machine", "vm-spoke-2", 1140, 290, workload2);
+            canvas.Add<NodeModel>("virtual-machine-scale-set", "vmss-spoke-2", 1140, 290, workload2);
 
             canvas.Link(spoke1, PortAlignment.Right, hub, PortAlignment.Left);
             canvas.Link(hub, PortAlignment.Right, spoke2, PortAlignment.Left);
@@ -137,7 +138,8 @@ namespace AzureDesignStudio.Core.Tests
             var vnet = Network(canvas, "vnet-aks", "10.10.0.0/16", 260, 180);
             var gatewaySubnet = canvas.Subnet(vnet, "snet-appgw", "10.10.1.0/24", 290, 220);
             var nodeSubnet = canvas.Subnet(vnet, "snet-aks-nodes", "10.10.16.0/20", 520, 220);
-            var gateway = canvas.Add<NodeModel>("app-gateway", "agw-aks", 320, 250, gatewaySubnet);
+            var gateway = canvas.Add<AppGatewayModel>("app-gateway", "agw-aks", 320, 250, gatewaySubnet);
+            gateway.Tier = "WAF_v2"; // internet-facing: the reference architecture uses the firewall tier
             canvas.Add<NodeModel>("aks-cluster", "aks-baseline", 550, 250, nodeSubnet);
             var gatewayIp = canvas.Add<PublicIpModel>("public-ip", "pip-agw-aks", 320, 30);
             canvas.Link(gatewayIp, PortAlignment.Bottom, gateway, PortAlignment.Top);
@@ -157,7 +159,8 @@ namespace AzureDesignStudio.Core.Tests
             var vnet = Network(canvas, "vnet-apim", "10.20.0.0/16", 260, 180);
             var gatewaySubnet = canvas.Subnet(vnet, "snet-appgw", "10.20.1.0/24", 290, 220);
             var apimSubnet = canvas.Subnet(vnet, "snet-apim", "10.20.2.0/24", 520, 220);
-            var gateway = canvas.Add<NodeModel>("app-gateway", "agw-apim", 320, 250, gatewaySubnet);
+            var gateway = canvas.Add<AppGatewayModel>("app-gateway", "agw-apim", 320, 250, gatewaySubnet);
+            gateway.Tier = "WAF_v2"; // internet-facing: the reference architecture uses the firewall tier
             var apim = canvas.Add<APIM.APIMModel>("apim", "apim-landingzone", 550, 250, apimSubnet);
             apim.SkuName = "Developer";
             apim.SkuCapacity = 1;
@@ -232,9 +235,9 @@ namespace AzureDesignStudio.Core.Tests
         {
             var expected = new Dictionary<string, string[]>
             {
-                ["hub-spoke"] = ["REL-VM-SINGLE:vm-spoke-1", "REL-VM-SINGLE:vm-spoke-2", "OPS-NO-MONITORING:design"],
-                ["aks-baseline"] = ["SEC-APPGW-NO-WAF:agw-aks", "SEC-NO-PRIVATE-ENDPOINT:acraksbaseline", "SEC-NO-PRIVATE-ENDPOINT:kv-aks-baseline"],
-                ["apim-landingzone"] = ["SEC-APPGW-NO-WAF:agw-apim", "SEC-NO-PRIVATE-ENDPOINT:kv-apim-landingzone"],
+                ["hub-spoke"] = ["OPS-NO-MONITORING:design"],
+                ["aks-baseline"] = ["SEC-NO-PRIVATE-ENDPOINT:acraksbaseline", "SEC-NO-PRIVATE-ENDPOINT:kv-aks-baseline"],
+                ["apim-landingzone"] = ["SEC-NO-PRIVATE-ENDPOINT:kv-apim-landingzone"],
             };
 
             foreach (var (key, pinned) in expected)

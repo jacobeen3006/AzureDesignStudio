@@ -8,7 +8,7 @@
       ],
       "TypeKey": "virtual-network",
       "ImagePath": "assets/azure/virtual-network.svg",
-      "Id": "873cbb94-66f0-4f6d-9b1c-83eb6c36cdf4",
+      "Id": "c689e357-e606-40da-b1ac-e90204a70159",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -31,7 +31,7 @@
       "PrivateSubnet": false,
       "TypeKey": "subnet",
       "ImagePath": "assets/azure/subnet.svg",
-      "Id": "e35ef2cb-6043-49f8-8329-cc9dbb25746f",
+      "Id": "99a42981-b8e6-4336-a024-1194cd570005",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -43,7 +43,7 @@
         "Width": 141,
         "Height": 141
       },
-      "GroupId": "873cbb94-66f0-4f6d-9b1c-83eb6c36cdf4",
+      "GroupId": "c689e357-e606-40da-b1ac-e90204a70159",
       "Name": "snet-appgw",
       "Location": "[parameters(\u0027location\u0027)]",
       "UseResourceGroupLocation": true
@@ -54,7 +54,7 @@
       "PrivateSubnet": false,
       "TypeKey": "subnet",
       "ImagePath": "assets/azure/subnet.svg",
-      "Id": "9ed99698-1b1e-431d-894c-b2d17ec050a0",
+      "Id": "64ec318f-1e48-4698-994a-dda9ab00747b",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -66,7 +66,7 @@
         "Width": 141,
         "Height": 141
       },
-      "GroupId": "873cbb94-66f0-4f6d-9b1c-83eb6c36cdf4",
+      "GroupId": "c689e357-e606-40da-b1ac-e90204a70159",
       "Name": "snet-apim",
       "Location": "[parameters(\u0027location\u0027)]",
       "UseResourceGroupLocation": true
@@ -74,7 +74,7 @@
   ],
   "Nodes": [
     {
-      "Tier": "Standard_v2",
+      "Tier": "WAF_v2",
       "Autoscaling": false,
       "InstanceCount": 2,
       "MinCapacity": 0,
@@ -84,7 +84,7 @@
       "BackendAddress": null,
       "TypeKey": "app-gateway",
       "ImagePath": "assets/azure/app-gateway.svg",
-      "Id": "64d6f5ae-fbb1-43a8-bd8f-2937be696695",
+      "Id": "20a2eb74-10ae-4d8d-84c5-6c5987c6f9b1",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -96,7 +96,7 @@
         "Width": 81,
         "Height": 81
       },
-      "GroupId": "e35ef2cb-6043-49f8-8329-cc9dbb25746f",
+      "GroupId": "99a42981-b8e6-4336-a024-1194cd570005",
       "Name": "agw-apim",
       "Location": "[parameters(\u0027location\u0027)]",
       "UseResourceGroupLocation": true
@@ -109,7 +109,7 @@
       "VnetType": "Internal",
       "TypeKey": "apim",
       "ImagePath": "assets/azure/apim.svg",
-      "Id": "957f30f0-e37b-4acd-ae9f-ffc173d3d21b",
+      "Id": "ebd49eb1-bc70-468c-bba1-5e883668ef76",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -121,7 +121,7 @@
         "Width": 81,
         "Height": 81
       },
-      "GroupId": "9ed99698-1b1e-431d-894c-b2d17ec050a0",
+      "GroupId": "64ec318f-1e48-4698-994a-dda9ab00747b",
       "Name": "apim-landingzone",
       "Location": "[parameters(\u0027location\u0027)]",
       "UseResourceGroupLocation": true
@@ -133,7 +133,7 @@
       "Tier": "Regional",
       "TypeKey": "public-ip",
       "ImagePath": "assets/azure/public-ip.svg",
-      "Id": "cd83ffb4-63d9-4844-9c03-a65ad28d97a4",
+      "Id": "48f02b40-8b5a-4bbe-85ef-ccfd40724e1e",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -155,7 +155,7 @@
       "EnableRbacAuthorization": true,
       "TypeKey": "key-vault",
       "ImagePath": "assets/azure/key-vault.svg",
-      "Id": "7ea7e231-0f03-448d-babd-9fbde7381daa",
+      "Id": "022f79ec-1ad2-4925-bdb9-84ad74305671",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -177,7 +177,7 @@
       "IngestionMode": "ApplicationInsights",
       "TypeKey": "application-insights",
       "ImagePath": "assets/azure/application-insights.svg",
-      "Id": "d046f1e7-eab6-40c8-bec7-c075fcbad446",
+      "Id": "f0ee53fd-e39e-4487-ba83-e20738a87d93",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -200,7 +200,7 @@
       "EnableInteractiveQuery": true,
       "TypeKey": "log-analytics-workspace",
       "ImagePath": "assets/azure/log-analytics-workspace.svg",
-      "Id": "9ddd545c-5bd4-4e8e-a366-6d21eb4ac728",
+      "Id": "a97ddac4-1051-4a1c-8125-c72fbc8af6ce",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -220,9 +220,9 @@
   ],
   "Links": [
     {
-      "SourcePortParentId": "cd83ffb4-63d9-4844-9c03-a65ad28d97a4",
+      "SourcePortParentId": "48f02b40-8b5a-4bbe-85ef-ccfd40724e1e",
       "SourcePortAlignment": 4,
-      "TargetPortParentId": "64d6f5ae-fbb1-43a8-bd8f-2937be696695",
+      "TargetPortParentId": "20a2eb74-10ae-4d8d-84c5-6c5987c6f9b1",
       "TargetPortAlignment": 0
     }
   ]
