@@ -81,6 +81,7 @@ namespace AzureDesignStudio.Core.Common
             _undo.Clear();
             _redo.Clear();
             _gesture = null;
+            _pendingChildren.Clear();
             StateChanged?.Invoke();
         }
 

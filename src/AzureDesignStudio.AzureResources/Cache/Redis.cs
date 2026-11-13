@@ -32,14 +32,8 @@ namespace AzureDesignStudio.AzureResources.Cache
         public override string ApiVersion => "2023-08-01";
 
         /// <summary>
-        /// The type of Redis cache to deploy. Valid values include (A) Basic, (B) Standard, (C) Premium, (P)
-        /// Premium, (E) Enterprise, (F) EnterpriseFlash.
-        /// </summary>
-        [JsonPropertyName("sku")]
-        public RedisSku Sku { get; set; }
-
-        /// <summary>
-        /// Redis resource properties.
+        /// Redis resource properties. The SKU is part of them (properties.sku); Microsoft.Cache/redis
+        /// has no top-level sku.
         /// </summary>
         [JsonPropertyName("properties")]
         public RedisProperties Properties { get; set; }
@@ -72,13 +66,14 @@ namespace AzureDesignStudio.AzureResources.Cache
 
         /// <summary>
         /// The size of the Redis cache to deploy. Valid values: for C (Basic/Standard) family (0, 1, 2, 3, 4,
-        /// 5), for P (Premium) family (0, 1, 2, 3, 4, 5).
+        /// 5, 6), for P (Premium) family (1, 2, 3, 4, 5). Nullable so that 0 - the C0 size, and a
+        /// required property - is written rather than dropped as a default.
         /// </summary>
         [JsonPropertyName("capacity")]
-        public int Capacity { get; set; }
+        public int? Capacity { get; set; }
 
         /// <summary>
-        /// The name of the Redis cache to deploy.
+        /// The type of Redis cache to deploy: Basic, Standard or Premium.
         /// </summary>
         [JsonPropertyName("name")]
         public string Name { get; set; }
@@ -90,6 +85,12 @@ namespace AzureDesignStudio.AzureResources.Cache
     [GeneratedCode("ArmTypeGenerator", "0.2.1.52938")]
     public partial class RedisProperties
     {
+        /// <summary>
+        /// The SKU of the Redis cache to deploy (required).
+        /// </summary>
+        [JsonPropertyName("sku")]
+        public RedisSku Sku { get; set; }
+
         /// <summary>
         /// The minimum TLS version.
         /// </summary>

@@ -1,4 +1,4 @@
-﻿@using AutoMapper
+@using AutoMapper
 @using AzureDesignStudio.Services
 @inject ILogger<DiagramPanel> logger
 @inject AdsContext adsContext
@@ -20,11 +20,11 @@
     </CascadingValue>
     @if (guideX is not null)
     {
-        <div class="ads-guide ads-guide-v" style="@($"left:{diagram.Pan.X + guideX.Value * diagram.Zoom}px")"></div>
+        <div class="ads-guide ads-guide-v" style="@(FormattableString.Invariant($"left:{diagram.Pan.X + guideX.Value * diagram.Zoom:0.##}px"))"></div>
     }
     @if (guideY is not null)
     {
-        <div class="ads-guide ads-guide-h" style="@($"top:{diagram.Pan.Y + guideY.Value * diagram.Zoom}px")"></div>
+        <div class="ads-guide ads-guide-h" style="@(FormattableString.Invariant($"top:{diagram.Pan.Y + guideY.Value * diagram.Zoom:0.##}px"))"></div>
     }
     <DiagramNavigator />
     <div class="ads-context-menu @(showCtxMenu ? "ads-context-menu-active" : "")">

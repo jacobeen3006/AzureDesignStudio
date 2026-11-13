@@ -120,7 +120,7 @@ namespace AzureDesignStudio.Core.Tests
             var plan = new AppServicePlanModel { Name = "ads-plan" };
             template.AddResource(plan.GetArmResources());
             template.AddResource(new PublicIpModel { Name = "ads-ip" }.GetArmResources());
-            template.AddResource(new VirtualMachineModel { Name = "ads-vm" }.GetArmResources());
+            template.AddResource(TestPlacement.MakeExportable(new VirtualMachineModel { Name = "ads-vm" }).GetArmResources());
             var web = new WebAppModel { Name = "ads-web", RuntimeStack = "NODE|14-lts" };
             plan.AddChild(web);
             template.AddResource(web.GetArmResources());

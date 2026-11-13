@@ -95,11 +95,11 @@
       },
       "Microsoft.AspNetCore.Components.WebAssembly.Server": {
         "type": "Direct",
-        "requested": "[10.0.13, )",
-        "resolved": "10.0.13",
-        "contentHash": "EeFVBmuxdbvNcjty7Jkvck9LG1hGjFnRaJUKDrGfoMKmHJF7iRXcp4rx85Qhm+JmRKKIm4vZMUdv2i2KNsR5JQ==",
+        "requested": "[10.0.15, )",
+        "resolved": "10.0.15",
+        "contentHash": "0fLVpTv9PMxOihGgSCxwTFQ8MOk0He2lqD5Hh97WKhXyZPiOj3N7c3SEBNYwUlk7J4Bv6Qe49G58SldIoJq1EA==",
         "dependencies": {
-          "Microsoft.AspNetCore.Components.WebAssembly": "10.0.13"
+          "Microsoft.AspNetCore.Components.WebAssembly": "10.0.15"
         }
       },
       "Microsoft.EntityFrameworkCore.InMemory": {
@@ -437,8 +437,8 @@
       },
       "Microsoft.AspNetCore.Components.WebAssembly.Authentication": {
         "type": "Transitive",
-        "resolved": "10.0.12",
-        "contentHash": "CuhCSaAZMfOm1ZxrYIArTsV+a0p42eEjyaSDpaAJfVZZAGldMcAA3U4DrmzmiSd51Aq4HpyiPTfck2u1g1q5Fw=="
+        "resolved": "10.0.15",
+        "contentHash": "QuN6lTvKLluAIzLYA6KZ5w5ny6nI/n/Fm7Pr9ZLfeFwSgv1HfaYkGDTVWEhkga4p+1Bl/9ZMZXmgDDJZSL+mnA=="
       },
       "Microsoft.Bcl.AsyncInterfaces": {
         "type": "Transitive",
@@ -643,8 +643,8 @@
       },
       "Microsoft.JSInterop.WebAssembly": {
         "type": "Transitive",
-        "resolved": "10.0.13",
-        "contentHash": "kh68RQ3KmgKSsIpkQetbuHxxLEsIkjaJ+GfJhGn7NQCgrT067JXGmbCzXM42uiPcdXW5dJ8S5AKwJcyRDJFWzQ=="
+        "resolved": "10.0.15",
+        "contentHash": "/UTg2l5MAipHsPlCXBTfTCCLHUsyVeQM+z+QSStjfbP2b4RCrxl9NoKVZ7Ls9heBUT1/4yRjhMbqojl59A/xew=="
       },
       "Microsoft.PowerPlatform.ResourceStack": {
         "type": "Transitive",
@@ -1150,13 +1150,12 @@
           "Azure.Bicep.Decompiler": "[0.48.1, )",
           "AzureDesignStudio.Core": "[1.0.0, )",
           "AzureDesignStudio.SharedModels": "[1.0.0, )",
-          "BlazorApplicationInsights": "[2.2.2, )",
           "Google.Protobuf": "[3.28.2, )",
           "Grpc.Net.Client": "[2.66.0, )",
           "Grpc.Net.Client.Web": "[2.66.0, )",
           "Grpc.Net.ClientFactory": "[2.66.0, )",
-          "Microsoft.AspNetCore.Components.WebAssembly": "[10.0.12, )",
-          "Microsoft.Authentication.WebAssembly.Msal": "[10.0.12, )",
+          "Microsoft.AspNetCore.Components.WebAssembly": "[10.0.15, )",
+          "Microsoft.Authentication.WebAssembly.Msal": "[10.0.15, )",
           "System.Formats.Nrbf": "[10.0.12, )",
           "System.IO.Abstractions.TestingHelpers": "[19.2.4, )",
           "System.Security.Cryptography.Pkcs": "[10.0.13, )",
@@ -1240,12 +1239,6 @@
           "TestableIO.System.IO.Abstractions.Wrappers": "22.2.0"
         }
       },
-      "BlazorApplicationInsights": {
-        "type": "CentralTransitive",
-        "requested": "[2.2.2, )",
-        "resolved": "2.2.2",
-        "contentHash": "PsXkZW/XErKmm9cdTd6g1yJgtljF1W0eRZns7dpARiagnzz7N16jnYHn7FNriA3xv5j2p/2HV3vJMZ6pNy/JFQ=="
-      },
       "Google.Protobuf": {
         "type": "CentralTransitive",
         "requested": "[3.28.2, )",
@@ -1284,20 +1277,20 @@
       },
       "Microsoft.AspNetCore.Components.WebAssembly": {
         "type": "CentralTransitive",
-        "requested": "[10.0.12, )",
-        "resolved": "10.0.13",
-        "contentHash": "w3V2ij4WptDXOLLu78o3/SIqHIVoW6uzCjKZzSr4hTJFKvv8/79YhwRyyGonktM+qP8hrFvBVNCQa51ZpoJ6Cw==",
+        "requested": "[10.0.15, )",
+        "resolved": "10.0.15",
+        "contentHash": "YWFk0tbTM25BfeJ2kFuUQ9E2HB0t6GK8jWFm2oIJeTVp3CS7CXGPU/TEpwLvtvK/uQGSX7eL4lpoRQGXgyWJZA==",
         "dependencies": {
-          "Microsoft.JSInterop.WebAssembly": "10.0.13"
+          "Microsoft.JSInterop.WebAssembly": "10.0.15"
         }
       },
       "Microsoft.Authentication.WebAssembly.Msal": {
         "type": "CentralTransitive",
-        "requested": "[10.0.12, )",
-        "resolved": "10.0.12",
-        "contentHash": "7Z0CmuE9PkJ5jrexBdNegxJMO48aqIFKl/fol2MoC+XOmdiImi62kjvEESttOHyCUBSXvdWMBEU+/CWa0RN/gg==",
+        "requested": "[10.0.15, )",
+        "resolved": "10.0.15",
+        "contentHash": "7kFqnNGI+kGA42R8Qd46+ecy2SJSRE15+F5VM+5pyZupsQjx+ymkPhJQeR30ELN53fRFbXFRTV9dHV5F7hmrGA==",
         "dependencies": {
-          "Microsoft.AspNetCore.Components.WebAssembly.Authentication": "10.0.12"
+          "Microsoft.AspNetCore.Components.WebAssembly.Authentication": "10.0.15"
         }
       },
       "Microsoft.Identity.Client": {

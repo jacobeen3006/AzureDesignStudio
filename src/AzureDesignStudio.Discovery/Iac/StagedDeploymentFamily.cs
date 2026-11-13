@@ -31,16 +31,25 @@ public sealed record StagedDeploymentMember(string Name, StagedDeploymentScope S
     /// where they were created. <paramref name="scopePath"/> is the target's canonical path;
     /// the tenant root ("/" or "") addresses the management endpoint directly.
     /// </summary>
-    public string OperationsUrl(string managementEndpoint, string apiVersion, string scopePath)
-    {
-        var prefix = scopePath.Trim('/');
-        return $"{managementEndpoint}{(prefix.Length > 0 ? "/" + prefix : "")}" +
-            $"/providers/Microsoft.Resources/deployments/{Name}/operations?api-version={apiVersion}";
-    }
+    public string OperationsUrl(string managementEndpoint, string apiVersion, string scopePath) =>
+        $"{StagedDeploymentFamily.DeploymentsUrl(managementEndpoint, scopePath)}/{Name}/operations?api-version={apiVersion}";
 }
 
 public static class StagedDeploymentFamily
 {
+    /// <summary>
+    /// The deployments collection at a canonical scope path, without a query string. The
+    /// management endpoint carries no trailing slash and the tenant root is "/" (or ""), so
+    /// the separator is added here: gluing a trimmed path straight onto the endpoint yields
+    /// a host like <c>management.azure.comsubscriptions</c>.
+    /// </summary>
+    public static string DeploymentsUrl(string managementEndpoint, string scopePath)
+    {
+        var prefix = scopePath.Trim('/');
+        return $"{managementEndpoint.TrimEnd('/')}{(prefix.Length > 0 ? "/" + prefix : "")}" +
+            "/providers/Microsoft.Resources/deployments";
+    }
+
     /// <summary>
     /// Merges the two scope listings into the one staged family: only anchored ads-deployment
     /// names, deterministic order (name ordinal-ignoring-case, then scope). Same name at both

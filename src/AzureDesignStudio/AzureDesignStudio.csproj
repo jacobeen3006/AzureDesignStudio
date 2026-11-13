@@ -8,6 +8,12 @@
 	<PublishTrimmed>true</PublishTrimmed>
 	<!-- AOT unsupported in Debug publish (WasmApp.Common.targets); Release-only. -->
 	<RunAOTCompilation Condition="'$(Configuration)' == 'Release'">true</RunAOTCompilation>
+    <!-- The wasm-tools workload adds its own "library-packs" folder as a package source, and
+         its copy of Microsoft.NET.Sdk.WebAssembly.Pack is repacked per platform: the Windows
+         copy, the Linux copy and the nuget.org package all hash differently. The lock file can
+         only hold one hash, so restore on a machine with the workload failed with NU1403 on
+         every other platform (the Docker image, the Linux CI job). Always take nuget.org's. -->
+    <DisableImplicitLibraryPacksFolder>true</DisableImplicitLibraryPacksFolder>
   </PropertyGroup>
   <PropertyGroup>
     <!-- Build-time compression runs before ServiceWorkerAssetsManifest generation,
@@ -20,7 +26,6 @@
     <PackageReference Include="AutoMapper" />
     <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" />
     <PackageReference Include="Azure.Bicep.Decompiler" />
-    <PackageReference Include="BlazorApplicationInsights" />
     <PackageReference Include="Google.Protobuf" />
     <PackageReference Include="Grpc.Net.Client" />
     <PackageReference Include="Z.Blazor.Diagrams" />

@@ -1,20 +1,30 @@
-::deep .group.ads-group {
+/* The frame. Z.Blazor.Diagrams 3.x wraps this component in its own positioned and sized
+ * <div class="diagram-group">; the element below is ours. These rules used to select
+ * ".group.ads-group" - one element carrying both classes, which is how the old fork
+ * rendered a group. Nothing has matched that since the move to the package, so a frame had
+ * no outline, no background, no placed title, and its icon filled it edge to edge. */
+.ads-group {
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
     outline-width: var(--olwidth, 2px);
     outline-style: var(--olstyle, dotted);
     outline-color: var(--olcolor, var(--ads-accent));
     border-radius: 8px;
-    background-color: var(--bgcolor, var(--ads-surface-2));
+    /* A model's own colour (the App Service plan's tier tint) is a hint, not a fill: mixed
+     * into the surface it stays readable under the title in the light and the dark theme. */
+    background-color: color-mix(in srgb, var(--bgcolor, transparent) 16%, var(--ads-surface-2));
 }
 
-::deep .group.selected.ads-group {
+.ads-group.selected {
     outline: 2px solid var(--ads-accent);
-    z-index: 10;
 }
 
 /* Center align the title
  * Responsive solution from https://stackoverflow.com/questions/1776915/how-can-i-center-an-absolutely-positioned-element-in-a-div
 */
-.group.ads-group > span.title {
+.ads-group > span.title {
     position: absolute;
     left: 50%;
     bottom: 0%;
@@ -24,10 +34,16 @@
     color: var(--ads-text);
 }
 
-.group.ads-group > img {
+/* A corner badge. The size is explicit: the catalogue icons carry a viewBox but no
+ * width/height, and an unsized absolutely-positioned image grows to the frame's width -
+ * every frame was painted over by its own icon. */
+.ads-group > img {
     position: absolute;
     right: -5px;
     bottom: -5px;
+    width: 24px;
+    height: 24px;
+    pointer-events: none;
 }
 
 /*

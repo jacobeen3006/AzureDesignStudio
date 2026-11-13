@@ -237,6 +237,75 @@ public class DecommissionPlannerTests
         Assert.Contains("guardrail-type", blocker.Detail);
     }
 
+    // A child is deleted with its parent. Guardrails used to be judged for the selected
+    // candidates only, so a protected database was deletable by selecting its server.
+    private const string SqlServer = Rg + "/providers/Microsoft.Sql/servers/sql1";
+    private const string SqlDb = SqlServer + "/databases/orders";
+
+    [Theory]
+    [InlineData("""{"types":["microsoft.sql/servers/databases"]}""", null)]
+    [InlineData("""{"tags":[{"key":"keep","value":"true"}]}""", "Keep")]
+    public void GuardrailProtectedChild_RefusesTheParentCandidate(string policyJson, string? childTag)
+    {
+        var policy = GuardrailPolicy.FromJson(policyJson);
+        var tags = childTag is null ? null : new Dictionary<string, string> { [childTag] = "true" };
+        var inventory = new[]
+        {
+            Item(SqlServer, "microsoft.sql/servers"),
+            Item(SqlDb, "microsoft.sql/servers/databases", tags: tags),
+        };
+
+        var plan = DecommissionPlanner.Plan(inventory, new[] { SqlServer },
+            guardrails: policy, locks: [], roleAssignments: [], backupItems: []);
+
+        Assert.Contains(plan.ImplicitChildren, c => c.ChildId == SqlDb);
+        Assert.False(plan.Allowed);
+        var blocker = Assert.Single(plan.Blockers, b => b.Kind == "guardrail-child");
+        Assert.Equal(SqlServer, blocker.ResourceId);
+        Assert.Contains(SqlDb, blocker.Detail);
+    }
+
+    [Fact]
+    public void UnprotectedChild_DoesNotBlockTheParent()
+    {
+        var policy = GuardrailPolicy.FromJson("""{"types":["microsoft.compute/virtualmachines"]}""");
+        var inventory = new[] { Item(SqlServer, "microsoft.sql/servers"), Item(SqlDb, "microsoft.sql/servers/databases") };
+
+        var plan = DecommissionPlanner.Plan(inventory, new[] { SqlServer },
+            guardrails: policy, locks: [], roleAssignments: [], backupItems: []);
+
+        Assert.True(plan.Allowed);
+    }
+
+    [Fact]
+    public void CanNotDeleteLockOnChild_RefusesTheParentCandidate()
+    {
+        var inventory = new[] { Item(SqlServer, "microsoft.sql/servers"), Item(SqlDb, "microsoft.sql/servers/databases") };
+
+        var plan = DecommissionPlanner.Plan(inventory, new[] { SqlServer },
+            guardrails: GuardrailPolicy.Empty,
+            locks: [new ArmLock(SqlDb, ArmLockLevel.CanNotDelete, "keep-orders")],
+            roleAssignments: [], backupItems: []);
+
+        Assert.False(plan.Allowed);
+        var blocker = Assert.Single(plan.Blockers, b => b.Kind == "lock-can-not-delete-child");
+        Assert.Contains("keep-orders", blocker.Detail);
+    }
+
+    [Fact]
+    public void LockAboveTheParent_IsReportedOnceOnTheParent()
+    {
+        var inventory = new[] { Item(SqlServer, "microsoft.sql/servers"), Item(SqlDb, "microsoft.sql/servers/databases") };
+
+        var plan = DecommissionPlanner.Plan(inventory, new[] { SqlServer },
+            guardrails: GuardrailPolicy.Empty,
+            locks: [new ArmLock(Rg, ArmLockLevel.CanNotDelete, "prod-lock")],
+            roleAssignments: [], backupItems: []);
+
+        Assert.Single(plan.Blockers, b => b.Kind == "lock-can-not-delete");
+        Assert.DoesNotContain(plan.Blockers, b => b.Kind == "lock-can-not-delete-child");
+    }
+
     [Fact]
     public void CanNotDeleteLock_InheritedFromResourceGroup_Refuses()
     {

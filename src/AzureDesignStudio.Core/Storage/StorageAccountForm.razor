@@ -1,5 +1,41 @@
-﻿<h3>StorageAccountForm</h3>
+@using AzureDesignStudio.Core.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@storageAccount" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
+    <NameAndLocation Node="@context" />
+    <FormItem Label="Redundancy">
+        <SimpleSelect @bind-Value="@context.SkuName" Size="@InputSize.Small">
+            <SelectOptions>
+                <SimpleSelectOption Label="Locally redundant (Standard_LRS)" Value="@("Standard_LRS")" />
+                <SimpleSelectOption Label="Zone redundant (Standard_ZRS)" Value="@("Standard_ZRS")" />
+                <SimpleSelectOption Label="Geo redundant (Standard_GRS)" Value="@("Standard_GRS")" />
+                <SimpleSelectOption Label="Read-access geo redundant (Standard_RAGRS)" Value="@("Standard_RAGRS")" />
+                <SimpleSelectOption Label="Premium, locally redundant (Premium_LRS)" Value="@("Premium_LRS")" />
+            </SelectOptions>
+        </SimpleSelect>
+    </FormItem>
+    <FormItem Label="Kind">
+        <SimpleSelect @bind-Value="@context.Kind" Size="@InputSize.Small">
+            <SelectOptions>
+                <SimpleSelectOption Label="General purpose v2 (StorageV2)" Value="@("StorageV2")" />
+                <SimpleSelectOption Label="Premium block blobs (BlockBlobStorage)" Value="@("BlockBlobStorage")" />
+                <SimpleSelectOption Label="Premium file shares (FileStorage)" Value="@("FileStorage")" />
+            </SelectOptions>
+        </SimpleSelect>
+    </FormItem>
+    @if (!storageAccount.IsValid)
+    {
+        <Alert Type="@AlertType.Warning" ShowIcon="true"
+               Message="Premium block blob and premium file share accounts need a Premium SKU. Choose Premium_LRS, or switch the kind to general purpose v2." />
+    }
+</Form>
 
 @code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+    [CascadingParameter]
+    public Diagram Diagram { get; set; } = null!;
 
+    private StorageAccountModel storageAccount => (StorageAccountModel)Node;
 }

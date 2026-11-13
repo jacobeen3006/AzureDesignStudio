@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AzureDesignStudio.Core.AKS;
 using AzureDesignStudio.Core.APIM;
 using AzureDesignStudio.Core.App;
@@ -248,7 +248,64 @@ public static partial class DataModelFactory
         return diagramGraph;
     }
 
-    private static IList<AzureNodeDto>? GetNodesDto(IList<object> source)
+    /// <summary>
+    /// Turns a base DTO (what Adopt/Merge emit for a live resource) into its registered derived
+    /// DTO. The type-specific members start from a fresh model's defaults: deserialising the
+    /// base JSON into the derived type left them null/0, and mapping those onto a model emptied
+    /// it (a VNet with no address space) or threw in a setter (firewall SKU, container CPU).
+    /// </summary>
+    private static AzureNodeDto Retype(AzureNodeDto dto, Type derived, IMapper mapper)
+    {
+        AzureNodeDto? typed = null;
+        try
+        {
+            if (CreateNodeModelFromKey(dto.TypeKey, dto.Name, dto.ImagePath) is IAzureNode fresh)
+                typed = fresh.GetNodeDto(mapper);
+        }
+        catch (Exception)
+        {
+            typed = null; // a model that cannot describe itself ungrouped: fall back below
+        }
+
+        if (typed is null || typed.GetType() != derived)
+            return (AzureNodeDto)JsonSerializer.Deserialize(JsonSerializer.Serialize(dto), derived)!;
+
+        typed.TypeKey = dto.TypeKey;
+        typed.ImagePath = dto.ImagePath;
+        typed.Id = dto.Id;
+        typed.ArmId = dto.ArmId;
+        typed.Locked = dto.Locked;
+        typed.Position = dto.Position;
+        typed.Size = dto.Size;
+        typed.GroupId = dto.GroupId;
+        typed.Name = dto.Name;
+        typed.Location = dto.Location;
+        typed.UseResourceGroupLocation = dto.UseResourceGroupLocation;
+        return typed;
+    }
+
+    /// <summary>Placeholder for a key this build has no model for. It keeps where it sits and
+    /// how it looks, so a design adopted from a tenant full of unmapped types does not load
+    /// with every placeholder stacked at the origin.</summary>
+    private static NodeModel CreateUnknownNode(AzureNodeDto dto)
+    {
+        var node = new UnknownNodeModel
+        {
+            StencilKey = dto.TypeKey,
+            Name = dto.Name,
+            ArmId = dto.ArmId,
+            ImagePath = dto.ImagePath,
+            Locked = dto.Locked,
+            UseResourceGroupLocation = dto.UseResourceGroupLocation,
+        };
+        if (dto.Position is { } position)
+            node.SetPosition(position.X, position.Y);
+        if (dto.Size is { Width: > 0, Height: > 0 } size)
+            node.Size = size;
+        return node;
+    }
+
+    private static IList<AzureNodeDto>? GetNodesDto(IList<object> source, IMapper mapper)
     {
         var nodesDto = new List<AzureNodeDto>();
         foreach (var node in source)
@@ -259,7 +316,7 @@ public static partial class DataModelFactory
                 // The engines emit base AzureNodeDto; GetNodeModelFromDto resolves the map by
                 // RUNTIME type, so re-type base instances to their registered derived DTO.
                 if (d.GetType() == typeof(AzureNodeDto) && GetDtoTypeFromKey(d.TypeKey) is { } derived)
-                    nodesDto.Add((AzureNodeDto)JsonSerializer.Deserialize(JsonSerializer.Serialize(d), derived)!);
+                    nodesDto.Add(Retype(d, derived, mapper));
                 else
                     nodesDto.Add(d);
             }
@@ -276,11 +333,32 @@ public static partial class DataModelFactory
         return nodesDto;
     }
 
-    public static void LoadDiagramFromDto(Diagram diagram, DiagramGraph diagramGraph, IMapper mapper, Dictionary<NodeModel, string>? savedEntityIds = null)
+    /// <param name="detached">Receives the name of every item whose saved parent group is not in
+    /// the document. Such an item is still loaded - at the canvas root - so nothing is lost,
+    /// but the caller can now say so instead of the hierarchy quietly changing.</param>
+    public static void LoadDiagramFromDto(Diagram diagram, DiagramGraph diagramGraph, IMapper mapper,
+        Dictionary<NodeModel, string>? savedEntityIds = null, ICollection<string>? detached = null)
     {
         diagram.SuspendRefresh = true;
+        try
+        {
+            LoadDiagramFromDtoCore(diagram, diagramGraph, mapper, savedEntityIds, detached);
+        }
+        finally
+        {
+            // A document that fails to load (a dangling link, an unknown port) throws out of
+            // here; leaving refresh suspended froze the canvas for the rest of the session.
+            diagram.SuspendRefresh = false;
+        }
+
+        diagram.Refresh();
+    }
+
+    private static void LoadDiagramFromDtoCore(Diagram diagram, DiagramGraph diagramGraph, IMapper mapper,
+        Dictionary<NodeModel, string>? savedEntityIds, ICollection<string>? detached)
+    {
         // Handle Json deserialization.
-        var groupsDto = GetNodesDto(diagramGraph.Groups) ?? throw new Exception("Groups' NodesDto is null.");
+        var groupsDto = GetNodesDto(diagramGraph.Groups, mapper) ?? throw new Exception("Groups' NodesDto is null.");
 
         // Model Ids are regenerated on load, so look them up by the saved dto Id.
         var groupById = new Dictionary<string, GroupModel>();
@@ -298,21 +376,34 @@ public static partial class DataModelFactory
                 savedEntityIds?[g] = parent.Id;
             }
         }
+        // Child groups are parents too: a subnet holds a firewall, an App Service plan holds
+        // its apps. They are all created and registered before anything is attached, so a
+        // node (or another group) saved inside one finds it by id. Left out of the lookup,
+        // everything inside a subnet loaded at the canvas root and the next save made that
+        // permanent.
+        var childGroupModels = new List<(AzureNodeDto Dto, GroupModel Model)>();
         foreach (var child in childGroups)
         {
-            var node = GetNodeModelFromDto(child, mapper);
-            if (node is GroupModel n)
+            if (GetNodeModelFromDto(child, mapper) is GroupModel n)
             {
-                var group = groupById.GetValueOrDefault(child.GroupId!);
-                // Sequence is important
+                // Sequence is important: on the diagram first, into its parent afterwards.
                 diagram.Groups.Add(n);
+                groupById[child.Id] = n;
                 savedEntityIds?[n] = child.Id;
-                group?.AddChild(n);
+                childGroupModels.Add((child, n));
             }
+        }
+        foreach (var (dto, model) in childGroupModels)
+        {
+            var parent = groupById.GetValueOrDefault(dto.GroupId!);
+            if (parent is null || ReferenceEquals(parent, model))
+                detached?.Add(dto.Name);
+            else
+                parent.AddChild(model);
         }
 
         // Load all nodes
-        var nodesDto = GetNodesDto(diagramGraph.Nodes) ?? throw new Exception("Nodes' NodesDto is null.");
+        var nodesDto = GetNodesDto(diagramGraph.Nodes, mapper) ?? throw new Exception("Nodes' NodesDto is null.");
         var nodeById = new Dictionary<string, NodeModel>();
         foreach (var nodeDto in nodesDto)
         {
@@ -323,7 +414,10 @@ public static partial class DataModelFactory
             if (!string.IsNullOrEmpty(nodeDto.GroupId))
             {
                 var parentGroup = groupById.GetValueOrDefault(nodeDto.GroupId);
-                parentGroup?.AddChild(node);
+                if (parentGroup is null)
+                    detached?.Add(nodeDto.Name);
+                else
+                    parentGroup.AddChild(node);
             }
         }
 
@@ -349,8 +443,5 @@ public static partial class DataModelFactory
             if (link is not null)
                 diagram.Links.Add(link);
         }
-
-        diagram.SuspendRefresh = false;
-        diagram.Refresh();
     }
 }

@@ -214,15 +214,19 @@ public static class AdoptEngine
             bool isGroup;
             try
             {
-                var model = CreateProbe(key);
+                // The model states its own ARM type. Exporting a throwaway instance to read it
+                // back - as this used to - needed a hand-built parent and links for every model
+                // that cannot be exported on its own, and quietly dropped any model whose
+                // export rules grew stricter.
+                var model = DataModelFactory.CreateNodeModelFromKey(key, "adopt-probe", string.Empty);
                 isGroup = model is AzureGroupBase;
-                if (model is IAzureResource resource)
+                var type = model switch
                 {
-                    // GetArmResources()[0] is the model's own resource (AzureNodeBase convention;
-                    // extras are dependency add-ons like a function app's diagnostic storage).
-                    var own = resource.GetArmResources().FirstOrDefault();
-                    if (!string.IsNullOrWhiteSpace(own?.Type)) types.Add(own!.Type);
-                }
+                    AzureNodeBase node => node.ArmResourceType,
+                    AzureGroupBase group => group.ArmResourceType,
+                    _ => null,
+                };
+                if (!string.IsNullOrWhiteSpace(type)) types.Add(type);
             }
             catch
             {
@@ -232,65 +236,6 @@ public static class AdoptEngine
             if (types.Count > 0)
                 yield return new StencilInfo(key, types.ToHashSet(StringComparer.OrdinalIgnoreCase), isGroup);
         }
-    }
-
-    // A fresh exportable instance of one stencil key. Child-scoped models export only
-    // inside their ARM parent (subnet in a vnet, database on a server, app in a plan) -
-    // wrapped here with the same throwaway parents the golden export suite uses, minus
-    // its asserts and the diagram-linked cases, which stay skipped.
-    private static NodeModel CreateProbe(string key)
-    {
-        var name = key == AdsConstants.DnsZone ? "ads-probe.com" : NamingEngine.Suggest(key, "adopt", "prod"); // zone names must be domains
-        var model = DataModelFactory.CreateNodeModelFromKey(key, name, "assets/azure/adopt-probe.svg");
-        switch (model)
-        {
-            case SubnetModel subnet:
-                subnet.AddressPrefix = "10.0.0.0/24";
-                new VirtualNetworkModel { Name = "ads-probe" }.AddSubnet(subnet);
-                break;
-            case SqlDatabaseModel:
-                new SqlServerModel { Name = "ads-probe" }.AddChild((AzureNodeBase)model);
-                break;
-            case ContainerAppModel or ContainerAppsJobModel:
-                new ContainerAppsEnvironmentModel { Name = "ads-probe" }.AddChild((AzureNodeBase)model);
-                break;
-            case APIMModel apim:
-                apim.PublisherName = "ads-probe";
-                apim.PublisherEmail = "probe@contoso.com";
-                break;
-            case WebAppModel or FunctionAppModel:
-                new AppServicePlanModel { Name = "ads-probe", Kind = "linux" }.AddChild((AzureNodeBase)model);
-                if (model is FunctionAppModel func)
-                    func.HostingPlan = "consumption";
-                model.GetType().GetProperty("RuntimeStack")?.SetValue(model, "dotnet|v6.0");
-                break;
-            // Bastion and firewall export only from their dedicated subnet with a linked
-            // public IP - the same throwaway wiring the golden export suite builds.
-            case AzureFirewallModel or BastionsModel:
-                {
-                    var host = new VirtualNetworkModel { Name = "ads-probe" }
-                        .AddSubnet(new SubnetModel
-                        {
-                            Name = model is AzureFirewallModel ? "AzureFirewallSubnet" : "AzureBastionSubnet",
-                            AddressPrefix = "10.0.0.0/26",
-                        });
-                    host.AddChild((AzureNodeBase)model);
-                    LinkProbePip((AzureNodeBase)model);
-                    break;
-                }
-            // App gateway export requires at least one linked public IP on its ports.
-            case AppGatewayModel gateway:
-                LinkProbePip(gateway);
-                break;
-        }
-        return model;
-    }
-
-    private static void LinkProbePip(AzureNodeBase node)
-    {
-        var pip = new PublicIpModel { Name = "ads-probe-pip" };
-        var diagram = new BlazorDiagram();
-        diagram.Links.Add(new LinkModel(new SinglePortAnchor(pip.Ports[1]), new SinglePortAnchor(node.Ports[0])));
     }
 
     private sealed class ReferenceComparer<T> : IEqualityComparer<T> where T : class

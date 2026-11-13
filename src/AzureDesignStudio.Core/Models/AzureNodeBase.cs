@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AzureDesignStudio.AzureResources.Base;
 using AzureDesignStudio.Core.Common;
 using AzureDesignStudio.Core.DTO;
@@ -15,6 +15,15 @@ namespace AzureDesignStudio.Core.Models
             Size = new Size(81, 81);
         }
         protected PortModel AddAzurePort(PortAlignment alignment) => AddPort(new AzurePort(this, alignment));
+
+        /// <summary>Every node connected to this one by a link, whichever end the link was
+        /// drawn from - links on the canvas carry no direction the export can rely on.</summary>
+        protected IEnumerable<NodeModel> LinkedNodes =>
+            Ports.SelectMany(p => p.Links)
+                .SelectMany(l => new[] { (l.Source.Model as PortModel)?.Parent, (l.Target.Model as PortModel)?.Parent })
+                .OfType<NodeModel>()
+                .Where(n => !ReferenceEquals(n, this))
+                .Distinct();
         public string ImagePath { get; set; } = string.Empty;
         /// <summary>Stencil key this node was created from (empty for legacy designs; resolved via DataModelFactory fallback).</summary>
         public string StencilKey { get; set; } = string.Empty;
@@ -43,6 +52,9 @@ namespace AzureDesignStudio.Core.Models
 
         #region IAzureResource
         protected virtual ResourceBase ArmResource => throw new NotImplementedException();
+
+        /// <summary>The ARM type of the resource this node exports ("Microsoft.Sql/servers").</summary>
+        public string ArmResourceType => ArmResource.Type;
         public virtual string ResourceId => $"[resourceId('{ArmResource.Type}', '{Name}')]";
         public string Name { get; set; } = string.Empty;
         public virtual string Location

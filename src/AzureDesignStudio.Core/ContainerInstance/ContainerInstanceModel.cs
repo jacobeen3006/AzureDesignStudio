@@ -48,18 +48,66 @@ namespace AzureDesignStudio.Core.ContainerInstance
         public string Cpu
         {
             get => _group.Properties.Cpu.ToString(CultureInfo.InvariantCulture);
-            set => _group.Properties.Cpu = double.Parse(value, CultureInfo.InvariantCulture);
+            set
+            {
+                // Unparseable or absent input keeps the current value instead of throwing.
+                if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var cpu))
+                    _group.Properties.Cpu = cpu;
+            }
         }
         [MapToDto]
         [DisplayName("Memory (GB)")]
         public string MemoryInGb
         {
             get => _group.Properties.MemoryInGb.ToString(CultureInfo.InvariantCulture);
-            set => _group.Properties.MemoryInGb = double.Parse(value, CultureInfo.InvariantCulture);
+            set
+            {
+                if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var memory))
+                    _group.Properties.MemoryInGb = memory;
+            }
         }
+        public const string DefaultImage = "mcr.microsoft.com/azuredocs/aci-helloworld:latest";
+        private string _image = DefaultImage;
+
+        [MapToDto]
+        [DisplayName("Image")]
+        public string Image
+        {
+            get => _image;
+            set => _image = string.IsNullOrWhiteSpace(value) ? _image : value.Trim();
+        }
+
         public override bool IsValid
         {
             get => Regex.IsMatch(Name, @"^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])?$");
+        }
+
+        // A container group is its containers: the export used to write an empty list, with
+        // the CPU and memory on the group, where the API has no such members.
+        protected override void PopulateArmAttributes()
+        {
+            base.PopulateArmAttributes();
+
+            _group.Properties.RestartPolicy = "Always";
+            _group.Properties.Containers =
+            [
+                new Dictionary<string, object>
+                {
+                    ["name"] = Name,
+                    ["properties"] = new Dictionary<string, object>
+                    {
+                        ["image"] = Image,
+                        ["resources"] = new Dictionary<string, object>
+                        {
+                            ["requests"] = new Dictionary<string, object>
+                            {
+                                ["cpu"] = _group.Properties.Cpu,
+                                ["memoryInGB"] = _group.Properties.MemoryInGb,
+                            },
+                        },
+                    },
+                },
+            ];
         }
         public override (bool result, string message) IsDrappable(GroupModel overlappedGroup)
         {

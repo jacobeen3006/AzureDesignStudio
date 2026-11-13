@@ -52,7 +52,7 @@ public sealed record GuardrailPolicy(
                 return "guardrail-scope:" + scope;
 
         foreach (var tag in ProtectedTags)
-            if (tags.TryGetValue(tag.Key, out var value)
+            if (TryGetTag(tags, tag.Key, out var value)
                 && (tag.Value is null || string.Equals(value, tag.Value, StringComparison.OrdinalIgnoreCase)))
                 return "guardrail-tag:" + tag.Key + (tag.Value is null ? "" : "=" + tag.Value);
 
@@ -61,10 +61,32 @@ public sealed record GuardrailPolicy(
                 return "guardrail-type:" + type2;
 
         // Legacy blanket flag survives any config (InventoryItem.HasCostEscalationSignal).
-        if (tags.TryGetValue("do-not-touch", out var dnt) && bool.TryParse(dnt, out var flagged) && flagged)
+        if (TryGetTag(tags, "do-not-touch", out var dnt) && bool.TryParse(dnt, out var flagged) && flagged)
             return "tag:do-not-touch";
 
         return null;
+    }
+
+    /// <summary>Azure tag keys are case-insensitive. The lookup must not depend on the comparer
+    /// the caller happened to build its dictionary with: with a default (ordinal) dictionary,
+    /// a resource tagged <c>Environment=prod</c> slipped past a rule for <c>environment</c>.</summary>
+    private static bool TryGetTag(IReadOnlyDictionary<string, string> tags, string key, out string value)
+    {
+        if (tags.TryGetValue(key, out var exact))
+        {
+            value = exact;
+            return true;
+        }
+
+        foreach (var pair in tags)
+            if (string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase))
+            {
+                value = pair.Value;
+                return true;
+            }
+
+        value = "";
+        return false;
     }
 
     /// <summary>`subscriptions/s1` protects its whole subtree; match must land on an id segment boundary.</summary>
@@ -76,9 +98,14 @@ public sealed record GuardrailPolicy(
     }
 
     /// <summary>`microsoft.compute` covers every child type; `.../virtualmachines` covers its children too.</summary>
-    private static bool TypeMatches(string type, string pattern) =>
-        type.Equals(pattern, StringComparison.OrdinalIgnoreCase)
-        || type.StartsWith(pattern + "/", StringComparison.OrdinalIgnoreCase);
+    private static bool TypeMatches(string type, string pattern)
+    {
+        // "microsoft.compute/" or a pattern with stray whitespace would otherwise never match.
+        pattern = pattern.Trim().TrimEnd('/');
+        return pattern.Length > 0
+            && (type.Equals(pattern, StringComparison.OrdinalIgnoreCase)
+                || type.StartsWith(pattern + "/", StringComparison.OrdinalIgnoreCase));
+    }
 
     private static IReadOnlyList<string> ReadStrings(JsonElement root, string property)
     {

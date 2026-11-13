@@ -1,4 +1,4 @@
-﻿@using AzureDesignStudio.Services
+@using AzureDesignStudio.Services
 @using AzureDesignStudio.SharedModels.Protos
 @using Microsoft.AspNetCore.Components.WebAssembly.Authentication
 @inherits FeedbackComponent<string, string>
@@ -16,7 +16,11 @@
             </Row>
             <Divider />
             <Spin Spinning="@_spinning">
-        @if(_showLinkSubscription)
+        @if (_lookupFailed)
+        {
+            <Alert Type="@AlertType.Warning" ShowIcon Message="Your linked subscriptions could not be read from the server. Close this panel and open it again to retry." />
+        }
+        else if(_showLinkSubscription)
         {
             <AntList Bordered DataSource="@_linkedSubscriptions" Size="@ListSize.Small">
                 <Header><b>Your linked subscriptions</b></Header>
@@ -45,6 +49,7 @@
 
     private bool _spinning = true;
     private bool _showLinkSubscription = false;
+    private bool _lookupFailed = false;
     private IList<SubscriptionRes>? _linkedSubscriptions = null;
 
     protected override async Task OnInitializedAsync()
@@ -63,6 +68,9 @@
     private async Task<bool> GetSubscriptionNames()
     {
         _linkedSubscriptions = await _deployService.GetLinkedSubscriptions();
+        // "Could not ask" is not "none linked": offering the link form here would have the
+        // user enter a client secret again for a subscription that is already linked.
+        _lookupFailed = _deployService.LinkedSubscriptionsUnknown;
         var hasLinked = _linkedSubscriptions?.Count > 0;
         if (_showLinkSubscription != hasLinked)
         {

@@ -83,9 +83,22 @@ public static class TopologyDeriver
                 case "microsoft.compute/virtualmachines":
                     foreach (var nic in IdsAt(props, "networkProfile", "networkInterfaces"))
                         builder.Edge(self, builder.Reference(nic), TopologyEdgeKind.Uses);
-                    foreach (var diskName in Arr(props, "storageProfile", "dataDisks")
-                                 .Select(d => AtString(d, "managedDisk", "name")).OfType<string>())
-                        builder.Edge(self, builder.DiskNamed(item, diskName), TopologyEdgeKind.AttachedTo, "data disk");
+                    // ARM describes an attached disk as { name, managedDisk: { id } }: the id is
+                    // the reference, and the name sits beside managedDisk, not inside it. The
+                    // older managedDisk.name spelling is still read for existing snapshots.
+                    void Attach(JsonElement disk, string detail)
+                    {
+                        if (AtString(disk, "managedDisk", "id") is { Length: > 0 } diskId)
+                            builder.Edge(self, builder.Reference(diskId), TopologyEdgeKind.AttachedTo, detail);
+                        else if ((AtString(disk, "managedDisk", "name") ?? AtString(disk, "name")) is { Length: > 0 } diskName)
+                            builder.Edge(self, builder.DiskNamed(item, diskName), TopologyEdgeKind.AttachedTo, detail);
+                    }
+
+                    foreach (var disk in Arr(props, "storageProfile", "dataDisks"))
+                        Attach(disk, "data disk");
+                    if (props.Value.TryGetProperty("storageProfile", out var storage) && storage.ValueKind == JsonValueKind.Object
+                        && storage.TryGetProperty("osDisk", out var osDisk) && osDisk.ValueKind == JsonValueKind.Object)
+                        Attach(osDisk, "OS disk");
                     break;
 
                 case "microsoft.compute/disks":

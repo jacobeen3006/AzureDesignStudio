@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AzureDesignStudio.AzureResources.Base;
 using AzureDesignStudio.AzureResources.Network;
 using AzureDesignStudio.Core.Attributes;
@@ -25,7 +25,7 @@ namespace AzureDesignStudio.Core.Network
         protected override ResourceBase ArmResource => _bastionHost;
         public override (bool result, string message) IsDrappable(GroupModel overlappedGroup)
         {
-            if (overlappedGroup is not SubnetModel subnet || !subnet.Name.Equals("AzureBastionSubnet"))
+            if (overlappedGroup is not SubnetModel subnet || !DedicatedSubnets.Is(subnet, DedicatedSubnets.AzureBastion))
                 return (false, "Azure Bastion needs a dedicated subnet named AzureBastionSubnet. Add a Subnet to a Virtual Network and set its name to AzureBastionSubnet.");
 
             if (subnet.Children.Count > 0)
@@ -44,7 +44,7 @@ namespace AzureDesignStudio.Core.Network
 
         public override bool IsValid =>
             Group is SubnetModel subnet && subnet.Children.Count == 1
-                && subnet.Name.Equals("AzureBastionSubnet") && HasPublicIp;
+                && DedicatedSubnets.Is(subnet, DedicatedSubnets.AzureBastion) && HasPublicIp;
 
         //[Required, DisplayName("Tier")]
         //public string Sku { get; set; } = "Standard";

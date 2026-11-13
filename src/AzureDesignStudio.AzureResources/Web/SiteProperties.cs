@@ -139,8 +139,10 @@ namespace AzureDesignStudio.AzureResources.Web
         /// <summary>
         /// <code>true</code> to enable client affinity; <code>false</code> to stop sending session affinity cookies, which route client requests in the same session to the same instance. Default is <code>true</code>.
         /// </summary>
+        // Nullable so an explicit false is written: Azure's default is true, and a plain bool
+        // false is dropped by the template serializer as a default value.
         [JsonPropertyName("clientAffinityEnabled")]
-        public bool ClientAffinityEnabled { get; set; }
+        public bool? ClientAffinityEnabled { get; set; }
 
         /// <summary>
         /// <code>true</code> to enable client certificate authentication (TLS mutual authentication); otherwise, <code>false</code>. Default is <code>false</code>.

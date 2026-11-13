@@ -23,19 +23,39 @@ public sealed class ArmTransport(HttpClient http, TokenCredential credential, Ar
     public async Task<List<JsonElement>> GetListAsync(string url, string valueProperty, CancellationToken ct = default)
     {
         var items = new List<JsonElement>();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
         string? next = url;
         while (next is not null)
         {
+            // nextLink comes from the response body and the bearer token goes wherever it
+            // points: follow it only on the host the listing started on, and never twice.
+            if (!visited.Add(next))
+                throw new ResourceGraphException("PagingLoop", $"ARM paging returned the same nextLink twice for {url}");
+            if (visited.Count > MaxListPages)
+                throw new ResourceGraphException("PagingLimit", $"ARM paging exceeded {MaxListPages} pages for {url}");
+            if (visited.Count > 1 && !SameHost(url, next))
+                throw new ResourceGraphException("PagingHostChanged", $"ARM paging for {url} pointed at another host; not followed.");
+
             using var doc = JsonDocument.Parse(await SendAsync(HttpMethod.Get, next, body: null, ct).ConfigureAwait(false));
             if (doc.RootElement.TryGetProperty(valueProperty, out var arr) && arr.ValueKind == JsonValueKind.Array)
                 foreach (var item in arr.EnumerateArray()) items.Add(item.Clone());
 
             next = doc.RootElement.TryGetProperty("nextLink", out var link) && link.ValueKind == JsonValueKind.String
-                ? link.GetString()
+                && link.GetString() is { Length: > 0 } nextLink
+                ? nextLink
                 : null;
         }
         return items;
     }
+
+    private const int MaxListPages = 1000;
+
+    private static bool SameHost(string first, string next) =>
+        Uri.TryCreate(first, UriKind.Absolute, out var a)
+        && Uri.TryCreate(next, UriKind.Absolute, out var b)
+        && string.Equals(a.Scheme, b.Scheme, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(a.Host, b.Host, StringComparison.OrdinalIgnoreCase)
+        && a.Port == b.Port;
 
     public Task<string> GetAsync(string url, CancellationToken ct = default) => SendAsync(HttpMethod.Get, url, null, ct);
     public Task<string> PostAsync(string url, string json, CancellationToken ct = default) => SendAsync(HttpMethod.Post, url, json, ct);
@@ -59,24 +79,79 @@ public sealed class ArmTransport(HttpClient http, TokenCredential credential, Ar
     }
 
     /// <summary>PUT that follows the ARM resource-LRO shape: a 201/202 carrying
-    /// <c>Azure-AsyncOperation</c> (preferred) or <c>Location</c> polls until a terminal answer.</summary>
+    /// <c>Azure-AsyncOperation</c> (preferred) or <c>Location</c> polls until a terminal answer
+    /// and returns the resource document.
+    ///
+    /// The two headers poll differently. A <c>Location</c> URL answers 202 until it answers
+    /// with the result. An <c>Azure-AsyncOperation</c> URL is a status monitor: it answers
+    /// 200 every time, with <c>{"status":"InProgress"}</c> while the operation runs and
+    /// Succeeded/Failed/Canceled at the end, and never returns the resource - so once it is
+    /// terminal the resource is read from the original URL, whose provisioningState carries
+    /// the outcome. (Stopping at the first 200 returned the "InProgress" body as the result.)</summary>
     public async Task<string> PutAsyncPolled(string url, string json, int maxPolls = 60, CancellationToken ct = default)
     {
         var r = await SendWithThrottleAsync(HttpMethod.Put, url, json, ct).ConfigureAwait(false);
+        var monitored = r.AsyncOperation is not null;
         var pollUrl = r.AsyncOperation ?? r.Location;
-        for (var poll = 0; r.Status is HttpStatusCode.Accepted or HttpStatusCode.Created && pollUrl is not null; poll++)
+        if (r.Status is not (HttpStatusCode.Accepted or HttpStatusCode.Created) || pollUrl is null)
+        {
+            if (r.IsSuccess) return r.Body;
+            throw ResourceGraphException.FromErrorBody((int)r.Status, r.Body);
+        }
+
+        for (var poll = 0; ; poll++)
         {
             if (poll >= maxPolls)
                 throw new ResourceGraphException("Timeout", $"ARM operation did not finish within {maxPolls} polls: {url}", 408);
             await _delay(r.RetryAfter ?? TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
             r = await SendWithThrottleAsync(HttpMethod.Get, pollUrl, null, ct).ConfigureAwait(false);
-            // A 202 without operation headers keeps the last poll URI (retry the status endpoint).
-            pollUrl = r.AsyncOperation ?? r.Location ?? (r.Status == HttpStatusCode.Accepted ? pollUrl : null);
-        }
 
-        if (r.IsSuccess) return r.Body;
-        throw ResourceGraphException.FromErrorBody((int)r.Status, r.Body);
+            if (r.Status == HttpStatusCode.Accepted)
+            {
+                // A 202 without operation headers keeps the last poll URI (retry the status endpoint).
+                pollUrl = r.AsyncOperation ?? r.Location ?? pollUrl;
+                continue;
+            }
+
+            if (!r.IsSuccess)
+                throw ResourceGraphException.FromErrorBody((int)r.Status, r.Body);
+
+            if (monitored && OperationStatus(r.Body) is { } status)
+            {
+                if (!IsTerminal(status))
+                    continue;
+                return await SendAsync(HttpMethod.Get, url, null, ct).ConfigureAwait(false);
+            }
+
+            return r.Body;
+        }
     }
+
+    /// <summary>The <c>status</c> of an async-operation monitor body, or null when the body is
+    /// not one (a monitor that answered with the resource itself, a Location-style result).</summary>
+    private static string? OperationStatus(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("status", out var status)
+                && status.ValueKind == JsonValueKind.String
+                ? status.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsTerminal(string status) =>
+        status.Equals("Succeeded", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("Failed", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("Canceled", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("Cancelled", StringComparison.OrdinalIgnoreCase);
 
     private Task<string> SendAsync(HttpMethod method, string url, string? body, CancellationToken ct) =>
         FinishAsync(method, url, body, ct);

@@ -47,6 +47,10 @@ namespace AzureDesignStudio.AzureResources.ContainerService
         [JsonPropertyName("mode")]
         public string Mode { get; set; }
 
+        /// <summary>The subnet the nodes (and, with Azure CNI, the pods) join.</summary>
+        [JsonPropertyName("vnetSubnetID")]
+        public string VnetSubnetID { get; set; }
+
         /// <summary>
         /// Whether to enable auto-scaling for the agent pool.
         /// </summary>

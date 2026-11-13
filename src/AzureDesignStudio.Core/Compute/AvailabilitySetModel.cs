@@ -69,9 +69,10 @@ namespace AzureDesignStudio.Core.Compute
 
         public override (bool result, string message) IsDrappable(GroupModel overlappedGroup)
         {
-            // Availability sets are top-level resources; VMs are placed into them, not the reverse.
-            if (overlappedGroup is not null)
-                return (false, $"{ServiceName} is a top-level resource and cannot be placed inside another group.");
+            // A subnet is the one frame an availability set belongs in: its machines need a
+            // network, and they take it from the subnet around the set.
+            if (overlappedGroup is not null and not Network.SubnetModel)
+                return (false, $"{ServiceName} can only be placed in a subnet or directly on the canvas.");
 
             // Canvas drop (no container) — same outcome as the base's null path.
             return (true, string.Empty);

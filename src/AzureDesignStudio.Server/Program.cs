@@ -15,9 +15,15 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Desktop talks native gRPC (HTTP/2) directly; cleartext HTTP/2 (h2c) needs its own
 // loopback listener because ALPN negotiation requires TLS. Browsers keep the
-// URL-configured endpoints and gRPC-Web over HTTP/1.1.
-builder.WebHost.ConfigureKestrel(options =>
-    options.ListenLocalhost(5204, listen => listen.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http2));
+// URL-configured endpoints and gRPC-Web over HTTP/1.1 - which only holds because
+// DesktopGrpcEndpoint re-binds them: an endpoint defined in code otherwise replaces
+// every URL-configured one. Development only unless DesktopGrpc:Port is set.
+var desktopGrpcPort = DesktopGrpcEndpoint.ResolvePort(builder.Configuration, builder.Environment);
+if (desktopGrpcPort > 0)
+{
+    builder.WebHost.ConfigureKestrel((context, options) =>
+        DesktopGrpcEndpoint.Add(options, context.Configuration, desktopGrpcPort));
+}
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
@@ -30,17 +36,37 @@ builder.Services.Configure<JwtBearerOptions>(
 #if DEBUG
 builder.Services.AddDbContext<DesignDbContext>(options => options.UseInMemoryDatabase("adsdb-inmem"));
 #else
-    // Use Azure Key Vault as configurations
-    var keyVaultName = builder.Configuration["KeyVaultName"];
-    if (string.IsNullOrWhiteSpace(keyVaultName))
-        throw new InvalidOperationException(
-            "KeyVaultName is not configured. Set the KeyVaultName configuration or environment variable (e.g. KeyVaultName=ads-kv).");
+// Key Vault supplies configuration (the "ads-main" connection string among it) when one is
+// named. The checked-in appsettings.json names a placeholder, "<kv name>": building the vault
+// URL from it threw UriFormatException before anything could say what was missing.
+var keyVaultName = builder.Configuration["KeyVaultName"];
+if (ServiceTools.IsConfigured(keyVaultName))
+{
     var secretClient = new SecretClient(
         new Uri($"https://{keyVaultName}.vault.azure.net/"),
         new DefaultAzureCredential());
-
     builder.Configuration.AddAzureKeyVault(secretClient, new KeyVaultSecretManager());
-    builder.Services.AddDbContext<DesignDbContext>(options => options.UseSqlServer(builder.Configuration["ads-main"]));
+}
+
+// The database: SQL Server, from the vault's "ads-main" secret or from ordinary
+// configuration (ConnectionStrings__ads-main, e.g. a Kubernetes secret). Database:Provider
+// set to InMemory runs without one - for a smoke test of the image, never for real use:
+// nothing survives a restart.
+var connectionString = builder.Configuration["ads-main"] ?? builder.Configuration.GetConnectionString("ads-main");
+if (string.Equals(builder.Configuration["Database:Provider"], "InMemory", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddDbContext<DesignDbContext>(options => options.UseInMemoryDatabase("adsdb-inmem"));
+}
+else if (ServiceTools.IsConfigured(connectionString))
+{
+    builder.Services.AddDbContext<DesignDbContext>(options => options.UseSqlServer(connectionString));
+}
+else
+{
+    throw new InvalidOperationException(
+        "No database is configured. Name a Key Vault that holds an \"ads-main\" connection string (KeyVaultName), " +
+        "or set ConnectionStrings__ads-main. Database__Provider=InMemory starts the server without one, for testing only.");
+}
 #endif
 
 builder.Services.AddSingleton<ICryptoService, CryptoService>();
@@ -70,17 +96,23 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 var app = builder.Build();
 
 #if !DEBUG
-    // Full EF schema first: on a database that predates this release, EnsureCreated
-    // brings up missing tables; on a brand-new one it creates the database itself
-    // (raw DDL alone would fail against a nonexistent database). The guard then makes
-    // certain the audit table exists even when the database was created before the
-    // approval model joined the model set.
-    using (var scope = app.Services.CreateScope())
+if (string.Equals(app.Configuration["Database:Provider"], "InMemory", StringComparison.OrdinalIgnoreCase))
+    app.Logger.LogWarning("Database:Provider is InMemory: designs, links and approvals are lost when the server stops. Use it for testing only.");
+#endif
+
+// The schema is brought up once, here. The gRPC services used to call EnsureCreated in
+// their constructors - a synchronous database round trip on every request.
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<DesignDbContext>();
+    db.Database.EnsureCreated();
+#if !DEBUG
+    // EnsureCreated creates a brand-new database with the full schema, and does nothing at
+    // all for one that already exists - it never adds a missing table. The guarded DDL below
+    // is what brings a database created by an earlier release up to date.
     {
-        var db = scope.ServiceProvider.GetRequiredService<DesignDbContext>();
         if (db.Database.IsRelational())
         {
-            db.Database.EnsureCreated();
             db.Database.ExecuteSqlRaw("""
                 IF OBJECT_ID(N'AdsPlanApprovals', N'U') IS NULL
                 CREATE TABLE AdsPlanApprovals (
@@ -154,8 +186,13 @@ var app = builder.Build();
         }
     }
 #endif
+}
 
 // Configure the HTTP request pipeline.
+// Forwarded headers first: behind a TLS-terminating ingress the request only reads as
+// HTTPS once X-Forwarded-Proto is applied, and HSTS is emitted for HTTPS requests alone.
+app.UseForwardedHeaders();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseWebAssemblyDebugging();
@@ -167,8 +204,11 @@ else
     app.UseHsts();
 }
 
-app.UseForwardedHeaders();
-app.UseHttpsRedirection();
+// The Desktop listener is cleartext by design and gRPC clients do not follow redirects,
+// so it is the one endpoint that must not be sent to HTTPS.
+app.UseWhen(
+    context => desktopGrpcPort == 0 || context.Connection.LocalPort != desktopGrpcPort,
+    branch => branch.UseHttpsRedirection());
 
 app.UseRouting();
 

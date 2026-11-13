@@ -34,6 +34,9 @@ namespace AzureDesignStudio.AzureResources.ContainerService
         /// <summary>
         /// The properties of the managed cluster.
         /// </summary>
+        [JsonPropertyName("identity")]
+        public ManagedClustersIdentity Identity { get; set; }
+
         [JsonPropertyName("properties")]
         public ManagedClustersClusterProperties Properties { get; set; }
 
@@ -42,5 +45,23 @@ namespace AzureDesignStudio.AzureResources.ContainerService
         /// </summary>
         [JsonIgnore]
         public string Etag { get; private set; }
+    }
+
+    public partial class ManagedClustersIdentity
+    {
+        [JsonPropertyName("type")]
+        public string Type { get; set; }
+    }
+
+    public partial class ManagedClustersNetworkProfile
+    {
+        [JsonPropertyName("networkPlugin")]
+        public string NetworkPlugin { get; set; }
+
+        [JsonPropertyName("serviceCidr")]
+        public string ServiceCidr { get; set; }
+
+        [JsonPropertyName("dnsServiceIP")]
+        public string DnsServiceIP { get; set; }
     }
 }

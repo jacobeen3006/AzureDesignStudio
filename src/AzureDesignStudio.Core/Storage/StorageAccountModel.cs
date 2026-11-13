@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AzureDesignStudio.AzureResources.Base;
 using AzureDesignStudio.AzureResources.Storage;
 using AzureDesignStudio.Core.Attributes;
@@ -28,9 +28,13 @@ namespace AzureDesignStudio.Core.Storage
         {
             return mapper.Map<StorageAccountModelDto>(this);
         }
+        // sku.name and kind are both required by Microsoft.Storage/storageAccounts. They used
+        // to start empty with no way to set them (the form was a stub), so a storage account
+        // dropped on the canvas could never be deployed.
         private readonly StorageAccounts _storageAccount = new()
         {
-            Sku = new(),
+            Sku = new() { Name = "Standard_LRS" },
+            Kind = "StorageV2",
             Properties = new()
             {
                 SupportsHttpsTrafficOnly = true,
@@ -42,14 +46,27 @@ namespace AzureDesignStudio.Core.Storage
         public string SkuName
         {
             get => _storageAccount.Sku.Name;
-            set => _storageAccount.Sku.Name = value;
+            set
+            {
+                // Designs saved before the defaults existed carry no value; keep the default.
+                if (!string.IsNullOrEmpty(value))
+                    _storageAccount.Sku.Name = value;
+            }
         }
         [Required, DisplayName("Kind"), MapToDto]
         public string Kind
         {
             get => _storageAccount.Kind;
-            set => _storageAccount.Kind = value;
+            set
+            {
+                if (!string.IsNullOrEmpty(value))
+                    _storageAccount.Kind = value;
+            }
         }
+        /// <summary>BlockBlobStorage and FileStorage are premium-only account kinds.</summary>
+        public override bool IsValid =>
+            Kind is not ("BlockBlobStorage" or "FileStorage") || SkuName.StartsWith("Premium", StringComparison.Ordinal);
+
         public string AccountKey
         {
             get

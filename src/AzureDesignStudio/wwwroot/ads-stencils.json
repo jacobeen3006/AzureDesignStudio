@@ -124,7 +124,7 @@
     "name": "aks-baseline",
     "iconPath": "assets/azure/reference-arch.svg",
     "label": "AKS Baseline Architecture",
-    "referenceArchPath": "",
+    "referenceArchPath": "gallery/aks-baseline.json",
     "category": 5
   },
   {
@@ -132,7 +132,7 @@
     "name": "apim-landingzone",
     "iconPath": "assets/azure/reference-arch.svg",
     "label": "APIM Landing Zone",
-    "referenceArchPath": "",
+    "referenceArchPath": "gallery/apim-landingzone.json",
     "category": 5
   }
   ,

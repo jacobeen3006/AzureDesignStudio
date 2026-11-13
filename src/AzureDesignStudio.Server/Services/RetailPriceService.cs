@@ -30,7 +30,12 @@ namespace AzureDesignStudio.Server.Services
         public override async Task<RetailPriceResponse> GetRetailPrices(RetailPriceRequest request, ServerCallContext context)
         {
             var response = new RetailPriceResponse();
-            if (string.IsNullOrWhiteSpace(request.ServiceName) || string.IsNullOrWhiteSpace(request.ArmRegionName))
+            if (string.IsNullOrWhiteSpace(request.ServiceName) || string.IsNullOrWhiteSpace(request.ArmRegionName)
+                || !IsPlausibleFilterValue(request.ServiceName, required: true)
+                || !IsPlausibleFilterValue(request.ArmRegionName, required: true)
+                || !IsPlausibleFilterValue(request.SkuName, required: false)
+                || !IsPlausibleFilterValue(request.MeterName, required: false)
+                || !IsPlausibleCurrency(request.CurrencyCode))
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
                 return response;
@@ -39,20 +44,12 @@ namespace AzureDesignStudio.Server.Services
             var url = BuildRequestUrl(request, includeRegion: true);
             try
             {
-                var items = await cache.GetOrCreateAsync(url, async entry =>
-                {
-                    entry.AbsoluteExpirationRelativeToNow = CacheLifetime;
-                    return await FetchPagesAsync(url, context.CancellationToken);
-                });
+                var items = await GetCachedAsync(url, context.CancellationToken);
                 if (items is { Count: 0 } && !string.IsNullOrWhiteSpace(request.ArmRegionName))
                 {
                     // Regionless services (e.g. Load Balancer) price against Global/edge zones.
                     url = BuildRequestUrl(request, includeRegion: false);
-                    items = await cache.GetOrCreateAsync(url, async entry =>
-                    {
-                        entry.AbsoluteExpirationRelativeToNow = CacheLifetime;
-                        return await FetchPagesAsync(url, context.CancellationToken);
-                    });
+                    items = await GetCachedAsync(url, context.CancellationToken);
                 }
                 if (items is not null)
                     response.Prices.AddRange(items);
@@ -64,6 +61,52 @@ namespace AzureDesignStudio.Server.Services
                 response.StatusCode = StatusCodes.Status502BadGateway;
             }
             return response;
+        }
+
+        // This endpoint is anonymous and its cache key is built from the caller's own text, so
+        // both are bounded: a caller sending endless distinct queries otherwise grew the cache
+        // without limit and fanned out up to MaxPages upstream requests for each one.
+        private const int MaxFilterValueLength = 120;
+        private const int MaxCachedQueries = 2000;
+        private static int cachedQueries;
+
+        internal static bool IsPlausibleFilterValue(string? value, bool required)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return !required;
+            if (value.Length > MaxFilterValueLength)
+                return false;
+            foreach (var c in value)
+                if (char.IsControl(c))
+                    return false;
+            return true;
+        }
+
+        internal static bool IsPlausibleCurrency(string? code) =>
+            string.IsNullOrWhiteSpace(code) || (code.Trim().Length == 3 && code.Trim().All(char.IsAsciiLetter));
+
+        private async Task<List<RetailPriceItem>> GetCachedAsync(string url, CancellationToken cancellationToken)
+        {
+            if (cache.TryGetValue(url, out List<RetailPriceItem>? cached) && cached is not null)
+                return cached;
+
+            var (items, complete) = await FetchPagesAsync(url, cancellationToken);
+
+            // A list cut off at the page limit is returned but not remembered: cached, it would
+            // answer as if it were the whole price list for the next hour.
+            if (complete && Interlocked.Increment(ref cachedQueries) <= MaxCachedQueries)
+            {
+                using var entry = cache.CreateEntry(url);
+                entry.AbsoluteExpirationRelativeToNow = CacheLifetime;
+                entry.Value = items;
+                entry.RegisterPostEvictionCallback(static (_, _, _, _) => Interlocked.Decrement(ref cachedQueries));
+            }
+            else if (complete)
+            {
+                Interlocked.Decrement(ref cachedQueries);
+            }
+
+            return items;
         }
 
         internal static string BuildRequestUrl(RetailPriceRequest request, bool includeRegion = true)
@@ -85,13 +128,17 @@ namespace AzureDesignStudio.Server.Services
             return url.ToString();
         }
 
-        private async Task<List<RetailPriceItem>> FetchPagesAsync(string url, CancellationToken cancellationToken)
+        private async Task<(List<RetailPriceItem> Items, bool Complete)> FetchPagesAsync(string url, CancellationToken cancellationToken)
         {
             var client = httpClientFactory.CreateClient("RetailPrices");
             var items = new List<RetailPriceItem>();
-            var pageUrl = url;
+            string? pageUrl = url;
             for (var page = 0; page < MaxPages && pageUrl is not null; page++)
             {
+                // Follow paging only on the prices host the query started on.
+                if (page > 0 && !pageUrl.StartsWith("https://prices.azure.com/", StringComparison.OrdinalIgnoreCase))
+                    return (items, false);
+
                 using var document = JsonDocument.Parse(await client.GetStringAsync(pageUrl, cancellationToken));
                 var root = document.RootElement;
                 if (root.TryGetProperty("Items", out var list) && list.ValueKind == JsonValueKind.Array)
@@ -101,7 +148,7 @@ namespace AzureDesignStudio.Server.Services
                     ? next.GetString()
                     : null;
             }
-            return items;
+            return (items, pageUrl is null);
         }
 
         private static RetailPriceItem MapItem(JsonElement item) => new()

@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AzureDesignStudio.AzureResources.Base;
 using AzureDesignStudio.AzureResources.Network;
 using AzureDesignStudio.Core.Attributes;
@@ -32,6 +32,9 @@ namespace AzureDesignStudio.Core.Network
             get => sku;
             set
             {
+                if (string.IsNullOrEmpty(value))
+                    return; // an absent value keeps the current SKU rather than throwing below
+
                 sku = value;
                 if (sku.Equals("Standard"))
                 {
@@ -44,7 +47,7 @@ namespace AzureDesignStudio.Core.Network
         public FirewallPolicyModel FirewallPolicy { get; set; } = new FirewallPolicyModel();
         public override (bool result, string message) IsDrappable(GroupModel overlappedGroup)
         {
-            if (overlappedGroup is not SubnetModel subnet || !subnet.Name.Equals("AzureFirewallSubnet"))
+            if (overlappedGroup is not SubnetModel subnet || !DedicatedSubnets.Is(subnet, DedicatedSubnets.AzureFirewall))
                 return (false, "Azure Firewall needs a dedicated subnet named AzureFirewallSubnet. Add a Subnet to a Virtual Network and set its name to AzureFirewallSubnet.");
 
             if (subnet.Children.Count > 0)
@@ -63,7 +66,7 @@ namespace AzureDesignStudio.Core.Network
 
         public override bool IsValid
             => Group is SubnetModel subnet && subnet.Children.Count == 1
-                && subnet.Name.Equals("AzureFirewallSubnet") && HasPublicIp;
+                && DedicatedSubnets.Is(subnet, DedicatedSubnets.AzureFirewall) && HasPublicIp;
 
         public override AzureNodeDto GetNodeDto(IMapper mapper)
         {

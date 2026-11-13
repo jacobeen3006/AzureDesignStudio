@@ -60,7 +60,18 @@ public sealed class WorkspaceScans(WorkspaceDb db)
     public async Task PersistPageAsync(string scanId, IReadOnlyList<InventorySnapshotRow> rows, string checkpointJson)
     {
         await using var ctx = db.CreateContext();
+        await using var transaction = await ctx.Database.BeginTransactionAsync();
         var takenAt = DateTimeOffset.UtcNow;
+
+        // A resumed scan re-runs the query group it was killed in, so its pages arrive a
+        // second time. Appending them left every such resource in the scan twice: the count
+        // was inflated and each reader had to remember to de-duplicate. One row per resource
+        // per scan, the later page winning.
+        rows = rows.GroupBy(r => r.Id, StringComparer.Ordinal).Select(g => g.Last()).ToList();
+        var replaced = 0;
+        foreach (var ids in rows.Select(r => r.Id).Chunk(500))
+            replaced += await ctx.ResourceSnapshots.Where(s => s.ScanId == scanId && ids.Contains(s.ResourceId)).ExecuteDeleteAsync();
+
         ctx.ResourceSnapshots.AddRange(rows.Select(r => new ResourceSnapshotRecord
         {
             ScanId = scanId,
@@ -76,8 +87,9 @@ public sealed class WorkspaceScans(WorkspaceDb db)
         }));
         var scan = await ctx.Scans.SingleAsync(s => s.Id == scanId);
         scan.CheckpointJson = checkpointJson;
-        scan.ResourceCount += rows.Count;
+        scan.ResourceCount += rows.Count - replaced;
         await ctx.SaveChangesAsync();
+        await transaction.CommitAsync();
     }
 
     public async Task FinishAsync(string scanId, string status, string checkpointJson, string manifestJson, string? error)
@@ -99,11 +111,15 @@ public sealed class WorkspaceScans(WorkspaceDb db)
     public async Task<ScanRecord?> GetLatestCompletedAsync()
     {
         await using var ctx = db.CreateContext();
-        var scans = await ctx.Scans
-            .Include(s => s.Snapshots)
-            .Where(s => s.Status == "Completed")
-            .ToListAsync();
-        return scans.OrderByDescending(s => s.FinishedAt).FirstOrDefault();
+        // Pick the scan first, then load only its snapshots. Including them for every
+        // completed scan read the whole history's inventory to return one scan.
+        // (SQLite cannot ORDER BY DateTimeOffset; the scan rows themselves are few.)
+        var completed = await ctx.Scans.AsNoTracking().Where(s => s.Status == "Completed").ToListAsync();
+        var latest = completed.OrderByDescending(s => s.FinishedAt).FirstOrDefault();
+        if (latest is null)
+            return null;
+
+        return await ctx.Scans.Include(s => s.Snapshots).SingleAsync(s => s.Id == latest.Id);
     }
 
     /// <summary>Scan history (newest first) without snapshot payloads.</summary>
@@ -114,8 +130,9 @@ public sealed class WorkspaceScans(WorkspaceDb db)
         return scans.OrderByDescending(s => s.StartedAt).ToList();
     }
 
-    /// <summary>All snapshot rows of one scan (browse source); a resumed scan may hold
-    /// duplicate resource rows from re-run query groups - readers deduplicate.</summary>
+    /// <summary>All snapshot rows of one scan (browse source), one per resource. Scans stored
+    /// before pages were upserted can still hold duplicates from a resume, so readers that
+    /// de-duplicate should keep doing so.</summary>
     public async Task<IReadOnlyList<ResourceSnapshotRecord>> GetSnapshotsAsync(string scanId)
     {
         await using var ctx = db.CreateContext();

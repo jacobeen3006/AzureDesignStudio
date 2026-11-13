@@ -1,4 +1,4 @@
-﻿using AntDesign;
+using AntDesign;
 using AutoMapper;
 using AzureDesignStudio.AzureResources.Base;
 using AzureDesignStudio.Core.Common;
@@ -76,6 +76,9 @@ namespace AzureDesignStudio.Core.Models
 
         #region IAzureResource
         protected virtual ResourceBase ArmResource => throw new NotImplementedException();
+
+        /// <summary>The ARM type of the resource this frame exports ("Microsoft.Network/virtualNetworks").</summary>
+        public string ArmResourceType => ArmResource.Type;
         public virtual string ResourceId => $"[resourceId('{ArmResource.Type}', '{Name}')]";
         public string Name { get; set; } = string.Empty;
         public virtual string Location

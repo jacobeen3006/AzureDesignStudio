@@ -12,15 +12,25 @@ public sealed class TopologyPositions(WorkspaceDb db)
     public async Task<Dictionary<string, (string ContainerId, double X, double Y)>> GetAllAsync()
     {
         using var context = db.CreateContext();
+        // Newest row per id: rows written before SaveAsync matched ids case-insensitively can
+        // differ only by casing, and ToDictionary threw on them - every read, permanently.
         return (await context.NodePositions.AsNoTracking().ToListAsync())
-            .ToDictionary(p => p.NodeId, p => (p.ContainerId, p.X, p.Y), StringComparer.OrdinalIgnoreCase);
+            .GroupBy(p => p.NodeId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g =>
+            {
+                var p = g.MaxBy(r => r.SavedAt)!;
+                return (p.ContainerId, p.X, p.Y);
+            }, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>Drag-end write; also used to seed positions for freshly imported layouts.</summary>
     public async Task SaveAsync(string nodeId, string containerId, double x, double y)
     {
         using var context = db.CreateContext();
-        var row = await context.NodePositions.FindAsync(nodeId);
+        // ARM ids are case-insensitive and a rescan may return different casing; an exact
+        // key lookup then added a second row for the same resource.
+        var lowered = nodeId.ToLowerInvariant();
+        var row = await context.NodePositions.FirstOrDefaultAsync(p => p.NodeId.ToLower() == lowered);
         if (row is null)
             context.NodePositions.Add(new NodePositionRecord
             {

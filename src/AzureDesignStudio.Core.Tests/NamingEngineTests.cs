@@ -38,9 +38,9 @@ public class NamingEngineTests
     [Fact]
     public void Suggest_TruncatesWorkloadButKeepsEntropyTail()
     {
-        var name = NamingEngine.Suggest(AdsConstants.SqlServer, "extremelylongworkloadnameformarketingtelemetry", "Prod");
+        var name = NamingEngine.Suggest(AdsConstants.SqlServer, "extremelylongworkloadnameformarketingtelemetry" + new string('x', 40), "Prod");
 
-        Assert.True(name.Length <= 15); // SQL server hard cap
+        Assert.True(name.Length <= 63); // Azure SQL logical server names are 1-63 characters
         Assert.True(EndsInEntropy(name)); // the globally-unique tail survives truncation
         Assert.True(NamingEngine.IsValid(AdsConstants.SqlServer, name));
     }

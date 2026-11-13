@@ -1,4 +1,4 @@
-﻿@page "/"
+@page "/"
 @page "/authentication/{action}"
 @using AzureDesignStudio.Components
 @using Microsoft.AspNetCore.Components.WebAssembly.Authentication
@@ -6,7 +6,6 @@
 @inject ILogger<Index> logger
 @inject ModalService modalService
 @inject NavigationManager navManager
-@inject IApplicationInsights AppInsights
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
 <UpdateAvailableDetector />
@@ -100,12 +99,10 @@ else
             var user = authState.User;
             if (user.Identity?.IsAuthenticated ?? false)
             {
-                await AppInsights.SetAuthenticatedUserContext(user.FindFirst("oid")?.Value!);
-                logger.LogInformation("User logged in. User Id: {userId}", user.FindFirst("oid")?.Value!);
+                logger.LogInformation("User logged in.");
             }
             else
             {
-                await AppInsights.ClearAuthenticatedUserContext();
                 logger.LogInformation("User logged out.");
             }
         });

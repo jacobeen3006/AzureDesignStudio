@@ -14,36 +14,19 @@
     -webkit-user-drag: none;
 }
 
-.ads-drag-ghost {
-    position: fixed;
-    z-index: 3000;
-    pointer-events: none;
-    transform: translate(-50%, -50%);
-    padding: 6px 10px;
-    border: 1px solid var(--ads-accent);
-    border-radius: 8px;
-    background: var(--ads-surface-3);
-    color: var(--ads-text);
-    box-shadow: var(--ads-shadow-2);
-    font-size: 12px;
-    font-weight: 600;
+/* .ads-drag-ghost + body.ads-dragging moved to css/ads-tokens.css */
+
+.ads-stencil:hover {
+    background-color: var(--ads-surface-2);
 }
 
-body.ads-dragging {
-    cursor: grabbing;
+.ads-stencil > img {
+    display: block;
+    width: 69px;
+    height: 45px;
+    margin-left: auto;
+    margin-right: auto;
 }
-
-    .ads-stencil:hover {
-        background-color: var(--ads-surface-2);
-    }
-
-    .ads-stencil > img {
-        display: block;
-        width: 69px;
-        height: 45px;
-        margin-left: auto;
-        margin-right: auto;
-    }
 
 .ads-stencil-label {
     text-align: center;

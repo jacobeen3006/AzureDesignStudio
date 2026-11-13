@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AzureDesignStudio.Core.Network;
 using Blazor.Diagrams.Core.Anchors;
 using Blazor.Diagrams.Core.Geometry;
@@ -26,6 +26,11 @@ namespace AzureDesignStudio.Core.DTO
 
             CreateMap<FirewallPolicyModel, FirewallPolicyModelDto>()
                 .ReverseMap();
+
+            // Without a map of its own, AutoMapper copies a List<AddressSpace> by handing over
+            // the same AddressSpace objects: a pasted virtual network shared its address-space
+            // entries with the original, and editing either changed both.
+            CreateMap<AddressSpace, AddressSpace>();
 
             CreateAzureNodeMaps();
         }

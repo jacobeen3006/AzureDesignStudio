@@ -36,8 +36,29 @@ namespace AzureDesignStudio.Core.Network
                 {
                     Ttl = 300,
                 },
+                // A profile needs a health probe; HTTPS on 443 at "/" is the portal's default too.
+                MonitorConfig = new()
+                {
+                    Protocol = "HTTPS",
+                    Port = 443,
+                    Path = "/",
+                },
             },
         };
+
+        // Traffic Manager is a global service: the profile's location is the literal "global",
+        // never the resource group's region.
+        public override bool UseResourceGroupLocation { get => false; set { } }
+        public override string Location { get => "global"; set { } }
+
+        protected override void PopulateArmAttributes()
+        {
+            base.PopulateArmAttributes();
+
+            // The profile's public name is {relativeName}.trafficmanager.net; without one the
+            // profile cannot be created. The resource name is already DNS-safe (see IsValid).
+            _trafficManagerProfile.Properties.DnsConfig.RelativeName = Name.ToLowerInvariant();
+        }
         protected override ResourceBase ArmResource => _trafficManagerProfile;
         public override Type? DataFormType => typeof(TrafficManagerProfileForm);
 
@@ -46,7 +67,11 @@ namespace AzureDesignStudio.Core.Network
         public string RoutingMethod
         {
             get => _trafficManagerProfile.Properties.TrafficRoutingMethod;
-            set => _trafficManagerProfile.Properties.TrafficRoutingMethod = value;
+            set
+            {
+                if (!string.IsNullOrEmpty(value))
+                    _trafficManagerProfile.Properties.TrafficRoutingMethod = value;
+            }
         }
 
         [MapToDto]
@@ -54,7 +79,12 @@ namespace AzureDesignStudio.Core.Network
         public int DnsTtl
         {
             get => _trafficManagerProfile.Properties.DnsConfig.Ttl;
-            set => _trafficManagerProfile.Properties.DnsConfig.Ttl = value;
+            set
+            {
+                // 0 is what a design saved without the value maps to; keep the default then.
+                if (value > 0)
+                    _trafficManagerProfile.Properties.DnsConfig.Ttl = value;
+            }
         }
 
         public override bool IsValid => Regex.IsMatch(Name, @"^[a-zA-Z][a-zA-Z0-9-]{1,48}[a-zA-Z0-9]$");

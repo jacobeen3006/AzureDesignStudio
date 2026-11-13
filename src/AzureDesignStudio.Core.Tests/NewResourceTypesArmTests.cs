@@ -65,6 +65,7 @@ namespace AzureDesignStudio.Core.Tests
                 new ContainerAppsEnvironmentModel { Name = "ads-env" }.AddChild(ca);
             if (model is ContainerAppsJobModel job)
                 new ContainerAppsEnvironmentModel { Name = "ads-env" }.AddChild(job);
+            TestPlacement.MakeExportable(model);
 
             var template = new ArmTemplate();
             template.AddResource(((IAzureResource)model).GetArmResources());

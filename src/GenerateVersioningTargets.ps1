@@ -2,20 +2,32 @@
 
 if (!(Test-Path "version.json")) {
   Write-Warning "NerdBank.GitVersioning isn't presented. Check that version.json exists";
-  exit -1;
+  exit 1;
 }
 
 if (!(Test-Path "nbgv-version.json")) {
   Write-Warning "nbgv-version.json isn't presented. Run nbgv to generate it.";
-  exit -1;
+  exit 1;
 }
 
 $versionOracle = Get-Content .\nbgv-version.json -Raw | ConvertFrom-Json
+
+# ConvertFrom-Json materialises the ISO timestamp as a DateTime.
+$gitCommitDateTicks = ''
+if ($versionOracle.GitCommitDate) {
+  $gitCommitDateTicks = ([datetime]$versionOracle.GitCommitDate).ToUniversalTime().Ticks
+}
 
 # so now we can create target file with override
 
 $text = @"
 <Project>
+<!-- This generated file shadows the repository-root Directory.Build.targets for
+     everything under src/, so chain to it explicitly. -->
+<PropertyGroup>
+  <_AdsParentBuildTargets>`$([MSBuild]::GetPathOfFileAbove('Directory.Build.targets', '`$(MSBuildThisFileDirectory)../'))</_AdsParentBuildTargets>
+</PropertyGroup>
+<Import Project="`$(_AdsParentBuildTargets)" Condition="'`$(_AdsParentBuildTargets)' != ''" />
 <Target Name="GetBuildVersion">
   <PropertyGroup>
     <BuildVersion Condition="'`$(BuildVersion)' == ''">$($versionOracle.Version.ToString())</BuildVersion>

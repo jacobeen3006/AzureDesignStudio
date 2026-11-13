@@ -57,6 +57,8 @@ namespace AzureDesignStudio.Core.Tests
             Assert.Equal("10.0.0.0/24", vnet.NextFreeSubnetPrefix());
 
             vnet.AddSubnet(new SubnetModel { Name = "one", AddressPrefix = "10.0.0.0/24" });
+            Assert.Equal("10.0.1.0/24", vnet.NextFreeSubnetPrefix());
+
             vnet.AddSubnet(new SubnetModel { Name = "two", AddressPrefix = "10.0.1.0/24" });
             Assert.Equal("10.0.2.0/24", vnet.NextFreeSubnetPrefix());
 

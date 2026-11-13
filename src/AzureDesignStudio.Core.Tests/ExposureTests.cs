@@ -109,10 +109,92 @@ public class ExposureTests
           {"name":"ssh-deny","properties":{"direction":"Inbound","access":"Deny","sourceAddressPrefix":"*","destinationPortRange":"22"}},
           {"name":"web-office","properties":{"direction":"Inbound","access":"Allow","sourceAddressPrefix":"40.40.0.0/16","destinationPortRange":"80"}},
           {"name":"egress","properties":{"direction":"Outbound","access":"Allow","sourceAddressPrefix":"*","destinationPortRange":"*"}},
-          {"name":"defaultDenyAll","properties":{"direction":"Inbound","access":"Allow","sourceAddressPrefix":"*","destinationPortRange":"*"}}
+          {"name":"web-internet","properties":{"direction":"Inbound","access":"Allow","sourceAddressPrefix":"*","destinationPortRange":"443"}},
+          {"name":"high-ports","properties":{"direction":"Inbound","access":"Allow","sourceAddressPrefix":"*","destinationPortRange":"3390-4000"}}
         ]
         """;
         Assert.Empty(Run(NsgWith(rules)));
+    }
+
+    // The shape ARM and Resource Graph return: the singular property is filled and its
+    // plural twin is an empty array (and the other way round). Reading the plural whenever
+    // it was an array made every such rule port-less, so nothing was ever flagged.
+    [Fact]
+    public void Nsg_RealArmShape_SingularFilledPluralEmpty_IsJudged()
+    {
+        var rules = """
+        [{"name":"ssh","properties":{"direction":"Inbound","access":"Allow","protocol":"Tcp",
+          "sourceAddressPrefix":"*","sourceAddressPrefixes":[],
+          "destinationPortRange":"22","destinationPortRanges":[]}}]
+        """;
+        var f = Assert.Single(Run(NsgWith(rules)));
+        Assert.Equal("nsg-open-admin-ports", f.Kind);
+        Assert.Contains("22", f.Detail);
+    }
+
+    // `az vm create` names the rules it opens "default-allow-ssh" / "default-allow-rdp". They
+    // are user rules in securityRules; Azure's built-ins live in defaultSecurityRules.
+    [Theory]
+    [InlineData("default-allow-ssh", "22")]
+    [InlineData("default-allow-rdp", "3389")]
+    public void Nsg_RuleNamedDefault_IsStillAUserRule(string name, string port)
+    {
+        var rules = "[{\"name\":\"" + name + "\",\"properties\":{\"direction\":\"Inbound\",\"access\":\"Allow\",\"sourceAddressPrefix\":\"*\",\"sourceAddressPrefixes\":[],\"destinationPortRange\":\"" + port + "\",\"destinationPortRanges\":[]}}]";
+        var f = Assert.Single(Run(NsgWith(rules)));
+        Assert.Equal("nsg-open-admin-ports", f.Kind);
+        Assert.Contains(port, f.Detail);
+    }
+
+    [Fact]
+    public void Nsg_BuiltInDefaultRulesAreNotJudged()
+    {
+        var nsg = Item(Nsg, "microsoft.network/networksecuritygroups", """
+        {"securityRules":[],
+         "defaultSecurityRules":[{"name":"AllowVnetInBound","properties":{"direction":"Inbound","access":"Allow","sourceAddressPrefix":"VirtualNetwork","destinationPortRange":"*"}},
+                                 {"name":"DenyAllInBound","properties":{"direction":"Inbound","access":"Deny","sourceAddressPrefix":"*","destinationPortRange":"*"}}]}
+        """);
+        Assert.Empty(Run(nsg));
+    }
+
+    [Theory]
+    [InlineData("20-25", "22")]
+    [InlineData("3000-4000", "3389")]
+    [InlineData("22-3389", "22, 3389")]
+    public void Nsg_PortRangeCoveringAnAdminPort_High(string range, string expectedPorts)
+    {
+        var rules = "[{\"name\":\"range\",\"properties\":{\"direction\":\"Inbound\",\"access\":\"Allow\",\"sourceAddressPrefix\":\"Internet\",\"destinationPortRange\":\"" + range + "\"}}]";
+        var f = Assert.Single(Run(NsgWith(rules)));
+        Assert.Equal("nsg-open-admin-ports", f.Kind);
+        Assert.EndsWith($"admin port(s) {expectedPorts}.", f.Detail);
+    }
+
+    [Theory]
+    [InlineData("0-65535")]
+    [InlineData("1-65535")]
+    public void Nsg_FullPortRange_IsAllPorts(string range)
+    {
+        var rules = "[{\"name\":\"all\",\"properties\":{\"direction\":\"Inbound\",\"access\":\"Allow\",\"sourceAddressPrefix\":\"*\",\"destinationPortRange\":\"" + range + "\"}}]";
+        var f = Assert.Single(Run(NsgWith(rules)));
+        Assert.Equal("nsg-open-all-inbound", f.Kind);
+    }
+
+    [Theory]
+    [InlineData("[\"10.0.0.0/8\",\"0.0.0.0/0\"]")]   // the internet is not the first entry
+    [InlineData("[\"::/0\"]")]
+    [InlineData("[\"10.0.0.0/8\",\"Internet\"]")]
+    public void Nsg_InternetAmongSeveralSources_IsInternet(string sources)
+    {
+        var rules = "[{\"name\":\"rdp\",\"properties\":{\"direction\":\"Inbound\",\"access\":\"Allow\",\"sourceAddressPrefix\":\"\",\"sourceAddressPrefixes\":" + sources + ",\"destinationPortRange\":\"3389\"}}]";
+        var f = Assert.Single(Run(NsgWith(rules)));
+        Assert.Equal("nsg-open-admin-ports", f.Kind);
+    }
+
+    [Fact]
+    public void Vm_PublicIpAndAllPortsOpen_EscalatedCritical()
+    {
+        var openAll = "[{\"name\":\"open-all\",\"properties\":{\"direction\":\"Inbound\",\"access\":\"Allow\",\"sourceAddressPrefix\":\"*\",\"sourceAddressPrefixes\":[],\"destinationPortRange\":\"*\",\"destinationPortRanges\":[]}}]";
+        var findings = Run(VmWith(), NicWith(Nsg), NsgWith(openAll), Item(Pip, "microsoft.network/publicipaddresses", PipJson()));
+        Assert.Equal(ExposureSeverity.Critical, findings.Single(x => x.Kind == "vm-public-ip").Severity);
     }
 
     // --- PaaS public endpoint / private endpoint ---

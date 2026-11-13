@@ -82,7 +82,11 @@ namespace AzureDesignStudio.Server.Models
     /// authenticated principal; deploys never consult a client-supplied copy.</summary>
     public record GuardrailPolicyModel
     {
+        // The single row is written with an explicit Id. By convention an int key is an
+        // IDENTITY column, which SQL Server refuses explicit values for - so on a database
+        // EnsureCreated built, the policy could never be stored. Matches the bootstrap DDL.
         [Key]
+        [System.ComponentModel.DataAnnotations.Schema.DatabaseGenerated(System.ComponentModel.DataAnnotations.Schema.DatabaseGeneratedOption.None)]
         public int Id { get; set; }
 
         /// <summary>GuardrailPolicy.FromJson shape (scopes/tags/types). Validated on write.</summary>

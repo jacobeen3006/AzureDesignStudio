@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AzureDesignStudio.AzureResources.Base;
 using AzureDesignStudio.AzureResources.Network;
 using AzureDesignStudio.Core.Attributes;
@@ -6,9 +6,6 @@ using AzureDesignStudio.Core.Common;
 using AzureDesignStudio.Core.DTO;
 using AzureDesignStudio.Core.Models;
 using Blazor.Diagrams.Core.Models;
-using System.Buffers.Binary;
-using System.Net;
-using System.Net.Sockets;
 
 namespace AzureDesignStudio.Core.Network
 {
@@ -58,52 +55,69 @@ namespace AzureDesignStudio.Core.Network
             return subnet;
         }
 
-        /// <summary>First unused /24 inside the first IPv4 address space, so auto-created
-        /// subnets never overlap one the user already defined.</summary>
-        public string NextFreeSubnetPrefix()
+        /// <summary>A subnet ready to add to this VNet: a name no sibling uses and, when one
+        /// is free, its own /24. Every subnet used to start as "Subnet1" on 10.0.0.0/24, so
+        /// the second one added was a duplicate name with an overlapping range.</summary>
+        public SubnetModel NewSubnet()
         {
-            const int prefixLength = 24;
-            var space = IpSpace.FirstOrDefault()?.AddressPrefix;
-            if (space is null || !TryParseCidr(space, out var baseAddress, out var spacePrefix))
-                return "10.0.0.0/24";
+            var taken = Subnets.Select(s => s.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var number = 1;
+            while (taken.Contains($"Subnet{number}"))
+                number++;
 
-            var used = Subnets
-                .Select(s => s.AddressPrefix.Trim())
-                .Where(p => p.Length > 0)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var subnet = new SubnetModel { Name = $"Subnet{number}" };
+            if (NextFreeSubnetPrefix() is { } prefix)
+                subnet.AddressPrefix = prefix;
+            return subnet;
+        }
 
-            if (spacePrefix >= prefixLength)
-                return FormatPrefix(baseAddress, prefixLength);
+        /// <summary>Finds the first free aligned /24 across this VNet's IPv4 address
+        /// spaces, in configured order. Returns <c>null</c> rather than a guess when no
+        /// address space can hold a /24 (exhausted, absent, IPv6-only, narrower than
+        /// /24, unparseable) or when an existing subnet's prefix cannot be parsed —
+        /// an unknown range could overlap anything.</summary>
+        public string? NextFreeSubnetPrefix()
+        {
+            const ulong blockSize = 256;
 
-            var blockSize = 1u << (32 - prefixLength);
-            var blocks = 1u << (prefixLength - spacePrefix);
-            for (uint i = 0; i < blocks; i++)
+            var used = new List<Ipv4Cidr>();
+            foreach (var subnet in Subnets)
             {
-                var candidate = FormatPrefix(baseAddress + i * blockSize, prefixLength);
-                if (!used.Contains(candidate))
-                    return candidate;
+                var prefix = subnet.AddressPrefix;
+                if (string.IsNullOrWhiteSpace(prefix) || Ipv4Cidr.IsIpv6(prefix))
+                    continue;
+                if (!Ipv4Cidr.TryParse(prefix, out var range))
+                    return null;
+                used.Add(range);
+            }
+            used.Sort((a, b) => a.Network.CompareTo(b.Network));
+
+            foreach (var space in IpSpace)
+            {
+                if (!Ipv4Cidr.TryParse(space.AddressPrefix, out var block) || block.PrefixLength > 24)
+                    continue;
+
+                // One sweep over the start-sorted ranges: a range that overlaps the
+                // candidate pushes it to the next /24 boundary past that range's end,
+                // so cost is O(subnets) no matter how large the address space is.
+                ulong candidate = block.Network;
+                ulong spaceEnd = block.Last;
+                foreach (var range in used)
+                {
+                    if (candidate + blockSize - 1 > spaceEnd)
+                        break;
+                    if (range.Last < candidate)
+                        continue;
+                    if (range.Network > candidate + blockSize - 1)
+                        break;
+                    candidate = ((ulong)range.Last / blockSize + 1) * blockSize;
+                }
+
+                if (candidate + blockSize - 1 <= spaceEnd)
+                    return Ipv4Cidr.Format((uint)candidate, 24);
             }
 
-            return FormatPrefix(baseAddress, prefixLength);
-
-            static bool TryParseCidr(string cidr, out uint address, out int prefix)
-            {
-                address = 0;
-                prefix = 0;
-                var parts = cidr.Split('/');
-                if (parts.Length != 2
-                    || !IPAddress.TryParse(parts[0], out var ip)
-                    || ip.AddressFamily != AddressFamily.InterNetwork
-                    || !int.TryParse(parts[1], out prefix)
-                    || prefix is < 0 or > 32)
-                    return false;
-
-                address = BinaryPrimitives.ReadUInt32BigEndian(ip.GetAddressBytes());
-                return true;
-            }
-
-            static string FormatPrefix(uint value, int prefix) =>
-                $"{value >> 24}.{(value >> 16) & 0xff}.{(value >> 8) & 0xff}.{value & 0xff}/{prefix}";
+            return null;
         }
 
         public override IList<ResourceBase> GetArmResources()

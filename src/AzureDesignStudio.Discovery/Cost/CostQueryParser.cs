@@ -70,7 +70,9 @@ public static class CostQueryParser
     {
         JsonValueKind.Number => cell.TryGetDecimal(out var d) ? d : (decimal)cell.GetDouble(),
         // Aggregation cells occasionally arrive quoted; treat as data, not error.
-        JsonValueKind.String when decimal.TryParse(cell.GetString(), out var s) => s,
+        // Invariant: under a comma-decimal culture "1234.56" otherwise parses as 0 or 123456.
+        JsonValueKind.String when decimal.TryParse(cell.GetString(), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var s) => s,
         _ => 0m,
     };
 }

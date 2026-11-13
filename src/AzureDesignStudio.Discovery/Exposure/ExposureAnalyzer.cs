@@ -26,8 +26,8 @@ public sealed record ExposureFinding(
 /// </summary>
 public static class ExposureAnalyzer
 {
-    private static readonly string[] InternetPrefixes = ["*", "0.0.0.0/0", "0.0.0.0", "internet", "any"];
-    private static readonly string[] AdminPorts = ["22", "3389"];
+    private static readonly string[] InternetPrefixes = ["*", "0.0.0.0/0", "0.0.0.0", "::/0", "internet", "any"];
+    private static readonly int[] AdminPorts = [22, 3389];
 
     /// <summary>PaaS types with a public internet endpoint unless a private endpoint exists (9.4 v1 set).</summary>
     private static readonly (string Type, string HostProperty)[] PublicPaaS =
@@ -140,9 +140,9 @@ public static class ExposureAnalyzer
         var nsgId = StrProp(nsgRef, "id");
         if (nsgId.Length == 0 || !byId.TryGetValue(nsgId, out var nsg)) return opened; // unresolvable: no claim
 
-        foreach (var (ports, source, action) in InboundRules(nsg))
-            if (action && Internet(source) && ports.Intersect(AdminPorts, StringComparer.Ordinal).Any())
-                opened.AddRange(ports.Intersect(AdminPorts, StringComparer.Ordinal));
+        foreach (var rule in InboundRules(nsg))
+            if (rule.Allow && rule.FromInternet)
+                opened.AddRange(rule.AdminPortsCovered());
 
         return opened.Distinct(StringComparer.Ordinal).ToList();
     }
@@ -151,61 +151,112 @@ public static class ExposureAnalyzer
 
     private static void NsgRules(InventoryItem nsg, List<ExposureFinding> findings)
     {
-        foreach (var (ports, source, action) in InboundRules(nsg))
+        foreach (var rule in InboundRules(nsg))
         {
-            if (!action || !Internet(source)) continue;
-            if (ports.Contains("*") || ports.Contains("0-65535") || ports.Contains("any"))
+            if (!rule.Allow || !rule.FromInternet) continue;
+            if (rule.AllPorts)
             {
                 findings.Add(new ExposureFinding(
                     nsg.Id, nsg.Type, "nsg-open-all-inbound", ExposureSeverity.Critical,
-                    $"Inbound rule allows the entire internet (source {source}) on all ports.",
+                    $"Inbound rule allows the entire internet (source {rule.SourceText}) on all ports.",
                     "Restrict the source to specific address ranges or use Azure Bastion / Just-in-Time VM access."));
             }
-            else if (ports.Intersect(AdminPorts, StringComparer.Ordinal).Any())
+            else if (rule.AdminPortsCovered() is { Count: > 0 } admin)
             {
                 findings.Add(new ExposureFinding(
                     nsg.Id, nsg.Type, "nsg-open-admin-ports", ExposureSeverity.High,
-                    $"Inbound rule allows the entire internet (source {source}) on admin port(s) {string.Join(", ", ports.Intersect(AdminPorts, StringComparer.Ordinal))}.",
+                    $"Inbound rule allows the entire internet (source {rule.SourceText}) on admin port(s) {string.Join(", ", admin)}.",
                     "Restrict the source to specific address ranges or use Azure Bastion / Just-in-Time VM access."));
             }
         }
     }
 
-    private static IEnumerable<(string[] Ports, string Source, bool Allow)> InboundRules(InventoryItem nsg)
+    /// <summary>One user-defined inbound rule. ARM carries a source and a port in a singular
+    /// AND a plural property and fills only one of each pair (the other is "" or []), so both
+    /// are read and merged; ports are kept as numeric ranges because "20-25" opens 22 too.</summary>
+    private sealed record InboundRule(IReadOnlyList<(int Low, int High)> Ports, IReadOnlyList<string> Sources, bool Allow)
+    {
+        public bool FromInternet => Sources.Any(s => InternetPrefixes.Contains(s, StringComparer.OrdinalIgnoreCase));
+
+        public bool AllPorts => Ports.Any(p => p.Low <= 1 && p.High >= 65535);
+
+        public string SourceText => string.Join(",", Sources);
+
+        public IReadOnlyList<string> AdminPortsCovered() => AdminPorts
+            .Where(port => Ports.Any(p => p.Low <= port && port <= p.High))
+            .Select(port => port.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .ToList();
+    }
+
+    private static IEnumerable<InboundRule> InboundRules(InventoryItem nsg)
     {
         if (nsg.Raw is not { } raw) yield break;
+        // Only securityRules is read: Azure's built-in rules (AllowVnetInBound, DenyAllInBound,
+        // ...) live in defaultSecurityRules. A user rule is judged whatever it is called -
+        // "default-allow-ssh", the rule `az vm create` writes, is as open as any other.
         if (!raw.TryGetProperty("securityRules", out var rules) || rules.ValueKind != JsonValueKind.Array) yield break;
 
         foreach (var rule in rules.EnumerateArray())
         {
             if (rule.ValueKind != JsonValueKind.Object) continue;
-            // Built-in rules start with "default" (DenyAllInBound etc.) - only user rules are judged.
-            var name = StrProp(rule, "name");
-            if (name.StartsWith("default", StringComparison.OrdinalIgnoreCase)) continue;
 
             var p = rule.TryGetProperty("properties", out var pr) && pr.ValueKind == JsonValueKind.Object ? pr : rule;
             var direction = StrProp(p, "direction");
             if (direction.Length > 0 && !direction.Equals("Inbound", StringComparison.OrdinalIgnoreCase)) continue;
 
             var allow = !StrProp(p, "access").Equals("Deny", StringComparison.OrdinalIgnoreCase);
-            var source = StrProp(p, "sourceAddressPrefix");
-            if (source.Length == 0 && p.TryGetProperty("sourceAddressPrefixes", out var srcs) && srcs.ValueKind == JsonValueKind.Array)
-                source = string.Join(",", srcs.EnumerateArray().Select(e => e.GetString() ?? ""));
-
-            yield return (PortsOf(p), source, allow);
+            yield return new InboundRule(PortsOf(p), Values(p, "sourceAddressPrefix", "sourceAddressPrefixes"), allow);
         }
     }
 
-    private static string[] PortsOf(JsonElement props)
+    /// <summary>The singular value and every plural value, trimmed, blanks dropped.</summary>
+    private static List<string> Values(JsonElement props, string singular, string plural)
     {
-        if (props.TryGetProperty("destinationPortRanges", out var ranges) && ranges.ValueKind == JsonValueKind.Array)
-            return ranges.EnumerateArray().Select(e => e.GetString() ?? "").Where(s => s.Length > 0).ToArray();
-        var single = StrProp(props, "destinationPortRange");
-        return single.Length > 0 ? [single] : ["*"];
+        var values = new List<string>();
+        void Add(string? value)
+        {
+            // A singular property can itself hold a comma-separated list.
+            foreach (var part in (value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                values.Add(part);
+        }
+
+        Add(StrProp(props, singular));
+        if (props.TryGetProperty(plural, out var many) && many.ValueKind == JsonValueKind.Array)
+            foreach (var item in many.EnumerateArray())
+                if (item.ValueKind == JsonValueKind.String)
+                    Add(item.GetString());
+
+        return values;
     }
 
-    private static bool Internet(string source) =>
-        source.Length > 0 && InternetPrefixes.Contains(source.Split(',')[0].Trim(), StringComparer.OrdinalIgnoreCase);
+    private static List<(int Low, int High)> PortsOf(JsonElement props)
+    {
+        var texts = Values(props, "destinationPortRange", "destinationPortRanges");
+        if (texts.Count == 0)
+            texts.Add("*"); // no port stated at all: judged as unrestricted
+
+        var ports = new List<(int, int)>();
+        foreach (var text in texts)
+        {
+            if (text is "*" || text.Equals("any", StringComparison.OrdinalIgnoreCase))
+            {
+                ports.Add((0, 65535));
+                continue;
+            }
+
+            var dash = text.IndexOf('-');
+            var lowText = dash < 0 ? text : text[..dash];
+            var highText = dash < 0 ? text : text[(dash + 1)..];
+            const System.Globalization.NumberStyles digits = System.Globalization.NumberStyles.None;
+            var invariant = System.Globalization.CultureInfo.InvariantCulture;
+            if (int.TryParse(lowText.Trim(), digits, invariant, out var low)
+                && int.TryParse(highText.Trim(), digits, invariant, out var high)
+                && low <= high)
+                ports.Add((low, high));
+        }
+
+        return ports;
+    }
 
     // --- front-door resources -------------------------------------------------------
 

@@ -48,8 +48,8 @@ namespace AzureDesignStudio.Core.AKS
         [DisplayName("DNS prefix"), MapToDto]
         public string DnsPrefix
         {
-            get => _cluster.Properties.DnsPrefix;
-            set => _cluster.Properties.DnsPrefix = value;
+            get => _dnsPrefix;
+            set => _dnsPrefix = value ?? string.Empty;
         }
 
         [DisplayName("Kubernetes version"), MapToDto]
@@ -84,9 +84,46 @@ namespace AzureDesignStudio.Core.AKS
 
             // The API demands a DNS prefix; derive a valid label from the cluster name when
             // the designer left it blank, so an untended tile still exports deployable bytes.
-            if (string.IsNullOrWhiteSpace(_cluster.Properties.DnsPrefix))
-                _cluster.Properties.DnsPrefix = DeriveDnsPrefix(Name);
+            // Derived at every export so it follows a rename, and never stored as the user's value.
+            _cluster.Properties.DnsPrefix = string.IsNullOrWhiteSpace(_dnsPrefix) ? DeriveDnsPrefix(Name) : _dnsPrefix;
+
+            // A cluster with neither a service principal nor an identity is refused
+            // ("servicePrincipalProfile is missing"); a system-assigned identity needs no
+            // secret. The pools travel as the API's agentPoolProfiles array - the single
+            // "defaultAgentPoolProfile" member the export used to write does not exist.
+            _cluster.Identity = new ManagedClustersIdentity { Type = "SystemAssigned" };
+            var pool = _cluster.Properties.DefaultAgentPoolProfile;
+            _cluster.Properties.AgentPoolProfiles = [pool];
+
+            // Placed in a subnet, the nodes join it (Azure CNI). The service range must not
+            // overlap the network, so it is taken from outside the 10.0.0.0/8 most designs use.
+            if (Group is Network.SubnetModel subnet)
+            {
+                pool.VnetSubnetID = subnet.ResourceId;
+                _cluster.Properties.NetworkProfile = new ManagedClustersNetworkProfile
+                {
+                    NetworkPlugin = "azure",
+                    ServiceCidr = "172.16.0.0/16",
+                    DnsServiceIP = "172.16.0.10",
+                };
+                _cluster.DependsOn = [subnet.ResourceId];
+            }
+            else
+            {
+                pool.VnetSubnetID = null;
+                _cluster.Properties.NetworkProfile = null;
+                _cluster.DependsOn = null;
+            }
         }
+
+        public override (bool result, string message) IsDrappable(GroupModel overlappedGroup)
+        {
+            if (overlappedGroup is null or Network.SubnetModel)
+                return (true, string.Empty);
+            return (false, $"{ServiceName} can only be placed in a subnet or directly on the canvas.");
+        }
+
+        private string _dnsPrefix = string.Empty;
 
         // ARM dnsPrefix grammar: lowercase alphanumeric or '-', no leading/trailing '-'.
         internal static string DeriveDnsPrefix(string name)

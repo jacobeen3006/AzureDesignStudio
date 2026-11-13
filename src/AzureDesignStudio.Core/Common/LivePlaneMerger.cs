@@ -174,18 +174,15 @@ public static class LivePlaneMerger
         Groups = source.Groups.Select(o => o is AzureNodeDto d ? Clone(d) : o).ToList(),
     };
 
-    private static AzureNodeDto Clone(AzureNodeDto n) => new()
+    /// <summary>A copy of the same runtime type. Designs hold derived DTOs
+    /// (<c>VirtualNetworkModelDto</c>, ...) whose extra members are the user's edits - address
+    /// spaces, SKUs, runtime stacks. Copying the base members into a new
+    /// <see cref="AzureNodeDto"/> dropped all of them, and merge/refresh/detach then saved
+    /// the stripped design. The JSON round trip is the same one a save and load performs.</summary>
+    private static AzureNodeDto Clone(AzureNodeDto n)
     {
-        TypeKey = n.TypeKey,
-        ImagePath = n.ImagePath,
-        Id = n.Id,
-        ArmId = n.ArmId,
-        Locked = n.Locked,
-        Position = n.Position,
-        Size = n.Size,
-        GroupId = n.GroupId,
-        Name = n.Name,
-        Location = n.Location,
-        UseResourceGroupLocation = n.UseResourceGroupLocation,
-    };
+        var type = n.GetType();
+        return (AzureNodeDto)System.Text.Json.JsonSerializer.Deserialize(
+            System.Text.Json.JsonSerializer.Serialize(n, type), type)!;
+    }
 }

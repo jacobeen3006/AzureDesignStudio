@@ -23,7 +23,7 @@ namespace AzureDesignStudio.Core.Validation
         private static readonly Dictionary<Type, (Regex Pattern, string Hint)> NameRules = new()
         {
             [typeof(StorageAccountModel)] = (new Regex("^[a-z0-9]{3,24}$"), "Storage account name must be 3-24 lowercase letters and digits."),
-            [typeof(SqlServerModel)] = (new Regex("^(?!sql)[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$", RegexOptions.IgnoreCase), "SQL server name must be 2-63 alphanumerics/hyphens, not start with 'sql'."),
+            [typeof(SqlServerModel)] = (new Regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"), "SQL server name must be 1-63 lowercase letters, digits and hyphens, and cannot start or end with a hyphen."),
             [typeof(SqlDatabaseModel)] = (new Regex("^[a-zA-Z0-9_-]{1,128}$"), "SQL database name must be 1-128 alphanumerics/_/-."),
             [typeof(AppServicePlanModel)] = (new Regex("^[a-zA-Z0-9][a-zA-Z0-9-]{0,58}[a-zA-Z0-9]$", RegexOptions.IgnoreCase), "App service plan name must be 2-60 alphanumerics/hyphens."),
             [typeof(WebAppModel)] = (new Regex("^[a-zA-Z][a-zA-Z0-9-]{0,58}[a-zA-Z0-9]$", RegexOptions.IgnoreCase), "Web app name must start with a letter, 2-60 chars, alphanumerics/hyphens."),
@@ -92,6 +92,14 @@ namespace AzureDesignStudio.Core.Validation
                     case SubnetModel { Group: not VirtualNetworkModel }:
                         issues.Add(new(ValidationSeverity.Error, "placement", name, $"Subnet '{name}' must be placed inside a virtual network."));
                         break;
+                    case AppServicePlanModel functionPlan
+                        when functionPlan.Children.OfType<FunctionAppModel>().FirstOrDefault(f => f.HostingPlan is "consumption" or "premium") is { } function:
+                        // The function's hosting plan sets the plan's SKU at export (Y1 / EP1); a
+                        // web app on the same plan would silently be deployed onto that SKU.
+                        foreach (var webApp in functionPlan.Children.Where(c => c is WebAppModel and not FunctionAppModel).OfType<WebAppModel>())
+                            issues.Add(new(ValidationSeverity.Error, "placement", webApp.Name,
+                                $"App service plan '{name}' is a {(function.HostingPlan == "consumption" ? "Consumption" : "Elastic Premium")} plan because of function app '{function.Name}'; web app '{webApp.Name}' needs a plan of its own."));
+                        break;
                     case AvailabilitySetModel availabilitySet:
                         foreach (var child in availabilitySet.Children.Where(c => c is not VirtualMachineModel))
                             issues.Add(new(ValidationSeverity.Error, "placement", (child as IAzureResource)?.Name ?? string.Empty,
@@ -129,6 +137,10 @@ namespace AzureDesignStudio.Core.Validation
                 }
             }
 
+            AddDuplicateNameIssues(list, issues);
+            foreach (var vnet in list.OfType<VirtualNetworkModel>())
+                AddAddressSpaceIssues(vnet, issues);
+
             // Container Apps environment requires a delegated subnet somewhere in the design.
             if (list.OfType<ContainerAppsEnvironmentModel>().Any()
                 && !list.OfType<SubnetModel>().Any(s => s.Delegation == "Microsoft.App/environments"))
@@ -136,6 +148,86 @@ namespace AzureDesignStudio.Core.Validation
                     "Container Apps environment requires a subnet delegated to Microsoft.App/environments."));
 
             return issues;
+        }
+
+        /// <summary>ARM refuses a template that defines one resource twice. Two nodes of the
+        /// same kind with the same name are that template, and so are two firewalls left on
+        /// the same firewall-policy name.</summary>
+        private static void AddDuplicateNameIssues(List<NodeModel> nodes, List<ValidationIssue> issues)
+        {
+            var named = nodes
+                .Where(n => n is IAzureNode and IAzureResource and not UnknownNodeModel)
+                .Select(n => (Node: n, Name: ((IAzureResource)n).Name?.Trim() ?? string.Empty))
+                .Where(n => n.Name.Length > 0);
+
+            // A subnet or a database only has to be unique inside its own network or server.
+            foreach (var group in named.GroupBy(n => (n.Node.GetType(), Scope: n.Node is SubnetModel or SqlDatabaseModel ? n.Node.Group : null, Name: n.Name.ToUpperInvariant()))
+                         .Where(g => g.Count() > 1))
+            {
+                var first = group.First();
+                issues.Add(new(ValidationSeverity.Error, "duplicate-name", first.Name,
+                    $"{group.Count()} {((IAzureNode)first.Node).ServiceName} resources are named '{first.Name}'; each needs its own name."));
+            }
+
+            foreach (var group in nodes.OfType<AzureFirewallModel>()
+                         .GroupBy(f => f.FirewallPolicy?.Name?.Trim() ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                         .Where(g => g.Key.Length > 0 && g.Count() > 1))
+                issues.Add(new(ValidationSeverity.Error, "duplicate-name", group.Key,
+                    $"Firewalls {string.Join(", ", group.Select(f => $"'{f.Name}'"))} all use the firewall policy name '{group.Key}'; give each firewall its own policy name."));
+        }
+
+        /// <summary>Address ranges Azure would reject at deployment: a prefix that is not a
+        /// CIDR block or is not the network address for its length, a subnet outside every
+        /// address space of its virtual network, and subnets that overlap one another.</summary>
+        private static void AddAddressSpaceIssues(VirtualNetworkModel vnet, List<ValidationIssue> issues)
+        {
+            var vnetName = vnet.Name;
+            var spaces = new List<Ipv4Cidr>();
+            foreach (var space in vnet.IpSpace)
+            {
+                if (Ipv4Cidr.IsIpv6(space.AddressPrefix))
+                    continue;
+                if (!Ipv4Cidr.TryParse(space.AddressPrefix, out var block, out var hostBits))
+                    issues.Add(new(ValidationSeverity.Error, "address-space", vnetName,
+                        $"Virtual network '{vnetName}' has an address space '{space.AddressPrefix}' that is not a valid CIDR block (for example 10.0.0.0/16)."));
+                else
+                {
+                    if (hostBits)
+                        issues.Add(new(ValidationSeverity.Error, "address-space", vnetName,
+                            $"Virtual network '{vnetName}' address space '{space.AddressPrefix.Trim()}' is not a network address; use {block}."));
+                    spaces.Add(block);
+                }
+            }
+
+            if (vnet.IpSpace.Count == 0)
+                issues.Add(new(ValidationSeverity.Error, "address-space", vnetName, $"Virtual network '{vnetName}' has no address space."));
+
+            var placed = new List<(SubnetModel Subnet, Ipv4Cidr Range)>();
+            foreach (var subnet in vnet.Subnets)
+            {
+                if (Ipv4Cidr.IsIpv6(subnet.AddressPrefix))
+                    continue;
+                if (!Ipv4Cidr.TryParse(subnet.AddressPrefix, out var range, out var hostBits))
+                {
+                    issues.Add(new(ValidationSeverity.Error, "address-space", subnet.Name,
+                        $"Subnet '{subnet.Name}' has an address prefix '{subnet.AddressPrefix}' that is not a valid CIDR block (for example 10.0.1.0/24)."));
+                    continue;
+                }
+
+                if (hostBits)
+                    issues.Add(new(ValidationSeverity.Error, "address-space", subnet.Name,
+                        $"Subnet '{subnet.Name}' prefix '{subnet.AddressPrefix.Trim()}' is not a network address; use {range}."));
+
+                if (spaces.Count > 0 && !spaces.Any(space => space.Contains(range)))
+                    issues.Add(new(ValidationSeverity.Error, "address-space", subnet.Name,
+                        $"Subnet '{subnet.Name}' ({range}) is outside the address space of virtual network '{vnetName}'."));
+
+                foreach (var (other, otherRange) in placed.Where(p => p.Range.Overlaps(range)))
+                    issues.Add(new(ValidationSeverity.Error, "address-space", subnet.Name,
+                        $"Subnets '{other.Name}' ({otherRange}) and '{subnet.Name}' ({range}) overlap."));
+
+                placed.Add((subnet, range));
+            }
         }
     }
 }

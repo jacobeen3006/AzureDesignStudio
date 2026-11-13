@@ -1,0 +1,38 @@
+# The server image builds with the repository root as its context
+# (src/AzureDesignStudio.Server/Dockerfile). Keep everything the server's
+# project closure does not need out of the context.
+
+**/.git
+**/.gitignore
+**/.vs
+**/.vscode
+**/.env
+**/bin
+**/obj
+**/node_modules
+**/npm-debug.log
+**/*.*proj.user
+**/Dockerfile*
+**/.dockerignore
+**/docker-compose*
+**/secrets.dev.yaml
+**/values.dev.yaml
+
+.github
+.planning
+assets
+docs
+graphify-out
+/*.md
+LICENSE
+
+# Deployment manifests and the version scratch file are not build inputs.
+src/Configurations
+src/nbgv-version.json
+
+# Projects outside the server's reference closure.
+src/AzureDesignStudio.Core.Tests
+src/AzureDesignStudio.Server.Tests
+src/AzureDesignStudio.Desktop
+src/AzureDesignStudio.Mcp
+src/AzureDesignStudio.Workspace

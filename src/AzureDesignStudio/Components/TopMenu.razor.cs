@@ -1,4 +1,4 @@
-﻿using AntDesign;
+using AntDesign;
 using AzureDesignStudio.Core;
 using AzureDesignStudio.Core.Cost;
 using AzureDesignStudio.Core.DTO;
@@ -77,6 +77,8 @@ namespace AzureDesignStudio.Components
                 case "scan":
                     if (features.OpenTenantScan is { } openScan)
                     {
+                        // The host opens this one itself; close ours first so they do not overlap.
+                        await ResetDrawerRef(string.Empty);
                         await openScan(Services!);
                     }
                     break;
@@ -88,8 +90,16 @@ namespace AzureDesignStudio.Components
             }
         }
 
-        private Task CloseDrawer()
+        /// <summary>Forgets a drawer that has closed - but only while it is still the current
+        /// one. Switching from drawer A to B closes A, and A's close handlers then ran against
+        /// B: they cleared the reference to B, so the next switch could not close it and the
+        /// drawers piled up, and they cleared its name, so clicking B's menu item opened a
+        /// second copy.</summary>
+        private Task CloseDrawer(DrawerRef<string> closing)
         {
+            if (!ReferenceEquals(drawerRef, closing))
+                return Task.CompletedTask;
+
             // Deselect the ant menu item. A bit strange way.
             // Tracked here: https://github.com/ant-design-blazor/ant-design-blazor/issues/2159
             // BL0005: setting the Menu parameter from outside is the only known workaround.
@@ -113,19 +123,20 @@ namespace AzureDesignStudio.Components
                 drawerOptions.BodyStyle = "padding:0px;";
 
             var dr = await drawerService.CreateAsync<TDrawerTemplate, string, string>(drawerOptions, options);
-            dr.OnClose = CloseDrawer;
+            dr.OnClose = () => CloseDrawer(dr);
             return dr;
         }
         private async Task<bool> ResetDrawerRef(string drawerName)
         {
             if (openedDrawer == drawerName)
                 return false;
+
+            // Detach first: the closing drawer's handlers must find that it is no longer current.
+            var previous = drawerRef;
+            drawerRef = null;
+            if (previous is not null)
+                await previous.CloseAsync();
             openedDrawer = drawerName;
-            if (drawerRef is not null)
-            {
-                await drawerRef.CloseAsync();
-                drawerRef = null;
-            }
 
             return true;
         }
@@ -135,9 +146,10 @@ namespace AzureDesignStudio.Components
                 return;
 
             drawerRef = await OpenDrawer<UserDrawerTemplate>("User account", "user");
-            drawerRef.OnClosed = async result =>
+            var opened = drawerRef;
+            opened.OnClosed = async result =>
             {
-                await CloseDrawer();
+                await CloseDrawer(opened);
             };
         }
         private async Task OpenExportDrawer()
@@ -146,9 +158,10 @@ namespace AzureDesignStudio.Components
                 return;
 
             drawerRef = await OpenDrawer<ExportDrawerTemplate>("Export the design", "export");
-            drawerRef.OnClosed = async result =>
+            var opened = drawerRef;
+            opened.OnClosed = async result =>
             {
-                await CloseDrawer();
+                await CloseDrawer(opened);
 
                 if (adsContext.Diagram.Groups.Count == 0 && adsContext.Diagram.Nodes.Count == 0)
                 {
@@ -180,9 +193,10 @@ namespace AzureDesignStudio.Components
                 return;
 
             drawerRef = await OpenDrawer<ImportAdsDrawerTemplate>("Import a text design (.ads.json)", "import", width: 480);
-            drawerRef.OnClosed = async result =>
+            var opened = drawerRef;
+            opened.OnClosed = async result =>
             {
-                await CloseDrawer();
+                await CloseDrawer(opened);
 
                 if (string.IsNullOrEmpty(result))
                     return;
@@ -192,18 +206,30 @@ namespace AzureDesignStudio.Components
                 {
                     file = AdsDesignText.Read(result);
                 }
-                catch (AdsDesignFormatException e)
+                catch (Exception e) when (e is AdsDesignFormatException or FormatException or JsonException or InvalidOperationException)
                 {
-                    messageService.Error(e.Message);
+                    // AdsDesignFormatException is the reader's own verdict; the others escape it
+                    // for input such as {"version":1.5}.
+                    messageService.Error(e is AdsDesignFormatException ? e.Message : "The file is not a readable design.");
                     return;
                 }
 
-                if (adsContext.Diagram.Groups.Count > 0 || adsContext.Diagram.Nodes.Count > 0)
-                    messageService.Info("The imported design replaced the current canvas.");
+                var hadContent = adsContext.Diagram.Groups.Count > 0 || adsContext.Diagram.Nodes.Count > 0;
 
-                var diagramGraph = file.Graph;
-                adsContext.Diagram.History.Suspend(() => DataModelFactory.LoadDiagramFromDto(adsContext.Diagram, diagramGraph, mapper));
-                adsContext.Diagram.History.Clear();
+                // Replace, as the notice below says: the import used to be added on top of
+                // whatever was already on the canvas.
+                var detached = new List<string>();
+                var failure = await CanvasLoader.ReplaceAsync(adsContext.Diagram, file.Graph, mapper, detached);
+                if (failure is not null)
+                {
+                    messageService.Error($"The design could not be imported: {failure}");
+                    return;
+                }
+                if (detached.Count > 0)
+                    messageService.Warning(new MessageConfig { Content = DetachedNotice(detached), Duration = 10 });
+
+                if (hadContent)
+                    messageService.Info("The imported design replaced the current canvas.");
                 adsContext.CurrentDesignName = string.IsNullOrWhiteSpace(file.Name) ? "imported design" : file.Name;
             };
         }
@@ -213,9 +239,10 @@ namespace AzureDesignStudio.Components
                 return;
 
             drawerRef = await OpenDrawer<NamingDrawerTemplate>("Globally unique names", "names", width: 480);
-            drawerRef.OnClosed = async result =>
+            var opened = drawerRef;
+            opened.OnClosed = async result =>
             {
-                await CloseDrawer();
+                await CloseDrawer(opened);
             };
         }
         private async Task OpenValidationDrawer()
@@ -228,9 +255,10 @@ namespace AzureDesignStudio.Components
             var options = System.Text.Json.JsonSerializer.Serialize(issues, AzureDesignStudio.Core.Validation.ValidationJson.Options);
 
             drawerRef = await OpenDrawer<ValidationDrawerTemplate>("Validate the design", options, width: 480);
-            drawerRef.OnClosed = async result =>
+            var opened = drawerRef;
+            opened.OnClosed = async result =>
             {
-                await CloseDrawer();
+                await CloseDrawer(opened);
             };
         }
 
@@ -245,9 +273,10 @@ namespace AzureDesignStudio.Components
             var options = System.Text.Json.JsonSerializer.Serialize(inputs, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
 
             drawerRef = await OpenDrawer<CostDrawerTemplate>("Estimate monthly cost", options, width: 560);
-            drawerRef.OnClosed = async result =>
+            var opened = drawerRef;
+            opened.OnClosed = async result =>
             {
-                await CloseDrawer();
+                await CloseDrawer(opened);
             };
         }
         private async Task<(string?, IArmTemplate?)> GetArmJson()
@@ -431,12 +460,14 @@ namespace AzureDesignStudio.Components
                 return;
 
             drawerRef = await OpenDrawer<SaveDrawerTemplate>("Save or load the design", "save", true);
-            drawerRef.OnClosed = async result =>
+            var opened = drawerRef;
+            opened.OnClosed = async result =>
             {
-                await CloseDrawer();
+                await CloseDrawer(opened);
                 if (!string.IsNullOrWhiteSpace(result))
                 {
-                    var splits = result.Split(':');
+                    // Two parts only: a name with a colon in it is still one name.
+                    var splits = result.Split(':', 2);
                     if (splits[0] == "save")
                         await SaveDiagram(splits[1]);
                     else
@@ -469,9 +500,13 @@ namespace AzureDesignStudio.Components
             }
             else
             {
-                messageService.Error($"Failed to save the design. Error code: {statusCode}");
+                messageService.Error($"The design was not saved: {DesignGrpcService.Describe(statusCode)}. It is still on the canvas.");
             }
         }
+
+        private static string DetachedNotice(IReadOnlyList<string> detached) =>
+            $"The design is loaded, but {detached.Count} item(s) referred to a parent group that is not in the file and were placed on the canvas directly: " +
+            string.Join(", ", detached.Take(5)) + (detached.Count > 5 ? ", ..." : ".") + " Check them before saving.";
 
         private async Task LoadDiagram(string designName)
         {
@@ -481,34 +516,47 @@ namespace AzureDesignStudio.Components
                 return;
             }
 
-            // Clear the diagram before loading a new one; history tracks user edits only.
-            adsContext.Diagram.History.Suspend(() =>
-            {
-                adsContext.Diagram.Nodes.Clear();
-                adsContext.Diagram.Links.Clear();
-                adsContext.Diagram.Groups.Clear();
-            });
+            // One keyed message: the result replaces the "loading" notice. (Unkeyed and with
+            // duration 0, that notice used to stay on screen after every load.)
+            const string messageKey = "ads-design-load";
+            messageService.Loading(new MessageConfig { Content = "Loading the design ...", Key = messageKey, Duration = 0 });
 
-            messageService.Loading("Loading the design ...", 0);
-
+            // Fetch and parse first; the canvas is only touched once there is a design to show.
+            // Clearing up front lost the unsaved canvas whenever the load then failed.
             DiagramGraph? diagramGraph = null;
-            var (status, designData) = await designService.LoadDesign(designName);
-            if (status == 200 && !string.IsNullOrEmpty(designData))
+            string? failure = null;
+            try
             {
-                diagramGraph = JsonSerializer.Deserialize<DiagramGraph>(designData);
+                var (status, designData) = await designService.LoadDesign(designName);
+                if (status == 200 && !string.IsNullOrEmpty(designData))
+                    diagramGraph = JsonSerializer.Deserialize<DiagramGraph>(designData);
+                else
+                    failure = $"Cannot load the design. Error code: {status}";
+            }
+            catch (Exception e) when (e is Grpc.Core.RpcException or HttpRequestException or JsonException)
+            {
+                logger.LogWarning(e, "Loading design {DesignName} failed.", designName);
+                failure = e is JsonException ? "The saved design is not readable." : "Cannot reach the server to load the design.";
             }
 
-            if (diagramGraph == null)
+            var detached = new List<string>();
+            if (diagramGraph is not null)
+                failure = await CanvasLoader.ReplaceAsync(adsContext.Diagram, diagramGraph, mapper, detached);
+            else
+                failure ??= "Cannot load the design.";
+
+            if (failure is null)
             {
-                messageService.Error("Cannot load the diagram.");
+                adsContext.CurrentDesignName = designName;
+                if (detached.Count == 0)
+                    messageService.Success(new MessageConfig { Content = "The design is loaded.", Key = messageKey, Duration = 2 });
+                else
+                    messageService.Warning(new MessageConfig { Content = DetachedNotice(detached), Key = messageKey, Duration = 10 });
             }
             else
             {
-                adsContext.Diagram.History.Suspend(() => DataModelFactory.LoadDiagramFromDto(adsContext.Diagram, diagramGraph!, mapper));
-                adsContext.Diagram.History.Clear();
-                adsContext.CurrentDesignName = designName;
+                messageService.Error(new MessageConfig { Content = failure, Key = messageKey, Duration = 6 });
             }
-
         }
     }
 }

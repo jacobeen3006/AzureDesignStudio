@@ -6,6 +6,9 @@
 	<ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>a237ae84-fe59-44e2-8570-ed2f536ab4ed</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    <!-- The image builds from the repository root: global.json and the central
+         Directory.*.props files live there, outside src/. -->
+    <DockerfileContext>..\..</DockerfileContext>
     <!-- Mirrors the client: generated service-worker assets must not get
          precompressed endpoints (broken {0}-templated compressed copies). -->
     <CompressionExcludePatterns>$(CompressionExcludePatterns);**/service-worker*.js;</CompressionExcludePatterns>
@@ -36,6 +39,10 @@
     <ProjectReference Include="..\AzureDesignStudio.SharedModels\AzureDesignStudio.SharedModels.csproj" />
     <ProjectReference Include="..\AzureDesignStudio\AzureDesignStudio.csproj" />
     <ProjectReference Include="..\AzureDesignStudio.Discovery\AzureDesignStudio.Discovery.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AzureDesignStudio.Server.Tests" />
   </ItemGroup>
 
   <!-- Analyzer donor from the referenced WASM app's Azure.Bicep.Decompiler; keep out. -->

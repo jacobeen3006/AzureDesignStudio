@@ -1,4 +1,4 @@
-﻿using AzureDesignStudio.AzureResources.Base;
+using AzureDesignStudio.AzureResources.Base;
 using AzureDesignStudio.Core.Common;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -61,7 +61,9 @@ namespace AzureDesignStudio.Core.Models
             //Template["parameters"].AddRange(parameters);
             foreach (var parameter in parameters)
             {
-                Template.Parameters.Add(parameter.Key, parameter.Value);
+                // Two SQL servers both declare sqlAdmin/sqlAdminPassword: one shared parameter,
+                // not "An item with the same key has already been added".
+                Template.Parameters.TryAdd(parameter.Key, parameter.Value);
             }
         }
 

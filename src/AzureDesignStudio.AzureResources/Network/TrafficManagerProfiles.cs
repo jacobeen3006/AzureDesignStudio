@@ -78,6 +78,36 @@ namespace AzureDesignStudio.AzureResources.Network
         /// </summary>
         [JsonPropertyName("dnsConfig")]
         public TrafficManagerProfilesDnsConfig DnsConfig { get; set; }
+
+        /// <summary>
+        /// The endpoint monitoring settings.
+        /// </summary>
+        [JsonPropertyName("monitorConfig")]
+        public TrafficManagerProfilesMonitorConfig MonitorConfig { get; set; }
+    }
+
+    /// <summary>
+    /// The endpoint monitoring settings.
+    /// </summary>
+    public partial class TrafficManagerProfilesMonitorConfig
+    {
+        /// <summary>
+        /// The protocol (HTTP, HTTPS or TCP) used to probe for endpoint health.
+        /// </summary>
+        [JsonPropertyName("protocol")]
+        public string Protocol { get; set; }
+
+        /// <summary>
+        /// The TCP port used to probe for endpoint health.
+        /// </summary>
+        [JsonPropertyName("port")]
+        public int Port { get; set; }
+
+        /// <summary>
+        /// The path relative to the endpoint domain name used to probe for endpoint health.
+        /// </summary>
+        [JsonPropertyName("path")]
+        public string Path { get; set; }
     }
 
     /// <summary>
@@ -85,6 +115,12 @@ namespace AzureDesignStudio.AzureResources.Network
     /// </summary>
     public partial class TrafficManagerProfilesDnsConfig
     {
+        /// <summary>
+        /// The relative DNS name of the profile; it forms {relativeName}.trafficmanager.net.
+        /// </summary>
+        [JsonPropertyName("relativeName")]
+        public string RelativeName { get; set; }
+
         /// <summary>
         /// The time to live (TTL) in seconds.
         /// </summary>

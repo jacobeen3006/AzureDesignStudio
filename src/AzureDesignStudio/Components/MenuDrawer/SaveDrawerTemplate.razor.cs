@@ -1,4 +1,4 @@
-﻿using AntDesign;
+using AntDesign;
 using Microsoft.AspNetCore.Components.WebAssembly.Authentication;
 using System.ComponentModel.DataAnnotations;
 
@@ -21,8 +21,16 @@ namespace AzureDesignStudio.Components.MenuDrawer
 
         internal record DesignRecord(string Key, string DesignName);
 
-        List<DesignRecord> _allDesignRecords = default!;
+        List<DesignRecord> _allDesignRecords = [];
         bool _loadingDesigns = false;
+
+        private const int MaxDesigns = 10;
+
+        // The limit is on how many designs a user holds, so it stops new names only. Saving
+        // changes to a design that already exists is always allowed (the server agrees); the
+        // button used to lock for both, leaving a user at the limit unable to save their work.
+        private bool SaveBlockedByQuota => _savedDesignCount >= MaxDesigns
+            && !_allDesignRecords.Any(r => string.Equals(r.DesignName, _designName.Name?.Trim(), StringComparison.OrdinalIgnoreCase));
 
         protected override async Task OnInitializedAsync()
         {
@@ -31,25 +39,39 @@ namespace AzureDesignStudio.Components.MenuDrawer
             {
                 Name = adsContext.CurrentDesignName
             };
-            var authState = await authenticationStateTask;
-            var user = authState.User;
-            if (user.Identity?.IsAuthenticated ?? false)
+            try
             {
-                var (status, savedDesigns) = await _designService.GetAllSavedDesign();
-                if (status == 200 && savedDesigns != null)
-                {
-                    _savedDesignCount = savedDesigns.Count;
-                    _allDesignRecords = new List<DesignRecord>();
-                    for (int i = 0; i < savedDesigns.Count; i++)
-                    {
-                        _allDesignRecords.Add(new DesignRecord(i.ToString(), savedDesigns[i]));
-                    }
-                }
+                var authState = await authenticationStateTask;
+                var user = authState.User;
+                if (user.Identity?.IsAuthenticated ?? false)
+                    await RefreshSavedDesigns();
+            }
+            finally
+            {
+                _loadingDesigns = false;
             }
 
-            _loadingDesigns = false;
-
             await base.OnInitializedAsync();
+        }
+
+        /// <summary>Reloads the list and the count beside it. A list that cannot be read keeps
+        /// what is on screen and says why, instead of showing an empty table as if nothing
+        /// had ever been saved.</summary>
+        private async Task RefreshSavedDesigns()
+        {
+            var (status, savedDesigns) = await _designService.GetAllSavedDesign();
+            if (status != 200 || savedDesigns == null)
+            {
+                _messageService.Error($"The saved designs could not be listed: {Services.DesignGrpcService.Describe(status)}.");
+                return;
+            }
+
+            _savedDesignCount = savedDesigns.Count;
+            _allDesignRecords = new List<DesignRecord>();
+            for (int i = 0; i < savedDesigns.Count; i++)
+            {
+                _allDesignRecords.Add(new DesignRecord(i.ToString(), savedDesigns[i]));
+            }
         }
 
         async Task SaveButtonClick()
@@ -94,23 +116,21 @@ namespace AzureDesignStudio.Components.MenuDrawer
             var status = await _designService.DeleteDesign(designName);
             if (status != 200)
             {
-                _messageService.Error($"Failed to delete {designName}");
+                _messageService.Error($"\"{designName}\" was not deleted: {Services.DesignGrpcService.Describe(status)}.");
                 return;
             }
 
+            // The deleted row must not stay selected: Load and Delete act on the selection.
+            _selectedRows = [];
             _loadingDesigns = true;
-
-            var (s, savedDesigns) = await _designService.GetAllSavedDesign();
-            if (s == 200 && savedDesigns != null)
+            try
             {
-                _allDesignRecords = new List<DesignRecord>();
-                for (int i = 0; i < savedDesigns.Count; i++)
-                {
-                    _allDesignRecords.Add(new DesignRecord(i.ToString(), savedDesigns[i]));
-                }
+                await RefreshSavedDesigns();
             }
-
-            _loadingDesigns = false;
+            finally
+            {
+                _loadingDesigns = false;
+            }
         }
     }
 }

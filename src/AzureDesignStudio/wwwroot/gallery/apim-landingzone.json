@@ -1,0 +1,227 @@
+{
+  "Groups": [
+    {
+      "IpSpace": [
+        {
+          "AddressPrefix": "10.20.0.0/16"
+        }
+      ],
+      "TypeKey": "virtual-network",
+      "ImagePath": "assets/azure/virtual-network.svg",
+      "Id": "50b645ef-8817-4167-8ad8-e3963e67cb06",
+      "ArmId": "",
+      "Locked": false,
+      "Position": {
+        "X": 260,
+        "Y": 190,
+        "Length": 322.02484376209236
+      },
+      "Size": {
+        "Width": 431,
+        "Height": 201
+      },
+      "GroupId": "",
+      "Name": "vnet-apim",
+      "Location": "[parameters(\u0027location\u0027)]",
+      "UseResourceGroupLocation": true
+    },
+    {
+      "AddressPrefix": "10.20.1.0/24",
+      "Delegation": "",
+      "TypeKey": "subnet",
+      "ImagePath": "assets/azure/subnet.svg",
+      "Id": "ef85e72f-3873-4770-ad59-395d7b53d463",
+      "ArmId": "",
+      "Locked": false,
+      "Position": {
+        "X": 290,
+        "Y": 220,
+        "Length": 364.0054944640259
+      },
+      "Size": {
+        "Width": 141,
+        "Height": 141
+      },
+      "GroupId": "50b645ef-8817-4167-8ad8-e3963e67cb06",
+      "Name": "snet-appgw",
+      "Location": "[parameters(\u0027location\u0027)]",
+      "UseResourceGroupLocation": true
+    },
+    {
+      "AddressPrefix": "10.20.2.0/24",
+      "Delegation": "",
+      "TypeKey": "subnet",
+      "ImagePath": "assets/azure/subnet.svg",
+      "Id": "891f1507-6429-48c4-83eb-336aef9e2cde",
+      "ArmId": "",
+      "Locked": false,
+      "Position": {
+        "X": 520,
+        "Y": 220,
+        "Length": 564.6237685397242
+      },
+      "Size": {
+        "Width": 141,
+        "Height": 141
+      },
+      "GroupId": "50b645ef-8817-4167-8ad8-e3963e67cb06",
+      "Name": "snet-apim",
+      "Location": "[parameters(\u0027location\u0027)]",
+      "UseResourceGroupLocation": true
+    }
+  ],
+  "Nodes": [
+    {
+      "Tier": "Standard_v2",
+      "Autoscaling": false,
+      "InstanceCount": 2,
+      "MinCapacity": 0,
+      "MaxCapacity": 10,
+      "BackendPoolName": null,
+      "BackendAddressType": "fqdn",
+      "BackendAddress": null,
+      "TypeKey": "app-gateway",
+      "ImagePath": "assets/azure/app-gateway.svg",
+      "Id": "e14ac062-015f-48a5-b1b1-fb9022948bf5",
+      "ArmId": "",
+      "Locked": false,
+      "Position": {
+        "X": 320,
+        "Y": 250,
+        "Length": 406.07881008493905
+      },
+      "Size": {
+        "Width": 81,
+        "Height": 81
+      },
+      "GroupId": "ef85e72f-3873-4770-ad59-395d7b53d463",
+      "Name": "agw-apim",
+      "Location": "[parameters(\u0027location\u0027)]",
+      "UseResourceGroupLocation": true
+    },
+    {
+      "SkuName": "Developer",
+      "SkuCapacity": 1,
+      "PublisherEmail": "apiadmin@contoso.com",
+      "PublisherName": "Contoso",
+      "VnetType": "Internal",
+      "TypeKey": "apim",
+      "ImagePath": "assets/azure/apim.svg",
+      "Id": "b7d452c7-fdf8-4005-8acc-9cf5a3749219",
+      "ArmId": "",
+      "Locked": false,
+      "Position": {
+        "X": 550,
+        "Y": 250,
+        "Length": 604.1522986797286
+      },
+      "Size": {
+        "Width": 81,
+        "Height": 81
+      },
+      "GroupId": "891f1507-6429-48c4-83eb-336aef9e2cde",
+      "Name": "apim-landingzone",
+      "Location": "[parameters(\u0027location\u0027)]",
+      "UseResourceGroupLocation": true
+    },
+    {
+      "IpVersion": "IPv4",
+      "IpAllocationMethod": "Static",
+      "Sku": "Standard",
+      "Tier": "Regional",
+      "TypeKey": "public-ip",
+      "ImagePath": "assets/azure/public-ip.svg",
+      "Id": "eddb9f50-ee93-485c-aa64-806fcb698aba",
+      "ArmId": "",
+      "Locked": false,
+      "Position": {
+        "X": 320,
+        "Y": 30,
+        "Length": 321.40317359976393
+      },
+      "Size": {
+        "Width": 81,
+        "Height": 81
+      },
+      "GroupId": "",
+      "Name": "pip-agw-apim",
+      "Location": "[parameters(\u0027location\u0027)]",
+      "UseResourceGroupLocation": true
+    },
+    {
+      "Sku": "standard",
+      "EnableRbacAuthorization": true,
+      "TypeKey": "key-vault",
+      "ImagePath": "assets/azure/key-vault.svg",
+      "Id": "5f550c6c-0b2a-4b72-afc9-91f43021d0bd",
+      "ArmId": "",
+      "Locked": false,
+      "Position": {
+        "X": 820,
+        "Y": 180,
+        "Length": 839.5236744726143
+      },
+      "Size": {
+        "Width": 81,
+        "Height": 81
+      },
+      "GroupId": "",
+      "Name": "kv-apim-landingzone",
+      "Location": "[parameters(\u0027location\u0027)]",
+      "UseResourceGroupLocation": true
+    },
+    {
+      "ApplicationType": "web",
+      "IngestionMode": "ApplicationInsights",
+      "TypeKey": "application-insights",
+      "ImagePath": "assets/azure/application-insights.svg",
+      "Id": "0c36be91-b0e5-4b87-8dd6-3ed48fd2c4f9",
+      "ArmId": "",
+      "Locked": false,
+      "Position": {
+        "X": 820,
+        "Y": 300,
+        "Length": 873.155198117723
+      },
+      "Size": {
+        "Width": 81,
+        "Height": 81
+      },
+      "GroupId": "",
+      "Name": "appi-apim-landingzone",
+      "Location": "[parameters(\u0027location\u0027)]",
+      "UseResourceGroupLocation": true
+    },
+    {
+      "SkuName": "PerGB2018",
+      "RetentionInDays": 30,
+      "EnableInteractiveQuery": true,
+      "TypeKey": "log-analytics-workspace",
+      "ImagePath": "assets/azure/log-analytics-workspace.svg",
+      "Id": "af5cf49d-04d0-4d36-8e5f-301643ae8936",
+      "ArmId": "",
+      "Locked": false,
+      "Position": {
+        "X": 820,
+        "Y": 420,
+        "Length": 921.3034245024817
+      },
+      "Size": {
+        "Width": 81,
+        "Height": 81
+      },
+      "GroupId": "",
+      "Name": "log-apim-landingzone",
+      "Location": "[parameters(\u0027location\u0027)]",
+      "UseResourceGroupLocation": true
+    }
+  ],
+  "Links": [
+    {
+      "SourcePortParentId": "eddb9f50-ee93-485c-aa64-806fcb698aba",
+      "SourcePortAlignment": 4,
+      "TargetPortParentId": "e14ac062-015f-48a5-b1b1-fb9022948bf5",
+      "TargetPortAlignment": 0
+    }
+  ]
+}

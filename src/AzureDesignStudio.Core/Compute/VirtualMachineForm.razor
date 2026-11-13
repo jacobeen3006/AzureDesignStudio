@@ -1,5 +1,44 @@
-﻿<h3>VirtualMachineForm</h3>
+@using AzureDesignStudio.Core.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Models
+
+<Form Model="@vm" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
+    <NameAndLocation Node="@context" />
+    <FormItem Label="Image">
+        <SimpleSelect @bind-Value="@context.OsImage" Size="@InputSize.Small">
+            <SelectOptions>
+                @foreach (var image in VmImages.All)
+                {
+                    <SimpleSelectOption Label="@image.Label" Value="@image.Key" />
+                }
+            </SelectOptions>
+        </SimpleSelect>
+    </FormItem>
+    <FormItem Label="Size">
+        <Input TValue="string" @bind-Value="@context.VmSize" Size="@InputSize.Small" Placeholder="Standard_D2s_v6" />
+    </FormItem>
+    <FormItem Label="Admin user">
+        <Input TValue="string" @bind-Value="@context.AdminUsername" Size="@InputSize.Small" Placeholder="azureuser" />
+    </FormItem>
+    @if (vm.Subnet is null)
+    {
+        <Alert Type="@AlertType.Warning" ShowIcon="true"
+               Message="A virtual machine needs a network. Place it in a subnet, or in an availability set that is in one." />
+    }
+    else if (!VmImages.IsValidAdminUsername(vm.AdminUsername))
+    {
+        <Alert Type="@AlertType.Warning" ShowIcon="true"
+               Message="Azure does not accept this administrator name. Use up to 20 letters, digits, hyphens or underscores, starting with a letter, and not a reserved name such as admin or root." />
+    }
+    <Alert Type="@AlertType.Info" ShowIcon="true"
+           Message="The password is not stored in the design. The exported template asks for it as the secure parameter adminPassword." />
+</Form>
 
 @code {
+    [CascadingParameter]
+    public NodeModel Node { get; set; } = null!;
+    [CascadingParameter]
+    public Diagram Diagram { get; set; } = null!;
 
+    private VirtualMachineModel vm => (VirtualMachineModel)Node;
 }

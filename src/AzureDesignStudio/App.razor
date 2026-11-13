@@ -1,4 +1,4 @@
-﻿<CascadingAuthenticationState>
+<CascadingAuthenticationState>
     <Router AppAssembly="@typeof(App).Assembly">
         <Found Context="routeData">
             <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)">
@@ -23,13 +23,4 @@
         </NotFound>
     </Router>
     <AntContainer />
-    @if (EnableTelemetry)
-    {
-        <ApplicationInsightsComponent />
-    }
 </CascadingAuthenticationState>
-
-@code {
-    /// <summary>Desktop host disables telemetry until MSAL/AI wiring lands (plan 4.2).</summary>
-    [Parameter] public bool EnableTelemetry { get; set; } = true;
-}

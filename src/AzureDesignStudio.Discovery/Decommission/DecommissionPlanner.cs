@@ -9,7 +9,9 @@ namespace AzureDesignStudio.Discovery.Decommission;
 public enum DecommissionSeverity { Info, Warning, Refusal }
 
 /// <summary>Resource lock as ARM reports it; the level mirrors the Microsoft.Authorization lock enum.</summary>
-public enum ArmLockLevel { NotSpecified, CanNotDelete, CanNotDeleteAndDenyAssignments, DenyAssignments }
+/// <summary>ReadOnly is last so existing numeric values keep their meaning. It is the
+/// stricter of ARM's two lock levels and blocks a delete just as CanNotDelete does.</summary>
+public enum ArmLockLevel { NotSpecified, CanNotDelete, CanNotDeleteAndDenyAssignments, DenyAssignments, ReadOnly }
 
 public sealed record ArmLock(string Scope, ArmLockLevel Level, string Name);
 
@@ -124,7 +126,7 @@ public static class DecommissionPlanner
                     if (!ScopeCovers(lockEntry.Scope, item.Id)) continue;
                     var where = string.Equals(lockEntry.Scope.Trim().TrimEnd('/'), item.Id, StringComparison.OrdinalIgnoreCase)
                         ? "on this scope" : $"inherited from scope {lockEntry.Scope.Trim()}";
-                    if (lockEntry.Level is ArmLockLevel.CanNotDelete or ArmLockLevel.CanNotDeleteAndDenyAssignments)
+                    if (lockEntry.Level is ArmLockLevel.CanNotDelete or ArmLockLevel.CanNotDeleteAndDenyAssignments or ArmLockLevel.ReadOnly)
                         blockers.Add(new DecommissionBlocker(item.Id, "lock-can-not-delete", DecommissionSeverity.Refusal,
                             $"lock \"{lockEntry.Name}\" ({lockEntry.Level}) is set {where} - remove it before deleting"));
                     else if (lockEntry.Level == ArmLockLevel.DenyAssignments)
@@ -183,6 +185,26 @@ public static class DecommissionPlanner
             if (owner is null) continue;
             cascadeOwner[nodeId] = owner;
             cascades.Add(new ImplicitCascade(Canonical(owner), node.Id, node.Type));
+
+            // A child dies with its parent, so whatever protects the child protects it from
+            // this plan too. Without this a do-not-touch database was deletable simply by
+            // selecting its server instead.
+            if (byId.TryGetValue(nodeId, out var child))
+            {
+                if (guardrails?.ProtectionReason(child) is { } childReason)
+                    blockers.Add(new DecommissionBlocker(Canonical(owner), "guardrail-child", DecommissionSeverity.Refusal,
+                        $"deleting it also deletes {child.Id}, which is protected by guardrail \"{childReason}\" - remove that from the do-not-touch list first"));
+
+                if (locks is not null)
+                    foreach (var lockEntry in locks)
+                    {
+                        // Locks at or above the parent are already reported on the parent itself.
+                        if (!ScopeCovers(lockEntry.Scope, child.Id) || ScopeCovers(lockEntry.Scope, Canonical(owner))) continue;
+                        if (lockEntry.Level is ArmLockLevel.CanNotDelete or ArmLockLevel.CanNotDeleteAndDenyAssignments or ArmLockLevel.ReadOnly)
+                            blockers.Add(new DecommissionBlocker(Canonical(owner), "lock-can-not-delete-child", DecommissionSeverity.Refusal,
+                                $"lock \"{lockEntry.Name}\" ({lockEntry.Level}) on child {child.Id} blocks the delete - remove it first"));
+                    }
+            }
         }
         string? OwnerOf(string nodeId)
         {

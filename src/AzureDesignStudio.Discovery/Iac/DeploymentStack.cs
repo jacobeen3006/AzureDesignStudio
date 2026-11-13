@@ -5,29 +5,36 @@ using System.Text.RegularExpressions;
 
 namespace AzureDesignStudio.Discovery.Iac;
 
-/// <summary>What ARM does to a resource that left the stack's deployment. <see cref="Delete"/> is gated until Phase 13.</summary>
+/// <summary>What ARM does to something that is no longer managed after a stack update or delete
+/// (<c>actionOnUnmanage</c>: <c>detach</c> keeps it in Azure, <c>delete</c> removes it).
+/// <see cref="Delete"/> is gated until Phase 13.</summary>
 public enum StackUnmanageAction
 {
     Detach,
     Delete,
-    Ignore,
 }
 
-/// <summary>ARM deny-settings lock levels on the stack's managed resources.</summary>
-public enum StackDenyLock
+/// <summary><c>denySettings.mode</c>: the deny assignment ARM places on the stack's managed resources.</summary>
+public enum StackDenyMode
 {
-    NotDeletion,
-    NotDeletionAndChildUsage,
+    /// <summary>No deny assignment.</summary>
+    None,
+    /// <summary>Resources can be read and modified, not deleted.</summary>
+    DenyDelete,
+    /// <summary>Resources can only be read.</summary>
+    DenyWriteAndDelete,
 }
 
-/// <summary>denySettings; <c>null</c> on a policy means ARM's default (no deny assignments).</summary>
-public sealed record StackDenySettings(bool Enabled, IReadOnlyList<StackDenyLock> Locks);
+/// <summary><c>denySettings</c>; <c>null</c> on a policy is sent as mode <c>none</c> - the API
+/// requires the member, so "no deny assignment" has to be stated, not omitted.</summary>
+public sealed record StackDenySettings(StackDenyMode Mode, bool ApplyToChildScopes = false);
 
-/// <summary>The unmanage + deny policy a stack enforces (v2 plan [60]).</summary>
+/// <summary>The unmanage + deny policy a stack enforces (v2 plan [60]). The three slots are the
+/// API's own: what happens to unmanaged resources, resource groups and management groups.</summary>
 public sealed record StackPolicy(
-    StackUnmanageAction Missing,
-    StackUnmanageAction ResourceGroup = StackUnmanageAction.Detach,
-    StackUnmanageAction Deployment = StackUnmanageAction.Detach,
+    StackUnmanageAction Resources,
+    StackUnmanageAction ResourceGroups = StackUnmanageAction.Detach,
+    StackUnmanageAction ManagementGroups = StackUnmanageAction.Detach,
     StackDenySettings? DenySettings = null);
 
 /// <summary>
@@ -83,22 +90,27 @@ public sealed record StackManagementDiff(int AlreadyManagedCount, IReadOnlyList<
 /// </summary>
 public static class DeploymentStack
 {
-    /// <summary>Stack API version the body is written against.</summary>
-    public const string ApiVersion = "2021-04-01";
+    /// <summary>Stack API version the body is written against. The shape below is the one
+    /// "Deployment Stacks - Create Or Update At Resource Group" documents for it; the earlier
+    /// 2021-04-01 with a <c>properties.policy</c> wrapper was never a deployment-stacks
+    /// version, and ARM would have refused every request.</summary>
+    public const string ApiVersion = "2024-03-01";
 
-    private static readonly Regex StackNamePattern = new(@"^[-\w\._\(\)]{1,63}$", RegexOptions.Compiled);
+    private static readonly Regex StackNamePattern = new(@"^[-\w\._\(\)]{1,90}$", RegexOptions.Compiled);
 
     /// <summary>
-    /// Builds the PUT body for one stack. The template must be a JSON object; parameters are
-    /// optional. Policy members are emitted in a fixed order and the hash covers the canonical
-    /// form, so the same inputs always produce byte-identical bodies and the same hash.
+    /// Builds the PUT body for one resource-group-scoped stack. The template must be a JSON
+    /// object; parameters are optional. There is no location member: a resource-group stack
+    /// inherits its group's. Members are emitted in a fixed order and the hash covers the
+    /// canonical form together with the stack name (which travels in the URL, not the body),
+    /// so the same inputs always produce byte-identical bodies and the same hash, and an
+    /// approval cannot be replayed against another stack.
     /// <paramref name="bypassOutOfSyncError"/> lands ARM's explicit out-of-sync override - the
     /// member rides inside the hashed body, so a sha256: approval binds the bypass exactly as
-    /// it binds the template. Default <c>false</c> emits nothing new (byte-identical bodies).
+    /// it binds the template. Default <c>false</c> emits nothing for it.
     /// </summary>
     public static DeploymentStackBody Build(
         string stackName,
-        string location,
         string templateJson,
         StackPolicy policy,
         string? parametersJson = null,
@@ -107,9 +119,7 @@ public static class DeploymentStack
         var diagnostics = new List<ArmDiagnostic>();
 
         if (string.IsNullOrWhiteSpace(stackName) || !StackNamePattern.IsMatch(stackName))
-            diagnostics.Add(Error("StackNameInvalid", "Stack name must match ^[-\\w._()]{1,63}$."));
-        if (string.IsNullOrWhiteSpace(location))
-            diagnostics.Add(Error("StackLocationMissing", "The stack resource needs a location."));
+            diagnostics.Add(Error("StackNameInvalid", "Stack name must match ^[-\\w._()]{1,90}$."));
         if (policy is null)
             diagnostics.Add(Error("StackPolicyMissing", "A stack without an unmanage policy would delete nothing but manage nothing; state the policy."));
         else
@@ -118,17 +128,13 @@ public static class DeploymentStack
             // protection windows or the approved-plan delete gate - refuse, not warn.
             foreach (var (slot, action) in new[]
             {
-                ("missing", policy.Missing),
-                ("resourceGroup", policy.ResourceGroup),
-                ("deployment", policy.Deployment),
+                ("resources", policy.Resources),
+                ("resourceGroups", policy.ResourceGroups),
+                ("managementGroups", policy.ManagementGroups),
             })
                 if (action == StackUnmanageAction.Delete)
                     diagnostics.Add(Error("StackDeleteActionLocked",
-                        $"actionOnUnmanage.{slot} = Delete is disabled until the decommissioning gates ship (v2 plan 13); use Detach or Ignore."));
-
-            if (policy.DenySettings is { Enabled: true, Locks.Count: 0 })
-                diagnostics.Add(Error("StackDenyLocksRequired",
-                    "denySettings.status Enabled requires at least one lock (NotDeletion, NotDeletionAndChildUsage)."));
+                        $"actionOnUnmanage.{slot} = delete is disabled until the decommissioning gates ship (v2 plan 13); use detach."));
         }
 
         JsonElement template = default;
@@ -170,9 +176,22 @@ public static class DeploymentStack
             }
         }
 
-        var json = BuildBody(stackName, location, template, templateOk, parameters, parametersOk, policy, bypassOutOfSyncError);
-        var hash = Hash(Canonicalize(JsonDocument.Parse(json).RootElement));
+        var json = BuildBody(template, templateOk, parameters, parametersOk, policy, bypassOutOfSyncError);
+        // The identity an approval binds to: the exact request plus the stack it is for.
+        var identity = "{\"deploymentStackName\":" + JsonSerializer.Serialize(stackName ?? string.Empty) + ",\"request\":" + json + "}";
+        var hash = Hash(Canonicalize(JsonDocument.Parse(identity).RootElement));
         return new DeploymentStackBody(json, hash, diagnostics);
+    }
+
+    /// <summary>Wire form of a deny mode (<c>none</c>, <c>denyDelete</c>,
+    /// <c>denyWriteAndDelete</c>), case-insensitive; blank, numeric or unknown values are refused.</summary>
+    public static bool TryParseDenyMode(string? value, out StackDenyMode mode)
+    {
+        mode = default;
+        if (!IsNamedWire(value) || !Enum.TryParse<StackDenyMode>(value, ignoreCase: true, out var parsed) || !Enum.IsDefined(parsed))
+            return false;
+        mode = parsed;
+        return true;
     }
 
     /// <summary>Wire form of an unmanage action, case-insensitive; blank, unknown or
@@ -190,16 +209,6 @@ public static class DeploymentStack
     // Enum names never start with a digit: a numeric wire value is someone's guess at the
     // protocol, not a protocol statement - refuse it rather than let "1" smuggle in Delete.
     private static bool IsNamedWire(string? value) => !string.IsNullOrWhiteSpace(value) && !char.IsDigit(value[0]);
-
-    /// <summary>Wire form of a deny lock level, case-insensitive; blank, numeric or unknown values are refused.</summary>
-    public static bool TryParseDenyLock(string? value, out StackDenyLock denyLock)
-    {
-        denyLock = default;
-        if (!IsNamedWire(value) || !Enum.TryParse<StackDenyLock>(value, ignoreCase: true, out var parsed) || !Enum.IsDefined(parsed))
-            return false;
-        denyLock = parsed;
-        return true;
-    }
 
     /// <summary>The name rule ARM enforces on stacks; the name interpolates the ARM URL, so
     /// every caller validates through this gate before any HTTP call or URL build.</summary>
@@ -458,9 +467,11 @@ public static class DeploymentStack
         return sb.ToString();
     }
 
+    // { "properties": { actionOnUnmanage, denySettings, template?, parameters?, bypass? } }
+    // actionOnUnmanage and denySettings are required by the API and always present; a missing
+    // policy has already produced an Error diagnostic, so the detach/none written for it here
+    // only keeps the bytes parseable for the hash - the body is never sent.
     private static string BuildBody(
-        string stackName,
-        string location,
         JsonElement template,
         bool templateOk,
         JsonElement parameters,
@@ -468,74 +479,35 @@ public static class DeploymentStack
         StackPolicy? policy,
         bool bypassOutOfSyncError)
     {
-        var sb = new StringBuilder();
-        sb.Append('{');
-        AppendProp(sb, "name", stackName ?? string.Empty, true);
-        AppendProp(sb, "location", location ?? string.Empty, false);
-        AppendProp(sb, "type", "Microsoft.Resources/deploymentStacks", false);
-        AppendProp(sb, "apiVersion", ApiVersion, false);
+        var deny = policy?.DenySettings ?? new StackDenySettings(StackDenyMode.None);
 
-        sb.Append(",\"properties\":{");
-        var firstProperty = true;
+        var sb = new StringBuilder();
+        sb.Append("{\"properties\":{\"actionOnUnmanage\":{");
+        sb.Append("\"resources\":\"").Append(ActionName(policy?.Resources ?? StackUnmanageAction.Detach)).Append("\",");
+        sb.Append("\"resourceGroups\":\"").Append(ActionName(policy?.ResourceGroups ?? StackUnmanageAction.Detach)).Append("\",");
+        sb.Append("\"managementGroups\":\"").Append(ActionName(policy?.ManagementGroups ?? StackUnmanageAction.Detach)).Append("\"}");
+        sb.Append(",\"denySettings\":{\"mode\":\"").Append(DenyModeName(deny.Mode)).Append('"');
+        sb.Append(",\"applyToChildScopes\":").Append(deny.ApplyToChildScopes ? "true" : "false").Append('}');
         if (templateOk)
-        {
-            sb.Append("\"template\":").Append(template.GetRawText());
-            firstProperty = false;
-        }
+            sb.Append(",\"template\":").Append(template.GetRawText());
         if (parametersOk)
-        {
-            if (!firstProperty) sb.Append(',');
-            sb.Append("\"parameters\":").Append(parameters.GetRawText());
-            firstProperty = false;
-        }
+            sb.Append(",\"parameters\":").Append(parameters.GetRawText());
+        // ARM guidance: redeploying the same template is the fix for an out-of-sync stack;
+        // this explicit override is the reviewed last resort, and the hash binds it.
         if (bypassOutOfSyncError)
-        {
-            // ARM guidance: redeploying the same template is the fix for an out-of-sync stack;
-            // this explicit override is the reviewed last resort, and the hash binds it.
-            if (!firstProperty) sb.Append(',');
-            sb.Append("\"bypassStackOutOfSyncError\":true");
-            firstProperty = false;
-        }
-        if (policy is not null)
-        {
-            if (!firstProperty) sb.Append(',');
-            sb.Append("\"policy\":{\"actionOnUnmanage\":{");
-            sb.Append("\"resourceGroup\":\"").Append(ActionName(policy.ResourceGroup)).Append("\",");
-            sb.Append("\"deployment\":\"").Append(ActionName(policy.Deployment)).Append("\",");
-            sb.Append("\"missing\":\"").Append(ActionName(policy.Missing)).Append("\"}");
-            if (policy.DenySettings is { } deny)
-            {
-                sb.Append(",\"denySettings\":{\"status\":\"").Append(deny.Enabled ? "Enabled" : "Disabled").Append('"');
-                sb.Append(",\"locks\":[");
-                var locks = deny.Locks.OrderBy(l => l.ToString(), StringComparer.Ordinal);
-                var first = true;
-                foreach (var lockKind in locks)
-                {
-                    if (!first) sb.Append(',');
-                    first = false;
-                    sb.Append('"').Append(lockKind).Append('"');
-                }
-                sb.Append(']');
-                sb.Append('}');
-            }
-            sb.Append('}');
-        }
-        sb.Append('}');
-        sb.Append('}');
+            sb.Append(",\"bypassStackOutOfSyncError\":true");
+        sb.Append("}}");
         return sb.ToString();
     }
 
-    private static void AppendProp(StringBuilder sb, string name, string value, bool first)
-    {
-        if (!first) sb.Append(',');
-        sb.Append(JsonSerializer.Serialize(name)).Append(':').Append(JsonSerializer.Serialize(value));
-    }
+    private static string ActionName(StackUnmanageAction action) =>
+        action == StackUnmanageAction.Delete ? "delete" : "detach";
 
-    private static string ActionName(StackUnmanageAction action) => action switch
+    private static string DenyModeName(StackDenyMode mode) => mode switch
     {
-        StackUnmanageAction.Delete => "Delete",
-        StackUnmanageAction.Ignore => "Ignore",
-        _ => "Detach",
+        StackDenyMode.DenyDelete => "denyDelete",
+        StackDenyMode.DenyWriteAndDelete => "denyWriteAndDelete",
+        _ => "none",
     };
 
     // Same canonical form and identity algorithm as DeployPlanArtifact (keys sorted ordinal,

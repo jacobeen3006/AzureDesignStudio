@@ -6,7 +6,7 @@
 
 ## OVERVIEW
 
-Azure Design Studio — Blazor app for visual Azure architecture design, hosted as WASM (Entra ID work+personal accounts) and MAUI Blazor Hybrid desktop (Windows). Diagramming, validation, ARM/Bicep IaC generation, export. .NET 10, 11 projects in src/. Microsoft Global Hackathon 2022 winner.
+Azure Design Studio — Blazor app for visual Azure architecture design, hosted as WASM (Entra ID work+personal accounts) and MAUI Blazor Hybrid desktop (Windows). Diagramming, validation, ARM/Bicep IaC generation, export. .NET 10, 12 projects in src/. Microsoft Global Hackathon 2022 winner.
 
 ## STRUCTURE
 
@@ -36,10 +36,11 @@ AzureDesignStudio/
 │   ├── AzureDesignStudio.SharedModels/ # Protobuf definitions (design_view_model, deploy_model)
 │   ├── AzureDesignStudio.SourceGeneration/ # Roslyn source generator (Scriban templates)
 │   ├── AzureDesignStudio.Core.Tests/   # xUnit tests (offline + live-Azure categories)
+│   ├── AzureDesignStudio.Server.Tests/ # xUnit tests of the gRPC services called directly (InMemory EF, fake ServerCallContext; no Azure, no network)
 │   ├── AzureDesignStudio.Workspace/    # SQLite workspace (EF Core): designs/scans/snapshots/cost cache/plans/audit
 │   ├── AzureDesignStudio.Discovery/    # Tenant analysis engines: scans/drift, exposure, guardrails, decommission planner/runbook, MCP tool engine
 │   ├── AzureDesignStudio.Mcp/          # Stdio MCP server: 13 read-only tools over the workspace (plan-only decom; never mutates)
-│   └── AzureDesignStudio.Desktop/      # MAUI BlazorWebView host (reuses App.razor; EnableTelemetry=false)
+│   └── AzureDesignStudio.Desktop/      # MAUI BlazorWebView host (reuses App.razor)
 ├── .github/workflows/                  # build.yml (build+test+CodeQL), publish.yml (tag v*: WASM zip, Docker, MSIX), codeql-analysis.yml
 └── assets/ docs/                       # Screenshots, documentation
 ```
@@ -55,7 +56,8 @@ AzureDesignStudio/
 | Modify diagram behavior | Core/Components/AzureNodeComponent.razor | Core renders diagram; WASM client hosts it |
 | Local persistence (offline) | AzureDesignStudio.Workspace/ | EF Core SQLite `workspace.db`; `SqliteDesignOfflineStore` = pending-design contract |
 | Fix build/packages | `Directory.Packages.props` + `Directory.Build.props` | Versions central; csproj declares `Include=` only |
-| CI/CD | .github/workflows/build.yml + Server/Dockerfile | Docker build via DockerBuild.ps1 |
+| CI/CD | .github/workflows/build.yml + Server/Dockerfile | Docker build via DockerBuild.ps1 (repo-root context, root `.dockerignore`) |
+| IPv4 ranges / subnet allocation | Core/Network/Ipv4Cidr.cs + VirtualNetworkModel.NextFreeSubnetPrefix/NewSubnet | Strict CIDR parsing; reserved subnet names via `DedicatedSubnets` |
 | MCP tool surface | AzureDesignStudio.Mcp/ + Discovery/Mcp/AdsToolEngine.cs | Read-only workspace truth for agents; engines pure/tested, host thin + ReadOnly SQLite |
 
 ## CONVENTIONS
@@ -71,7 +73,7 @@ AzureDesignStudio/
 - **Source gen**: Roslyn incremental generator with Scriban templates
 - **ARM models**: `ResourceBase` → `ARMResourceBase` hierarchy, JSON serialization, `[GeneratedCode("ArmTypeGenerator")]`
 - **DI registration pattern**: `AdsBicepDecompiler` uses custom extension method pattern (`AddAdsBicepDecompiler()`)
-- **Testing**: xUnit — each test project independent
+- **Testing**: xUnit — each test project independent. `Core.Tests` covers Core/Discovery/Workspace; `Server.Tests` calls the gRPC service classes directly with a fake `ServerCallContext` (the caller is `UserState["__HttpContext"].User`) and never reaches Azure; it also holds the tests of the client's gRPC wrappers (`DesignGrpcService`, `DeployGrpcService`), reached through the Server's reference to the client
 
 ## ANTI-PATTERNS
 
@@ -85,10 +87,12 @@ AzureDesignStudio/
 
 ```bash
 dotnet build src/AzureDesignStudio.sln       # Full solution build (Windows)
-dotnet build src/AzureDesignStudio.Server -c Release && dotnet build src/AzureDesignStudio -c Release && dotnet build src/AzureDesignStudio.Core.Tests -c Release  # CI project set (Linux-safe; skips MAUI Desktop - ubuntu slnf parsing is broken in SDK 10.0.4xx and net10.0-windows cannot build there)
-dotnet run --project src/AzureDesignStudio.Server  # dev gRPC server; Desktop native gRPC hits its loopback h2c listener http://localhost:5204 (Desktop `ServerUrl`) - URL endpoints stay HTTP/1.1 for browser gRPC-Web
+dotnet build src/AzureDesignStudio.Server -c Release -p:RunAOTCompilation=false && dotnet build src/AzureDesignStudio -c Release -p:RunAOTCompilation=false && dotnet build src/AzureDesignStudio.Mcp -c Release && dotnet build src/AzureDesignStudio.Core.Tests -c Release  # CI project set (Linux-safe; skips MAUI Desktop - ubuntu slnf parsing is broken in SDK 10.0.4xx and net10.0-windows cannot build there). Release enables WASM AOT, which needs the wasm-tools workload (NETSDK1147 without it) - hence the flag; the Docker build does the AOT build
+dotnet run --project src/AzureDesignStudio.Server  # dev server: URL endpoints (https://localhost:7203, http://localhost:5203; HTTP/1.1 + gRPC-Web for browsers) plus the Desktop loopback h2c listener http://localhost:5204 (Desktop `ServerUrl`). The h2c listener is Development-only unless `DesktopGrpc:Port` is set (0 = off)
 dotnet test src/AzureDesignStudio.Core.Tests --filter "Category!=LiveAzure"  # Offline tests
-docker build -f src/AzureDesignStudio.Server/Dockerfile .  # Docker image
+dotnet test src/AzureDesignStudio.Server.Tests  # Server RPC tests (in Release add -p:RunAOTCompilation=false - it builds the Server, which hosts the WASM client)
+node --test src/AzureDesignStudio/JsTests/*.test.cjs  # Stencil drag state machine (ads.js) tests; kept out of wwwroot so they are not published
+docker build -f src/AzureDesignStudio.Server/Dockerfile .  # Docker image - context is the REPO ROOT (central props/global.json live there); src/DockerBuild.ps1 [-Tag] adds the nbgv version
 dotnet publish src/AzureDesignStudio.Desktop -c Release -f net10.0-windows10.0.19041.0 -p:WindowsPackageType=MSIX -p:RuntimeIdentifier=win-x64 -p:WindowsAppSDKSelfContained=true  # MSIX package
 ```
 
@@ -97,9 +101,19 @@ dotnet publish src/AzureDesignStudio.Desktop -c Release -f net10.0-windows10.0.1
 - Diagramming via `Z.Blazor.Diagrams` NuGet — no submodule; assets served from `_content/Z.Blazor.Diagrams`
 - `version.json` uses Nerdbank.GitVersioning for version stamping
 - `PublishTrimmed=true` on WASM client — TrimmerRootAssembly for Msal + Collections.Immutable
-- InMemory EF Core in DEBUG; SQL Server + Key Vault in production
-- PITFALL: checked-in `Server/appsettings.json` has `KeyVaultName: "<kv name>"` placeholder → `CryptoService` ctor builds an invalid URI and throws, failing every `Deploy.*` RPC. Supply a real vault via user-secrets (`UserSecretsId` is set in the Server csproj)
+- InMemory EF Core in DEBUG. Release (the image) needs a database: SQL Server from the Key Vault secret `ads-main` (`KeyVaultName`) or from `ConnectionStrings__ads-main`; without either it stops with a message saying so. `Database__Provider=InMemory` starts it with no database - smoke tests only, nothing persists. Placeholders such as `<kv name>` count as unset (`ServiceTools.IsConfigured`)
+- PITFALL: checked-in `Server/appsettings.json` has `KeyVaultName: "<kv name>"` placeholder → `CryptoService` (loads the vault key on first use, not in its ctor) reports "Key Vault is not configured": `SaveSubscriptionInfo` answers 503 (400 is reserved for bad input) and every RPC that needs a linked subscription answers 404. Supply a real vault via user-secrets (`UserSecretsId` is set in the Server csproj)
+- PITFALL: any Kestrel endpoint defined in code (`Listen*`) REPLACES every URL-configured endpoint (`ASPNETCORE_URLS`, `ASPNETCORE_HTTP_PORTS`, launchSettings). `Server/Utils/DesktopGrpcEndpoint` re-binds the hosting URLs next to the Desktop h2c listener - add listeners there, never with a bare `ConfigureKestrel(o => o.Listen...)`
+- PITFALL: ARM/Resource Graph payload shapes are easy to get subtly wrong and offline fixtures will happily pin the wrong shape (lock name = last URL segment; `managedBy` is a top-level ARG column; deployment-operation fields sit under `properties`; ARG pages on `$skipToken`, not `resultTruncated`; `Azure-AsyncOperation` monitors answer 200 `InProgress`). Check the REST reference before writing a fixture
+- Gallery designs (`wwwroot/gallery/*.json`) are generated, not hand-written: the builders are in `Core.Tests/GalleryDesignTests.cs`; regenerate with `ADS_WRITE_GALLERY=<path to wwwroot/gallery> dotnet test src/AzureDesignStudio.Core.Tests --filter GalleryDesignTests`. The same tests fail when a gallery stencil points at a missing file
+- PITFALL: Z.Blazor.Diagrams 3.x wraps node/group components in its own `div.diagram-node` / `div.diagram-group`; our element is the child (`.ads-azure-node`, `.ads-group`). A selector that expects both on one element (`.group.ads-group`) matches nothing
 - PITFALL: stale second copy `src/Configurations/ads-stencils.json` (2.4 KB) has drifted from the canonical `src/AzureDesignStudio/wwwroot/ads-stencils.json` (~8 KB) — Desktop and Core.Tests link the wwwroot copy; never edit the Configurations copy
 - GSD planning artifacts live in `.planning/` (roadmap, phases, codebase maps); commit them with `docs(<phase>):` messages, don't hand-edit `STATE.md` counters
+- Deployment stacks: `Discovery/Iac/DeploymentStack.cs` writes the api-version 2024-03-01 body - `properties.actionOnUnmanage.{resources,resourceGroups,managementGroups}` (`detach`/`delete`, delete refused until Phase 13) and the required `properties.denySettings.{mode,applyToChildScopes}`; no name/type/location in the body (the name is in the URL, a resource-group stack inherits its group's location). The plan hash binds the body plus the stack name
+- Exported templates are checked against Azure itself, not only offline: `ADS_WRITE_TEMPLATES=<dir> dotnet test src/AzureDesignStudio.Core.Tests --filter GalleryDesignTests.WriteExportedTemplatesWhenAsked` writes one template per palette entry plus the gallery designs and their stack bodies, for `az deployment group validate`/`what-if` (create nothing). `GalleryDesignTests.EveryPaletteEntryHasACompleteMinimalDesign` is the offline half
+- Virtual machines and scale sets need a subnet (a VM may also sit in an availability set that is in one) and export their NIC alongside; the admin password is never stored - the template asks for the secure parameter `adminPassword`. Private endpoints and internal load balancers also need a subnet; a private endpoint takes its target from a link (or a typed id)
+- Scan status `Partial` = some query group failed or a listing was truncated. Partial scans are browsable but never the comparison baseline (`GetLatestCompletedAsync` and the Desktop rescan diff take `Completed` only) - a partial baseline makes what it missed look deleted
+- PITFALL: the `wasm-tools` workload's `library-packs` copy of `Microsoft.NET.Sdk.WebAssembly.Pack` hashes differently on Windows, on Linux and on nuget.org, so a lock file written on one fails NU1403 on the others (Docker, Linux CI). The client sets `DisableImplicitLibraryPacksFolder=true` to always take nuget.org's. A machine whose NuGet cache already holds the workload copy must drop that one cache entry (`~/.nuget/packages/microsoft.net.sdk.webassembly.pack/<version>`) once
+- No client-side telemetry: the web client and the Desktop app (which loads the same `wwwroot/index.html`) send nothing. Server telemetry is `AddApplicationInsightsTelemetry()`, active only when `ApplicationInsights:ConnectionString` is configured. Do not put a key or a tracking snippet in `index.html`
 - gRPC reflection service only registered in DEBUG
 - Server behind ingress: `ForwardedHeaders` configured for XForwardedFor/XForwardedProto

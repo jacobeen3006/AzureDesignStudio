@@ -96,4 +96,34 @@ public class StagedDeploymentFamilyTests
             "https://management.azure.com/subscriptions/sub-1/resourcegroups/rg-1/providers/Microsoft.Resources/deployments/ads-deployment-b2/operations?api-version=2025-04-01",
             resourceGroupUrl);
     }
+
+    // The monitor listed deployments at "{endpoint}{trimmedScope}/providers/...", which for every
+    // scope except the tenant root produced the host "management.azure.comsubscriptions".
+    [Theory]
+    [InlineData("/subscriptions/sub-1", "https://management.azure.com/subscriptions/sub-1/providers/Microsoft.Resources/deployments")]
+    [InlineData("/subscriptions/sub-1/resourceGroups/rg-1", "https://management.azure.com/subscriptions/sub-1/resourceGroups/rg-1/providers/Microsoft.Resources/deployments")]
+    [InlineData("subscriptions/sub-1/", "https://management.azure.com/subscriptions/sub-1/providers/Microsoft.Resources/deployments")]
+    [InlineData("/providers/Microsoft.Management/managementGroups/mg-1", "https://management.azure.com/providers/Microsoft.Management/managementGroups/mg-1/providers/Microsoft.Resources/deployments")]
+    [InlineData("/", "https://management.azure.com/providers/Microsoft.Resources/deployments")]
+    [InlineData("", "https://management.azure.com/providers/Microsoft.Resources/deployments")]
+    public void DeploymentsUrl_SeparatesTheScopeFromTheEndpoint(string scopePath, string expected)
+    {
+        Assert.Equal(expected, StagedDeploymentFamily.DeploymentsUrl("https://management.azure.com", scopePath));
+        Assert.Equal(expected, StagedDeploymentFamily.DeploymentsUrl("https://management.azure.com/", scopePath));
+        Assert.True(System.Uri.TryCreate(expected, System.UriKind.Absolute, out var uri));
+        Assert.Equal("management.azure.com", uri!.Host);
+    }
+
+    [Fact]
+    public void OperationsUrl_AtAScopePath_BuildsOnTheDeploymentsCollection()
+    {
+        var member = new StagedDeploymentMember("ads-deployment-b1", StagedDeploymentScope.Tenant, "Running");
+
+        Assert.Equal(
+            "https://management.azure.com/providers/Microsoft.Resources/deployments/ads-deployment-b1/operations?api-version=2025-04-01",
+            member.OperationsUrl("https://management.azure.com", "2025-04-01", "/"));
+        Assert.Equal(
+            "https://management.azure.com/subscriptions/sub-1/providers/Microsoft.Resources/deployments/ads-deployment-b1/operations?api-version=2025-04-01",
+            member.OperationsUrl("https://management.azure.com", "2025-04-01", "/subscriptions/sub-1"));
+    }
 }

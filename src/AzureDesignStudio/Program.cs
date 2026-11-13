@@ -2,7 +2,6 @@ using AzureDesignStudio;
 using AzureDesignStudio.Core.DTO;
 using AzureDesignStudio.Services;
 using AzureDesignStudio.SharedModels.Protos;
-using BlazorApplicationInsights;
 using Grpc.Net.Client.Web;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Authentication;
@@ -36,8 +35,7 @@ builder.Services.AddMsalAuthentication(options =>
 });
 
 builder.Logging.AddConfiguration(builder.Configuration.GetSection("Logging"));
-// App insights
-builder.Services.AddBlazorApplicationInsights();
+
 // Grpc
 builder.Services.AddScoped<DesignGrpcService>();
 builder.Services.AddGrpcClient<Design.DesignClient>("DesignClientWithAuth", o =>

@@ -1,4 +1,4 @@
-﻿using AzureDesignStudio.Server.Models;
+using AzureDesignStudio.Server.Models;
 using AzureDesignStudio.SharedModels.Protos;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
@@ -12,12 +12,12 @@ namespace AzureDesignStudio.Server.Services
     [RequiredScope(RequiredScopesConfigurationKey = "AzureAd:Scopes")]
     public class DesignService : Design.DesignBase
     {
+        private const int MaxDesignsPerUser = 10;
         private readonly DesignDbContext designContext = null!;
         private readonly ILogger<DesignService> logger;
         public DesignService(DesignDbContext context, ILogger<DesignService> logger)
         {
             designContext = context;
-            designContext.Database.EnsureCreated();
 
             this.logger = logger;
         }
@@ -43,18 +43,20 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            // Check quota
-            var count = designContext.AdsDesigns.Where(d => d.UserId == userId).Count();
-            if (count >= 10)
-            {
-                logger.LogInformation("Hit quota limit. User: {UserIdClaim}", userIdClaim);
-                response.StatusCode = StatusCodes.Status507InsufficientStorage;
-                return response;
-            }
-
             var design = designContext.AdsDesigns.FirstOrDefault(d => d.UserId == userId && d.Name == request.Name);
             if (design == null)
             {
+                // The quota limits how many designs a user holds, so it gates creation only:
+                // checked before the lookup, it also refused to save changes to a design the
+                // user already had once they reached the limit.
+                var count = designContext.AdsDesigns.Where(d => d.UserId == userId).Count();
+                if (count >= MaxDesignsPerUser)
+                {
+                    logger.LogInformation("Hit quota limit. User: {UserIdClaim}", userIdClaim);
+                    response.StatusCode = StatusCodes.Status507InsufficientStorage;
+                    return response;
+                }
+
                 logger.LogInformation("Save new design. Name: {DesignName}", request.Name);
                 design = new DesignModel
                 {
@@ -133,14 +135,17 @@ namespace AzureDesignStudio.Server.Services
 
             var userId = new Guid(userIdClaim);
 
-            response.Data = (await designContext.AdsDesigns.FirstOrDefaultAsync(d => d.UserId == userId && d.Name == request.Name))?.DesignData;
-            if (string.IsNullOrEmpty(response.Data))
+            // Protobuf string setters reject null, so a missing design must not be assigned.
+            var data = (await designContext.AdsDesigns.AsNoTracking()
+                .FirstOrDefaultAsync(d => d.UserId == userId && d.Name == request.Name))?.DesignData;
+            if (string.IsNullOrEmpty(data))
             {
                 logger.LogWarning("{RequestName} is not found, from user: {UserIdClaim}", request.Name, userIdClaim);
                 response.StatusCode = StatusCodes.Status404NotFound;
             }
             else
             {
+                response.Data = data;
                 response.StatusCode = StatusCodes.Status200OK;
             }
 

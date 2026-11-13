@@ -126,6 +126,56 @@ namespace AzureDesignStudio.Core.Tests
             Assert.Equal(0, LegacyDesignImporter.ImportIfNeeded(_workspace, legacy)); // idempotent
         }
 
+        // The importer used to delete each file as it went and commit once at the end, so one
+        // bad entry (two files with the same design name, or no data) threw at the commit -
+        // after every file was gone - and all pending designs were lost.
+        [Fact]
+        public void LegacyImportKeepsEveryGoodDesignWhenOneEntryCannotBeStored()
+        {
+            var legacy = Path.Combine(_directory, "designs");
+            Directory.CreateDirectory(legacy);
+            var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+            void Write(string file, object entry) =>
+                File.WriteAllText(Path.Combine(legacy, file), JsonSerializer.Serialize(entry, options));
+
+            Write("a.adsdesign.json", new { Name = "alpha", Data = "{\"x\":1}", SavedAt = DateTimeOffset.UtcNow });
+            Write("b.adsdesign.json", new { Name = "alpha", Data = "{\"x\":2}", SavedAt = DateTimeOffset.UtcNow }); // same name
+            Write("c.adsdesign.json", new { Name = "no-data", SavedAt = DateTimeOffset.UtcNow });                   // Data missing
+            Write("d.adsdesign.json", new { Name = "delta", Data = "{\"x\":4}", SavedAt = DateTimeOffset.UtcNow });
+
+            var imported = LegacyDesignImporter.ImportIfNeeded(_workspace, legacy);
+
+            Assert.Equal(2, imported);
+            using var db = _workspace.CreateContext();
+            Assert.Equal(new[] { "alpha", "delta" }, db.Designs.Select(d => d.Name).OrderBy(n => n).ToArray());
+        }
+
+        [Fact]
+        public async Task LatestDecomWindowIsTheMostRecentlyUpdated()
+        {
+            var windows = new WorkspaceDecomWindows(_workspace);
+            Assert.Null(await windows.LatestAsync());
+
+            DecomWindowModel Window(string id, DateTimeOffset updated) => new()
+            {
+                WindowId = id,
+                ScanId = "scan",
+                SubscriptionId = "sub",
+                PlanHash = "p",
+                ExecutionHash = "e",
+                ScopesJson = "[]",
+                State = "Locked",
+                RowsJson = "[]",
+                UpdatedAtUtc = updated,
+            };
+            var now = DateTimeOffset.UtcNow;
+            await windows.UpsertAsync(Window("older", now.AddHours(-2)));
+            await windows.UpsertAsync(Window("newest", now));
+            await windows.UpsertAsync(Window("middle", now.AddHours(-1)));
+
+            Assert.Equal("newest", (await windows.LatestAsync())!.WindowId);
+        }
+
         [Fact]
         public void FullSchemaRoundTripsAndScanDeleteCascades()
         {

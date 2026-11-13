@@ -187,16 +187,33 @@ namespace AzureDesignStudio.Services
         {
             History.Capture(() =>
             {
+                var doomed = GetSelectedModels().Where(m => !m.Locked).ToList();
+                var doomedGroups = doomed.OfType<GroupModel>().ToHashSet();
+
                 // Groups lose their children before Removed fires; snapshot for undo.
-                foreach (var group in GetSelectedModels().OfType<GroupModel>())
+                foreach (var group in doomedGroups)
                     History.SnapshotChildren(group);
+
+                bool GoesWithAnAncestor(NodeModel model)
+                {
+                    for (var parent = model.Group; parent is not null; parent = parent.Group)
+                        if (doomedGroups.Contains(parent))
+                            return true;
+                    return false;
+                }
 
                 Batch(() =>
                 {
-                    foreach (var sm in GetSelectedModels().ToList())
+                    foreach (var sm in doomed)
                     {
-                        if (sm.Locked)
-                            continue;
+                        // The layer also detaches a model from its parent before Removed fires.
+                        // Recording the membership here is what lets undo put a deleted firewall
+                        // back in its subnet (or a subnet back in its network) instead of
+                        // leaving it loose on the canvas, where export then refuses it. A model
+                        // deleted along with an ancestor comes back through that ancestor's
+                        // child snapshot.
+                        if (sm is NodeModel { Group: { } parent } member && !GoesWithAnAncestor(member))
+                            History.RecordChildMembership(parent, member, added: false);
 
                         if (sm is GroupModel group)
                             Groups.Delete(group);
@@ -233,13 +250,40 @@ namespace AzureDesignStudio.Services
                 var h = Math.Max(bounds.Height, 1);
                 SetZoom(Math.Min((pageW - 2 * margin) / w, (pageH - 2 * margin) / h));
 
-                // Center the content bounds in the page.
+                // Center the content bounds in the page. SetPan, not UpdatePan: UpdatePan adds
+                // to the current pan, so a canvas the user had scrolled printed off-centre -
+                // or off the page - by exactly that scroll.
                 var cx = pageW / 2.0 - (bounds.Left + bounds.Width / 2) * Zoom;
                 var cy = pageH / 2.0 - (bounds.Top + bounds.Height / 2) * Zoom;
-                UpdatePan(cx, cy);
+                SetPan(cx, cy);
             });
 
             return page;
+        }
+
+        /// <summary>Brings everything on the canvas into view, centred, never magnified past
+        /// 100%. A design that replaces the canvas otherwise appears at whatever pan and zoom
+        /// the previous content was left at - often partly or wholly off screen.</summary>
+        public void FitToContent(double margin = 48)
+        {
+            if (Container is not { Width: > 0, Height: > 0 } view)
+                return;
+
+            var nodes = Nodes.Cast<NodeModel>().Concat(Groups).ToList();
+            if (nodes.Count == 0)
+                return;
+
+            var bounds = nodes.GetBounds();
+            var w = Math.Max(bounds.Width, 1);
+            var h = Math.Max(bounds.Height, 1);
+            var zoom = Math.Min(1, Math.Min((view.Width - 2 * margin) / w, (view.Height - 2 * margin) / h));
+            zoom = Math.Clamp(zoom, Options.Zoom.Minimum, Math.Max(Options.Zoom.Minimum, Options.Zoom.Maximum));
+
+            Batch(() =>
+            {
+                SetZoom(zoom);
+                SetPan(view.Width / 2 - (bounds.Left + w / 2) * zoom, view.Height / 2 - (bounds.Top + h / 2) * zoom);
+            });
         }
 
         public void AfterPrint()

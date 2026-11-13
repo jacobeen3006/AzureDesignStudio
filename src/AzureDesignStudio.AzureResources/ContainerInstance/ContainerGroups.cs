@@ -59,14 +59,19 @@ namespace AzureDesignStudio.AzureResources.ContainerInstance
         /// <summary>
         /// The number of CPUs to allocate to the container group.
         /// </summary>
-        [JsonPropertyName("cpu")]
+        // Requested per container (containers[].properties.resources.requests); the group has
+        // no such members, so these are kept for the model and never written.
+        [JsonIgnore]
         public double Cpu { get; set; }
 
         /// <summary>
         /// The amount of memory in GB to allocate to the container group.
         /// </summary>
-        [JsonPropertyName("memoryInGb")]
+        [JsonIgnore]
         public double MemoryInGb { get; set; }
+
+        [JsonPropertyName("restartPolicy")]
+        public string RestartPolicy { get; set; }
 
         /// <summary>
         /// An array of containers assigned to the container group.

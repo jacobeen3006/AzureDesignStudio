@@ -37,7 +37,6 @@ namespace AzureDesignStudio.Server.Services
             WhatIfTokenGate whatIfGate, IHttpClientFactory httpClientFactory)
         {
             _designContext = context;
-            _designContext.Database.EnsureCreated();
 
             _logger = logger;
             _cryptoService = cryptoService;
@@ -66,21 +65,53 @@ namespace AzureDesignStudio.Server.Services
 
             try
             {
-                var subscription = new AzureSubscriptionModel
+                var subscriptionId = new Guid(request.SubscriptionId);
+                var tenantId = new Guid(request.TenantId);
+                var clientId = new Guid(request.ClientId);
+                var clientSecret = await _cryptoService.Encrypt(request.ClientSecret);
+
+                // One link per (user, subscription). Saving again - a rotated secret, a new
+                // app registration - replaces the link; it used to add a second row while
+                // lookups kept returning the first, stale one.
+                var existing = await _designContext.AzureSubscriptions
+                    .Where(s => s.UserId == userId && s.SubscriptionId == subscriptionId)
+                    .OrderByDescending(s => s.Id)
+                    .ToListAsync();
+                if (existing.Count == 0)
                 {
-                    UserId = userId,
-                    SubscriptionId = new Guid(request.SubscriptionId),
-                    SubscriptionName = request.SubscriptionName,
-                    TenantId = new Guid(request.TenantId),
-                    ClientId = new Guid(request.ClientId),
-                    ClientSecret = await _cryptoService.Encrypt(request.ClientSecret)
-                };
-                _designContext.AzureSubscriptions.Add(subscription);
+                    _designContext.AzureSubscriptions.Add(new AzureSubscriptionModel
+                    {
+                        UserId = userId,
+                        SubscriptionId = subscriptionId,
+                        SubscriptionName = request.SubscriptionName,
+                        TenantId = tenantId,
+                        ClientId = clientId,
+                        ClientSecret = clientSecret
+                    });
+                }
+                else
+                {
+                    var current = existing[0];
+                    current.SubscriptionName = request.SubscriptionName;
+                    current.TenantId = tenantId;
+                    current.ClientId = clientId;
+                    current.ClientSecret = clientSecret;
+                    _designContext.AzureSubscriptions.RemoveRange(existing.Skip(1));
+                }
+            }
+            catch (Exception ex) when (ex is FormatException or ArgumentException or OverflowException)
+            {
+                // Not a GUID, or a secret the key cannot hold: the request is wrong.
+                _logger.LogWarning(ex, "The subscription details are not valid.");
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                return response;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Exception occurred.");
-                response.StatusCode = StatusCodes.Status400BadRequest;
+                // Key Vault missing or unreachable, database down: the request may be fine.
+                // Answering 400 told the user to correct details that were never the problem.
+                _logger.LogError(ex, "The subscription could not be stored.");
+                response.StatusCode = StatusCodes.Status503ServiceUnavailable;
                 return response;
             }
 
@@ -115,7 +146,12 @@ namespace AzureDesignStudio.Server.Services
             }
             var userId = new Guid(userIdClaim);
 
-            var subResources = _designContext.AzureSubscriptions.Where(s => s.UserId == userId);
+            // Newest link per subscription: rows saved before links were upserted can repeat one.
+            var subResources = _designContext.AzureSubscriptions.AsNoTracking()
+                .Where(s => s.UserId == userId)
+                .OrderByDescending(s => s.Id)
+                .AsEnumerable()
+                .DistinctBy(s => s.SubscriptionId);
             foreach (var subResource in subResources)
             {
                 response.SubscriptionData.Add(new SubscriptionRes
@@ -130,18 +166,71 @@ namespace AzureDesignStudio.Server.Services
         }
         private async Task<AzureSubscriptionModel?> GetSubscriptionInfo(Guid userId, Guid subscriptionId)
         {
-            var subModel = _designContext.AzureSubscriptions.Where(s => s.UserId == userId && s.SubscriptionId == subscriptionId)
-                .FirstOrDefault();
+            // Untracked, and the plaintext goes on a copy. Writing the decrypted secret onto
+            // the tracked entity let the next SaveChangesAsync on this scoped context (the
+            // audit rows of a deploy, stack apply or lock release) store it in the database
+            // in the clear - after which every later Decrypt of that row failed.
+            var subModel = await _designContext.AzureSubscriptions.AsNoTracking()
+                .Where(s => s.UserId == userId && s.SubscriptionId == subscriptionId)
+                .OrderByDescending(s => s.Id)
+                .FirstOrDefaultAsync();
             if (subModel == null)
                 return null;
 
-            subModel.ClientSecret = await _cryptoService.Decrypt(subModel.ClientSecret);
-            return subModel;
+            try
+            {
+                return subModel with { ClientSecret = await _cryptoService.Decrypt(subModel.ClientSecret) };
+            }
+            catch (Exception ex) when (ex is FormatException or InvalidOperationException or RequestFailedException
+                                           or System.Security.Cryptography.CryptographicException)
+            {
+                // An unreadable link is an unusable link. Callers answer "no subscription" (404)
+                // instead of failing the RPC; saving the subscription again replaces the row.
+                _logger.LogError(ex, "The stored secret for subscription {SubscriptionId} could not be decrypted; the subscription must be linked again.", subscriptionId);
+                return null;
+            }
         }
         private async Task<SubscriptionResource?> GetSubscriptionResource(Guid userId, Guid subscriptionId)
         {
             var armClient = await GetArmClient(userId, subscriptionId);
             return armClient is null ? null : await armClient.GetDefaultSubscriptionAsync();
+        }
+
+        /// <summary>
+        /// Looks a resource group up and turns every way that can fail into an answer. The SDK
+        /// throws for a missing group (it never returns null), for a rejected or expired
+        /// credential and for a network failure; called bare, each of those ended the RPC with
+        /// an unhandled exception instead of the "cannot find the resource group" reply.
+        /// </summary>
+        private async Task<(Azure.ResourceManager.Resources.ResourceGroupResource? Group, int StatusCode, string Error)>
+            FindResourceGroupAsync(ArmClient armClient, string resourceGroupName, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var subscription = await armClient.GetDefaultSubscriptionAsync(cancellationToken);
+                var group = (await subscription.GetResourceGroupAsync(resourceGroupName, cancellationToken)).Value;
+                return (group, StatusCodes.Status200OK, string.Empty);
+            }
+            catch (RequestFailedException ex) when (ex.Status == StatusCodes.Status404NotFound)
+            {
+                _logger.LogWarning("{ResourceGroup} cannot be found.", resourceGroupName);
+                return (null, StatusCodes.Status404NotFound, "Cannot find the resource group.");
+            }
+            catch (RequestFailedException ex)
+            {
+                _logger.LogWarning(ex, "Resource group {ResourceGroup} could not be read.", resourceGroupName);
+                return (null,
+                    ex.Status is StatusCodes.Status401Unauthorized or StatusCodes.Status403Forbidden
+                        ? StatusCodes.Status403Forbidden
+                        : StatusCodes.Status502BadGateway,
+                    $"The resource group could not be read (HTTP {ex.Status}: {ex.ErrorCode}).");
+            }
+            catch (Exception ex) when (ex is AuthenticationFailedException or HttpRequestException)
+            {
+                _logger.LogWarning(ex, "Azure could not be reached for resource group {ResourceGroup}.", resourceGroupName);
+                return (null, StatusCodes.Status502BadGateway,
+                    "Azure could not be reached with the linked subscription's credential.");
+            }
         }
 
         /// <summary>An authenticated ARM client for the linked subscription - the credential handle
@@ -278,15 +367,14 @@ namespace AzureDesignStudio.Server.Services
                 var credential = new ClientSecretCredential(subModel.TenantId.ToString(),
                     subModel.ClientId.ToString(), subModel.ClientSecret);
                 var armClient = new ArmClient(credential, subscriptionId.ToString());
-                var subResource = await armClient.GetDefaultSubscriptionAsync();
                 string location;
                 if (target.Kind == DeployScopeKind.ResourceGroup)
                 {
-                    var rg = (await subResource.GetResourceGroupAsync(request.ResourceGroupName))?.Value;
+                    var (rg, rgStatus, rgError) = await FindResourceGroupAsync(armClient, request.ResourceGroupName, context.CancellationToken);
                     if (rg == null)
                     {
-                        response.StatusCode = StatusCodes.Status404NotFound;
-                        response.ErrorMessage = "Cannot find the resource group.";
+                        response.StatusCode = rgStatus;
+                        response.ErrorMessage = rgError;
                         return response;
                     }
 
@@ -473,7 +561,7 @@ namespace AzureDesignStudio.Server.Services
                 // every other target lists exactly the scope it deploys at - including the
                 // management-group and tenant scopes that no subscription listing can show.
                 string DeploymentsAt(string scopePath) =>
-                    $"{managementEndpoint}{scopePath.Trim('/')}/providers/Microsoft.Resources/deployments";
+                    StagedDeploymentFamily.DeploymentsUrl(managementEndpoint, scopePath);
                 var listings = monitorTarget.Kind switch
                 {
                     DeployScopeKind.Subscription => new List<(StagedDeploymentScope Scope, string Url)>
@@ -736,12 +824,11 @@ namespace AzureDesignStudio.Server.Services
             string location;
             if (target.Kind == DeployScopeKind.ResourceGroup)
             {
-                var rg = (await (await armClient.GetDefaultSubscriptionAsync()).GetResourceGroupAsync(request.ResourceGroupName))?.Value;
+                var (rg, rgStatus, rgError) = await FindResourceGroupAsync(armClient, request.ResourceGroupName, context.CancellationToken);
                 if (rg == null)
                 {
-                    _logger.LogWarning("{ResourceGroup} cannot be found.", request.ResourceGroupName);
-                    response.StatusCode = StatusCodes.Status404NotFound;
-                    response.ErrorMessage = "Cannot find the resource group.";
+                    response.StatusCode = rgStatus;
+                    response.ErrorMessage = rgError;
                     await responseStream.WriteAsync(response);
                     return;
                 }
@@ -903,42 +990,38 @@ namespace AzureDesignStudio.Server.Services
             }
 
             // Wire-form policy before anything is spent: unknown values answer 400, never a surprise
-            // mid-apply. Blank optional slots take ARM's Detach default; missing_action is required.
-            if (!DeploymentStack.TryParseAction(request.MissingAction, out var missingAction))
+            // mid-apply. Blank optional slots mean detach; resources_action is required.
+            if (!DeploymentStack.TryParseAction(request.ResourcesAction, out var resourcesAction))
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "missing_action must be Detach or Ignore (Delete is disabled until the decommissioning gates ship).";
+                response.ErrorMessage = "resources_action must be detach (delete is disabled until the decommissioning gates ship).";
                 return response;
             }
-            var resourceGroupAction = StackUnmanageAction.Detach;
-            if (!string.IsNullOrWhiteSpace(request.ResourceGroupAction) && !DeploymentStack.TryParseAction(request.ResourceGroupAction, out resourceGroupAction))
+            var resourceGroupsAction = StackUnmanageAction.Detach;
+            if (!string.IsNullOrWhiteSpace(request.ResourceGroupsAction) && !DeploymentStack.TryParseAction(request.ResourceGroupsAction, out resourceGroupsAction))
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "resource_group_action must be Detach or Ignore when set.";
+                response.ErrorMessage = "resource_groups_action must be detach or delete when set.";
                 return response;
             }
-            var deploymentAction = StackUnmanageAction.Detach;
-            if (!string.IsNullOrWhiteSpace(request.DeploymentAction) && !DeploymentStack.TryParseAction(request.DeploymentAction, out deploymentAction))
+            var managementGroupsAction = StackUnmanageAction.Detach;
+            if (!string.IsNullOrWhiteSpace(request.ManagementGroupsAction) && !DeploymentStack.TryParseAction(request.ManagementGroupsAction, out managementGroupsAction))
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "deployment_action must be Detach or Ignore when set.";
+                response.ErrorMessage = "management_groups_action must be detach or delete when set.";
                 return response;
             }
             StackDenySettings? denySettings = null;
-            if (request.DenyEnabled || request.DenyLocks.Count > 0)
+            if (!string.IsNullOrWhiteSpace(request.DenyMode) || request.DenyApplyToChildScopes)
             {
-                var locks = new List<StackDenyLock>();
-                foreach (var rawLock in request.DenyLocks)
+                var denyMode = StackDenyMode.None;
+                if (!string.IsNullOrWhiteSpace(request.DenyMode) && !DeploymentStack.TryParseDenyMode(request.DenyMode, out denyMode))
                 {
-                    if (!DeploymentStack.TryParseDenyLock(rawLock, out var parsedLock))
-                    {
-                        response.StatusCode = StatusCodes.Status400BadRequest;
-                        response.ErrorMessage = "deny_locks entries must be NotDeletion or NotDeletionAndChildUsage.";
-                        return response;
-                    }
-                    locks.Add(parsedLock);
+                    response.StatusCode = StatusCodes.Status400BadRequest;
+                    response.ErrorMessage = "deny_mode must be none, denyDelete or denyWriteAndDelete.";
+                    return response;
                 }
-                denySettings = new StackDenySettings(request.DenyEnabled, locks);
+                denySettings = new StackDenySettings(denyMode, request.DenyApplyToChildScopes);
             }
 
             var userIdClaim = ServiceTools.GetUserId(context);
@@ -978,13 +1061,11 @@ namespace AzureDesignStudio.Server.Services
             var credential = new ClientSecretCredential(subModel.TenantId.ToString(),
                 subModel.ClientId.ToString(), subModel.ClientSecret);
             var armClient = new ArmClient(credential, subscriptionId.ToString());
-            var subResource = await armClient.GetDefaultSubscriptionAsync();
-            var rg = (await subResource.GetResourceGroupAsync(request.ResourceGroupName))?.Value;
+            var (rg, rgStatus, rgError) = await FindResourceGroupAsync(armClient, request.ResourceGroupName, context.CancellationToken);
             if (rg == null)
             {
-                _logger.LogWarning("{ResourceGroup} cannot be found.", request.ResourceGroupName);
-                response.StatusCode = StatusCodes.Status404NotFound;
-                response.ErrorMessage = "Cannot find the resource group.";
+                response.StatusCode = rgStatus;
+                response.ErrorMessage = rgError;
                 return response;
             }
 
@@ -1038,8 +1119,8 @@ namespace AzureDesignStudio.Server.Services
             }
 
             // Engine validation before the single-use token burns: refuse-with-diagnostics, never warn.
-            var body = DeploymentStack.Build(request.StackName, rg.Data.Location,
-                request.ArmTemplate, new StackPolicy(missingAction, resourceGroupAction, deploymentAction, denySettings),
+            var body = DeploymentStack.Build(request.StackName,
+                request.ArmTemplate, new StackPolicy(resourcesAction, resourceGroupsAction, managementGroupsAction, denySettings),
                 parametersJson, bypassOutOfSyncError: request.BypassOutOfSync);
             if (!body.Success)
             {
@@ -1114,6 +1195,18 @@ namespace AzureDesignStudio.Server.Services
                         : "STACK_OUTCOME_UNKNOWN: the stack apply could not be confirmed; check the stack in Azure before retrying.";
                 return response;
             }
+            catch (Exception ex) when (ex is HttpRequestException or AuthenticationFailedException or JsonException)
+            {
+                // The transport does not wrap these. Left uncaught they ended the RPC with the
+                // approval consumed and a lone Started row - no terminal event at all.
+                _logger.LogError(ex, "Stack apply {ApplyId} could not be confirmed.", applyId);
+                await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
+                    PlanApplyEventModel.OutcomeUnknown, $"stack submission outcome unconfirmable: {ex.GetType().Name}",
+                    request.StackName);
+                response.StatusCode = StatusCodes.Status502BadGateway;
+                response.ErrorMessage = "STACK_OUTCOME_UNKNOWN: the stack apply could not be confirmed; check the stack in Azure before retrying.";
+                return response;
+            }
             catch (OperationCanceledException)
             {
                 // Client disconnect and the HttpClient deadline are the same audit fact: the apply
@@ -1134,10 +1227,11 @@ namespace AzureDesignStudio.Server.Services
             // ARM state decides the terminal event: Failed-in-200 is Failed, an unreadable
             // state is OutcomeUnknown - never a silent success claim.
             var state = TryGetProvisioningState(stackJson);
-            var terminal = state switch
+            // The stacks API spells its states in lower case ("succeeded", "failed").
+            var terminal = state?.ToLowerInvariant() switch
             {
-                "Succeeded" => PlanApplyEventModel.Completed,
-                "Failed" or "Canceled" => PlanApplyEventModel.Failed,
+                "succeeded" => PlanApplyEventModel.Completed,
+                "failed" or "canceled" => PlanApplyEventModel.Failed,
                 _ => PlanApplyEventModel.OutcomeUnknown,
             };
             await RecordApplyEventAsync(applyId, approval, subscriptionId.ToString(), request.ResourceGroupName,
@@ -1497,6 +1591,7 @@ namespace AzureDesignStudio.Server.Services
 
             var clientGone = false;
             var consecutivePollFailures = 0;
+            RequestFailedException? terminalFailure = null;
             while (!lro.HasCompleted)
             {
                 if (!clientGone)
@@ -1524,6 +1619,13 @@ namespace AzureDesignStudio.Server.Services
                     await lro.UpdateStatusAsync();
                     consecutivePollFailures = 0;
                 }
+                catch (RequestFailedException ex) when (lro.HasCompleted)
+                {
+                    // Not a failed poll: the SDK reports a deployment that ended Failed or
+                    // Canceled by throwing from the status update that observes the terminal
+                    // state. The operation is over and has no value to read.
+                    terminalFailure = ex;
+                }
                 catch (RequestFailedException ex)
                 {
                     // A status-query failure is not a deployment failure; tolerate transient ARM
@@ -1550,13 +1652,24 @@ namespace AzureDesignStudio.Server.Services
                 }
             }
 
-            var provisioningState = lro.Value?.Data?.Properties?.ProvisioningState?.ToString();
+            // lro.Value throws for an operation that completed without succeeding, so a failed
+            // deployment must be read from the terminal exception, never from the value.
+            var provisioningState = terminalFailure is null && lro.HasValue
+                ? lro.Value?.Data?.Properties?.ProvisioningState?.ToString()
+                : "Failed";
+            var failureCode = terminalFailure is null
+                ? ""
+                : $" (HTTP {terminalFailure.Status}: {terminalFailure.ErrorCode ?? "no error code"})";
             var succeeded = string.Equals(provisioningState, "Succeeded", StringComparison.OrdinalIgnoreCase);
+            if (terminalFailure is not null)
+            {
+                _logger.LogWarning(terminalFailure, "Deployment {DeploymentName} ended unsuccessfully for apply {ApplyId}", deploymentName, applyId);
+            }
             // Truth lands first, even when nobody is listening anymore: the durable terminal
             // event is recorded from ARM's state alone, never gated on a client write.
             await RecordApplyEventAsync(applyId, approval, subscriptionId, resourceGroupName,
                 succeeded ? PlanApplyEventModel.Completed : PlanApplyEventModel.Failed,
-                succeeded ? $"provisioningState={provisioningState}" : $"Deployment finished with provisioningState={provisioningState ?? "Unknown"}.",
+                succeeded ? $"provisioningState={provisioningState}" : $"Deployment finished with provisioningState={provisioningState ?? "Unknown"}{failureCode}.",
                 deploymentName, targetScope);
 
             if (!clientGone)
@@ -1572,7 +1685,7 @@ namespace AzureDesignStudio.Server.Services
                     {
                         response.StatusCode = StatusCodes.Status400BadRequest;
                         response.DeploymentStatus = "failed";
-                        response.ErrorMessage = $"{Context(batchLabel)}Deployment finished with provisioningState={provisioningState ?? "Unknown"}.";
+                        response.ErrorMessage = $"{Context(batchLabel)}Deployment finished with provisioningState={provisioningState ?? "Unknown"}{failureCode}.";
                     }
 
                     await responseStream.WriteAsync(response);
@@ -1720,18 +1833,36 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var subResource = await GetSubscriptionResource(userId, subscriptionId);
-            if (subResource == null)
+            try
             {
-                response.StatusCode = StatusCodes.Status404NotFound;
-                return response;
-            }
+                var subResource = await GetSubscriptionResource(userId, subscriptionId);
+                if (subResource == null)
+                {
+                    response.StatusCode = StatusCodes.Status404NotFound;
+                    return response;
+                }
 
-            await foreach (var rg in subResource.GetResourceGroups())
-            {
-                response.ResourceGroupName.Add(rg.Data.Name);
+                await foreach (var rg in subResource.GetResourceGroups().WithCancellation(context.CancellationToken))
+                {
+                    response.ResourceGroupName.Add(rg.Data.Name);
+                }
+                response.StatusCode = StatusCodes.Status200OK;
             }
-            response.StatusCode = StatusCodes.Status200OK;
+            catch (RequestFailedException ex)
+            {
+                // A revoked or under-privileged service principal is an answer, not a crash.
+                _logger.LogWarning(ex, "Listing resource groups failed for subscription {SubscriptionId}.", subscriptionId);
+                response.ResourceGroupName.Clear();
+                response.StatusCode = ex.Status is StatusCodes.Status401Unauthorized or StatusCodes.Status403Forbidden
+                    ? StatusCodes.Status403Forbidden
+                    : StatusCodes.Status502BadGateway;
+            }
+            catch (Exception ex) when (ex is AuthenticationFailedException or HttpRequestException)
+            {
+                _logger.LogWarning(ex, "Azure could not be reached for subscription {SubscriptionId}.", subscriptionId);
+                response.ResourceGroupName.Clear();
+                response.StatusCode = StatusCodes.Status502BadGateway;
+            }
 
             return response;
         }
@@ -1796,7 +1927,7 @@ namespace AzureDesignStudio.Server.Services
             var displayName = context.GetHttpContext().User.FindFirst("name")?.Value;
             var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
 
-            var existing = await _designContext.AdsDecomApprovals.FindAsync(executionHash, context.CancellationToken);
+            var existing = await _designContext.AdsDecomApprovals.FindAsync([executionHash], context.CancellationToken);
             if (existing != null)
                 _designContext.AdsDecomApprovals.Remove(existing);
 
@@ -1893,7 +2024,7 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var approval = await _designContext.AdsDecomApprovals.FindAsync(executionHash, context.CancellationToken);
+            var approval = await _designContext.AdsDecomApprovals.FindAsync([executionHash], context.CancellationToken);
             if (approval == null)
             {
                 response.StatusCode = StatusCodes.Status412PreconditionFailed;
@@ -1901,8 +2032,27 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
+            // Same rule as CreateDeployment: the approval belongs to the principal who gave it.
+            if (!string.Equals(approval.ApprovedByUserId, userIdClaim, StringComparison.Ordinal))
+            {
+                _logger.LogWarning("Decom execution {ExecutionHash} approved by {Approver} but executed by a different principal", executionHash, approval.ApprovedBy);
+                response.StatusCode = StatusCodes.Status403Forbidden;
+                response.ErrorMessage = "DECOM_APPROVER_MISMATCH: only the principal that approved this window may execute it; no locks were touched.";
+                return response;
+            }
+
             // The server re-sorts the scopes itself; the sorted set is used everywhere after.
             var scopes = request.Scopes.Select(s => s.Trim()).OrderBy(s => s.ToLowerInvariant(), StringComparer.Ordinal).ToList();
+
+            // Every scope is spliced into an ARM URL under the linked credential, and the
+            // guardrail re-judgement below reads this one subscription only.
+            if (scopes.FirstOrDefault(s => !DecomExecution.IsScopeInSubscription(s, subscriptionId.ToString())) is { } badScope)
+            {
+                _logger.LogWarning("Decom window {WindowId} names a scope outside subscription {Subscription}", request.WindowId, subscriptionId);
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = $"DECOM_SCOPE_INVALID: '{badScope}' is not a resource id inside subscription {subscriptionId}; no locks were touched.";
+                return response;
+            }
 
             // Verify the lock set matches the approval before anything is consumed or mutated.
             var recomputed = DecomExecution.ExecutionHash(request.WindowId, planHash, subscriptionId.ToString(), purge, scopes);
@@ -1939,6 +2089,13 @@ namespace AzureDesignStudio.Server.Services
                 var graph = new ResourceGraphClient(_httpClientFactory.CreateClient("arm"), credential);
                 var result = await graph.QueryAllAsync("Resources | project id, type, tags",
                     [subscriptionId.ToString()], context.CancellationToken);
+                if (result.Truncated)
+                {
+                    // Fail closed: resources the listing left out were never judged.
+                    response.StatusCode = StatusCodes.Status502BadGateway;
+                    response.ErrorMessage = "GUARDRAIL_CHECK_FAILED: the resource graph returned an incomplete listing for the do-not-touch re-judgement; no locks were touched.";
+                    return response;
+                }
                 foreach (var row in result.Rows)
                 {
                     var id = JsonString(row, "id");
@@ -2002,7 +2159,7 @@ namespace AzureDesignStudio.Server.Services
                     try
                     {
                         var listUrl = $"{endpoint}{scope.TrimStart('/')}/providers/Microsoft.Authorization/locks?api-version=2016-09-01";
-                        var (ours, foreignNames, _) = DecomExecution.ParseLockState(
+                        var (ours, foreignNames) = DecomExecution.ParseLockState(
                             await transport.GetAsync(listUrl, context.CancellationToken), lockName);
                         if (ours)
                             rows.Add(new DecomLockRow { Scope = scope, Outcome = "already-locked" });
@@ -2011,15 +2168,22 @@ namespace AzureDesignStudio.Server.Services
                         else
                         {
                             await transport.PutAsyncPolled(
-                                DecomExecution.LockUri(endpoint, scope, DecomExecution.LockIdFor(request.WindowId, scope)),
+                                DecomExecution.LockUri(endpoint, scope, lockName),
                                 DecomExecution.LockBody(notes), ct: context.CancellationToken);
                             rows.Add(new DecomLockRow { Scope = scope, Outcome = "locked" });
                         }
                     }
+                    catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+                    {
+                        // The caller went away mid-run: a PUT in flight may or may not have landed.
+                        // That is an unknown outcome for the run, not a refusal by this scope.
+                        throw;
+                    }
                     catch (Exception ex)
                     {
                         // Per-scope isolation: one scope's refusal must not abort the rest.
-                        rows.Add(new DecomLockRow { Scope = scope, Outcome = "failed", Detail = ex.Message });
+                        _logger.LogWarning(ex, "Decom lock failed for scope {Scope} (apply {ApplyId})", scope, applyId);
+                        rows.Add(new DecomLockRow { Scope = scope, Outcome = "failed", Detail = LockFailureDetail(ex) });
                     }
                 }
             }
@@ -2100,6 +2264,13 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
+            if (request.Scopes.FirstOrDefault(s => !DecomExecution.IsScopeInSubscription(s, subscriptionId.ToString())) is { } badScope)
+            {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = $"DECOM_SCOPE_INVALID: '{badScope.Trim()}' is not a resource id inside subscription {subscriptionId}; nothing was released.";
+                return response;
+            }
+
             var displayName = context.GetHttpContext().User.FindFirst("name")?.Value;
             var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
             var applyId = Guid.NewGuid();
@@ -2122,15 +2293,13 @@ namespace AzureDesignStudio.Server.Services
                 try
                 {
                     var listUrl = $"{endpoint}{scope.TrimStart('/')}/providers/Microsoft.Authorization/locks?api-version=2016-09-01";
-                    var (ours, foreignNames, ourLockId) = DecomExecution.ParseLockState(
+                    var (ours, foreignNames) = DecomExecution.ParseLockState(
                         await transport.GetAsync(listUrl, context.CancellationToken), lockName);
-                    if (ours && ourLockId is not null)
+                    if (ours)
                     {
-                        await transport.DeleteAsync(DecomExecution.LockUri(endpoint, scope, ourLockId.Value), context.CancellationToken);
+                        await transport.DeleteAsync(DecomExecution.LockUri(endpoint, scope, lockName), context.CancellationToken);
                         rows.Add(new DecomLockRow { Scope = scope, Outcome = "released" });
                     }
-                    else if (ours)
-                        rows.Add(new DecomLockRow { Scope = scope, Outcome = "failed", Detail = "window lock present but its id is unparseable" });
                     else if (foreignNames.Count > 0)
                         rows.Add(new DecomLockRow { Scope = scope, Outcome = "left-in-place", Detail = string.Join(", ", foreignNames) });
                     else
@@ -2138,7 +2307,8 @@ namespace AzureDesignStudio.Server.Services
                 }
                 catch (Exception ex)
                 {
-                    rows.Add(new DecomLockRow { Scope = scope, Outcome = "failed", Detail = ex.Message });
+                    _logger.LogWarning(ex, "Decom lock release failed for scope {Scope} (apply {ApplyId})", scope, applyId);
+                    rows.Add(new DecomLockRow { Scope = scope, Outcome = "failed", Detail = LockFailureDetail(ex) });
                 }
             }
 
@@ -2146,6 +2316,16 @@ namespace AzureDesignStudio.Server.Services
             foreach (var row in rows) response.Rows.Add(row);
             return response;
         }
+
+        /// <summary>What a client may see about a failed lock call: ARM's own code and status
+        /// when ARM answered, otherwise only the kind of failure. The full exception is logged;
+        /// raw transport messages can carry host names and request ids.</summary>
+        private static string LockFailureDetail(Exception ex) => ex switch
+        {
+            ResourceGraphException rg => $"HTTP {rg.StatusCode}: {rg.Code}",
+            OperationCanceledException => "timed out",
+            _ => ex.GetType().Name,
+        };
 
         private static bool IsValidHash(string hash) =>
             hash.StartsWith(DeployPlanArtifact.HashPrefix, StringComparison.Ordinal) && hash.Length == 71;
@@ -2200,10 +2380,13 @@ namespace AzureDesignStudio.Server.Services
 
         private static bool IsUnderAnyScope(string id, IReadOnlyList<string> scopes)
         {
-            foreach (var scope in scopes)
+            foreach (var raw in scopes)
+            {
+                var scope = raw.TrimEnd('/');
                 if (string.Equals(id, scope, StringComparison.OrdinalIgnoreCase) ||
                     id.StartsWith(scope + "/", StringComparison.OrdinalIgnoreCase))
                     return true;
+            }
             return false;
         }
     }

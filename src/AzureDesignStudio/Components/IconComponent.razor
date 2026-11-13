@@ -1,4 +1,4 @@
-﻿@inject IHttpClientFactory clientFactory
+@inject IHttpClientFactory clientFactory
 
 <Icon Component="component"></Icon>
 
@@ -18,6 +18,9 @@
     {
         if (!string.IsNullOrEmpty(IconPath) && fetchedPath != IconPath)
         {
+            // Remember the attempt, not just a success: an icon that is not there was otherwise
+            // requested again after every render of its parent.
+            fetchedPath = IconPath;
             var httpClient = clientFactory.CreateClient("AzureDesignStudio.ResourceAccess");
             string? svgMarkup;
             try
@@ -29,7 +32,6 @@
                 // Decorative icon unavailable (e.g. local run without CDN assets); render empty.
                 return;
             }
-            fetchedPath = IconPath;
             component = builder =>
             {
                 builder.AddMarkupContent(0, svgMarkup);

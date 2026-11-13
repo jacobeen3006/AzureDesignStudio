@@ -6,7 +6,11 @@ metadata:
   labels:
     app: ads-main
 spec:
-  replicas: 2
+  # One replica: the what-if token gate (WhatIfTokenGate) lives in process memory, so a
+  # preview issued by one pod is unknown to another and approve/apply would answer
+  # WHAT_IF_STALE whenever the ingress picked a different pod. Raise this only once the
+  # gate is backed by shared storage.
+  replicas: 1
   selector:
     matchLabels:
       app: ads-main

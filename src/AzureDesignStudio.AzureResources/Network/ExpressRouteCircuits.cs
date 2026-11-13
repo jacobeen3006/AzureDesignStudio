@@ -66,6 +66,9 @@ namespace AzureDesignStudio.AzureResources.Network
         /// </summary>
         [JsonPropertyName("tier")]
         public string Tier { get; set; }
+
+        [JsonPropertyName("family")]
+        public string Family { get; set; }
     }
 
     /// <summary>
@@ -76,7 +79,24 @@ namespace AzureDesignStudio.AzureResources.Network
         /// <summary>
         /// The service provider through which the ExpressRoute circuit is provisioned.
         /// </summary>
-        [JsonPropertyName("serviceProvider")]
+        // The API takes the provider as serviceProviderProperties { serviceProviderName,
+        // peeringLocation, bandwidthInMbps }; a bare "serviceProvider" string is not a member.
+        [JsonIgnore]
         public string ServiceProvider { get; set; }
+
+        [JsonPropertyName("serviceProviderProperties")]
+        public ExpressRouteCircuitsServiceProviderProperties ServiceProviderProperties { get; set; }
+    }
+
+    public partial class ExpressRouteCircuitsServiceProviderProperties
+    {
+        [JsonPropertyName("serviceProviderName")]
+        public string ServiceProviderName { get; set; }
+
+        [JsonPropertyName("peeringLocation")]
+        public string PeeringLocation { get; set; }
+
+        [JsonPropertyName("bandwidthInMbps")]
+        public int BandwidthInMbps { get; set; }
     }
 }

@@ -1,4 +1,4 @@
-﻿@using AzureDesignStudio.Core.Common
+@using AzureDesignStudio.Core.Common
 @using AzureDesignStudio.Core.Components
 @using Blazor.Diagrams.Core
 @using Blazor.Diagrams.Core.Models
@@ -42,7 +42,6 @@
                                 <SimpleSelectOption Label="No delegation" Value="@("")" />
                                 <SimpleSelectOption Label="Microsoft.App/environments" Value="@("Microsoft.App/environments")" />
                                 <SimpleSelectOption Label="Microsoft.Web/serverfarms" Value="@("Microsoft.Web/serverfarms")" />
-                                <SimpleSelectOption Label="Microsoft.Database/custom" Value="@("Microsoft.Database/custom")" />
                             </SelectOptions>
                         </SimpleSelect>
                         <Tooltip Title=@("Remove the subnet") Style="display:inline-flex;">
@@ -67,10 +66,7 @@
     {
         Diagram.EnsureHistory().Capture(() =>
         {
-            var subnet = vnet.AddSubnet(new SubnetModel()
-                {
-                    Name = "Subnet1"
-                });
+            var subnet = vnet.AddSubnet(vnet.NewSubnet());
 
             Diagram.Groups.Add(subnet);
             Diagram.GetHistory()?.RecordChildMembership(vnet, subnet, added: true);

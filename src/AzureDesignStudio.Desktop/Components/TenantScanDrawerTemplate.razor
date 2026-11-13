@@ -1242,7 +1242,8 @@
     {
         history = await Session.GetHistoryAsync();
         resumable = await Session.GetResumableAsync();
-        completed = history.Where(s => s.Status == "Completed").ToList();
+        // Partial scans are listed for browsing and analysis; only complete ones are compared.
+        completed = history.Where(s => s.Status is "Completed" or "Partial").ToList();
     }
 
     private async Task SwitchTabAsync(string key)
@@ -1826,7 +1827,7 @@
         topoItems = rows.Select(ToItem).ToList();
 
         // rescan diff (8.4): changed or new ids versus the previous completed scan
-        var prev = completed.FirstOrDefault(s => s.Id != topoScanId);
+        var prev = completed.FirstOrDefault(s => s.Id != topoScanId && s.Status == "Completed"); // a partial scan would make what it missed look deleted
         if (prev is not null)
         {
             var prevRows = (await Session.GetSnapshotsAsync(prev.Id))
@@ -2455,6 +2456,7 @@
     private static string ScanColor(string status) => status switch
     {
         "Completed" => "green",
+        "Partial" => "gold",
         "Running" => "blue",
         "Canceled" => "orange",
         _ => "red",

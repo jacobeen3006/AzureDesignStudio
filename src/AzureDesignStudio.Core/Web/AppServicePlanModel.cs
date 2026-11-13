@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AzureDesignStudio.AzureResources.Base;
 using AzureDesignStudio.AzureResources.Web;
 using AzureDesignStudio.Core.Attributes;
@@ -85,6 +85,38 @@ namespace AzureDesignStudio.Core.Web
                 }
             }
         }
+        /// <summary>The dedicated (always-on) sizes the plan form offers. Free and Shared are
+        /// left out: the exported sites set AlwaysOn, which those tiers reject.</summary>
+        public static readonly IReadOnlyList<(string Name, string Tier)> DedicatedSkus =
+        [
+            ("B1", "Basic"), ("B2", "Basic"), ("B3", "Basic"),
+            ("S1", "Standard"), ("S2", "Standard"), ("S3", "Standard"),
+            ("P1v2", "PremiumV2"), ("P2v2", "PremiumV2"), ("P3v2", "PremiumV2"),
+            ("P0v3", "PremiumV3"), ("P1v3", "PremiumV3"), ("P2v3", "PremiumV3"), ("P3v3", "PremiumV3"),
+        ];
+
+        public const string DefaultDedicatedSku = "P1v2";
+
+        /// <summary>Consumption (Y1) or Elastic Premium (EP*): a plan only Function Apps can use.</summary>
+        public bool IsServerless => SkuTier is "Dynamic" or "ElasticPremium";
+
+        /// <summary>True while a Function App on this plan has chosen Consumption or Premium
+        /// hosting: that choice, not the plan form, decides the SKU.</summary>
+        public bool SkuFollowsFunctionApp =>
+            Children.OfType<FunctionAppModel>().Any(f => f.HostingPlan is "consumption" or "premium");
+
+        /// <summary>Sets a dedicated size and the tier that belongs to it. Unknown names are ignored.</summary>
+        public bool UseDedicatedSku(string? skuName)
+        {
+            var match = DedicatedSkus.FirstOrDefault(s => string.Equals(s.Name, skuName, StringComparison.OrdinalIgnoreCase));
+            if (match.Name is null)
+                return false;
+
+            SkuName = match.Name;
+            SkuTier = match.Tier;
+            return true;
+        }
+
         protected override void PopulateArmAttributes()
         {
             base.PopulateArmAttributes();

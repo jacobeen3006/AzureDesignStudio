@@ -269,24 +269,41 @@ public sealed class MsalAccountService
     private Task ShowDeviceCodeAsync(DeviceCodeResult deviceCode)
     {
         var message = $"Sign in at {deviceCode.VerificationUrl} with code {deviceCode.UserCode}";
-        _logger.LogInformation(message);
-        SetWindowTitle(message);
-        try
+        // The code itself stays out of the log file: it is shown, not recorded.
+        _logger.LogInformation("Device-code sign-in started; the code is in the window title and on the clipboard.");
+
+        // MSAL calls this from a thread-pool thread. The window and the clipboard belong to
+        // the UI thread: touching them from here threw (wrong-thread COM error), the catch
+        // below swallowed only the clipboard half, and the fallback sign-in died without the
+        // user ever seeing a code.
+        return MainThread.InvokeOnMainThreadAsync(async () =>
         {
-            Clipboard.Default.SetTextAsync(deviceCode.UserCode!).GetAwaiter().GetResult();
-        }
-        catch (Exception e)
-        {
-            _logger.LogDebug(e, "Could not copy device code to clipboard");
-        }
-        return Task.CompletedTask;
+            SetWindowTitle(message);
+            try
+            {
+                await Clipboard.Default.SetTextAsync(deviceCode.UserCode!);
+            }
+            catch (Exception e)
+            {
+                _logger.LogDebug(e, "Could not copy device code to clipboard");
+            }
+        });
     }
 
     private static void SetWindowTitle(string title)
     {
-        var window = Application.Current?.Windows?.FirstOrDefault();
-        if (window != null)
-            window.Title = title;
+        static void Set(string text)
+        {
+            var window = Application.Current?.Windows?.FirstOrDefault();
+            if (window != null)
+                window.Title = text;
+        }
+
+        // Callers include continuations after MSAL awaits, which need not be on the UI thread.
+        if (MainThread.IsMainThread)
+            Set(title);
+        else
+            MainThread.BeginInvokeOnMainThread(() => Set(title));
     }
 
     private static IntPtr GetWindowHandle()

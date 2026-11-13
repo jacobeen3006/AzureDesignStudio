@@ -28,7 +28,7 @@ namespace AzureDesignStudio.Core.Messaging
             Sku = new()
             {
                 Name = "Standard",
-                Tier = "Regional"
+                Tier = "Standard"
             },
         };
         protected override ResourceBase ArmResource => _serviceBus;
@@ -40,7 +40,11 @@ namespace AzureDesignStudio.Core.Messaging
             get => _serviceBus.Sku.Name;
             set
             {
+                if (string.IsNullOrEmpty(value))
+                    return;
+                // A namespace's tier always equals its sku name (Basic, Standard, Premium).
                 _serviceBus.Sku.Name = value;
+                _serviceBus.Sku.Tier = value;
                 _serviceBus.Sku.Capacity = value == "Premium" ? 1 : 0;
             }
         }

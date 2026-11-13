@@ -940,6 +940,28 @@ body {
 }
 
 /* ---------- Diagram links ---------- */
+
+/* ---------- Drag ghost + cursor (FIX-03: moved here so JS-created elements match) ---------- */
+
+.ads-drag-ghost {
+    position: fixed;
+    z-index: 3000;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    padding: 6px 10px;
+    border: 1px solid var(--ads-accent);
+    border-radius: 8px;
+    background: var(--ads-surface-3);
+    color: var(--ads-text);
+    box-shadow: var(--ads-shadow-2);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+body.ads-dragging {
+    cursor: grabbing;
+}
+
 /* Thicker connector + arrow in every theme; white strokes in dark mode. */
 .diagram-link > path:not(.selection-helper) {
     stroke-width: 3;

@@ -1,9 +1,27 @@
-﻿@using AzureDesignStudio.Core.Components
+@using AzureDesignStudio.Core.Components
 @using Blazor.Diagrams.Core
 @using Blazor.Diagrams.Core.Models
 
 <Form Model="@appsvcPlan" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
     <NameAndLocation Node="@context" />
+    <FormItem Label="Size">
+        @if (appsvcPlan.SkuFollowsFunctionApp)
+        {
+            <Alert Type="@AlertType.Info" ShowIcon="true"
+                   Message="A Function App on this plan uses Consumption or Premium hosting, which decides the plan's size. Switch the Function App to an App Service plan to choose one here." />
+        }
+        else
+        {
+            <SimpleSelect @bind-Value="@SelectedSku" Size="@InputSize.Small">
+                <SelectOptions>
+                    @foreach (var sku in AppServicePlanModel.DedicatedSkus)
+                    {
+                        <SimpleSelectOption Label="@($"{sku.Name} ({sku.Tier})")" Value="@sku.Name" />
+                    }
+                </SelectOptions>
+            </SimpleSelect>
+        }
+    </FormItem>
 </Form>
 
 @code {
@@ -13,6 +31,15 @@
     public Diagram Diagram { get; set; } = null!;
 
     private AppServicePlanModel appsvcPlan => (Node as AppServicePlanModel)!;
+
+    // The select edits name and tier together; a serverless SKU left on the plan shows as the default.
+    private string SelectedSku
+    {
+        get => AppServicePlanModel.DedicatedSkus.FirstOrDefault(s =>
+                   string.Equals(s.Name, appsvcPlan.SkuName, StringComparison.OrdinalIgnoreCase)).Name
+               ?? AppServicePlanModel.DefaultDedicatedSku;
+        set => appsvcPlan.UseDedicatedSku(value);
+    }
 
     private void HandleOSChange(string value)
     {

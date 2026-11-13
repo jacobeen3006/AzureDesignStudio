@@ -1,7 +1,8 @@
-﻿@using AzureDesignStudio.Services
+@using AzureDesignStudio.Services
 @using AzureDesignStudio.SharedModels.Protos
 @inherits FeedbackComponent<string, string>
 @inject DeployGrpcService _deployService
+@inject MessageService _messageService
 
 <Form Model="@_subscriptionInfo" @ref="@_form" OnFinish="@OnFormFinish" OnFinishFailed="@OnFinishFailed"
     Loading="@_formLoading" LabelCol="@(new ColLayoutParam { Span = 10 })" WrapperCol="@(new ColLayoutParam { Span = 14 })" Size="@FormSize.Small">
@@ -74,20 +75,31 @@
     private async Task OnFormFinish(EditContext editContext)
     {
         _formLoading = true;
+        int response;
+        try
+        {
+            response = await _deployService.LinkAzureSubscription(_subscriptionInfo);
+        }
+        finally
+        {
+            _formLoading = false;
+        }
 
-        var response = await _deployService.LinkAzureSubscription(_subscriptionInfo);
         if (response == 200)
         {
-            _formLoading = false;
-
             DrawerRef<string> dr = (FeedbackRef as DrawerRef<string>)!;
             await dr!.CloseAsync("completed");
+            return;
         }
-        else
+
+        // The form used to stop spinning and say nothing, which read as "saved".
+        _messageService.Error(response switch
         {
-            _formLoading = false;
-            // Show error message
-        }
+            400 => "The subscription was not linked: the server did not accept these details. Check the ids and the subscription name.",
+            401 => "The subscription was not linked: you are not signed in, or the sign-in has expired.",
+            503 => "The subscription was not linked: the server could not be reached, or it cannot store secrets (its Key Vault is not configured).",
+            _ => $"The subscription was not linked: the server answered {response}.",
+        });
     }
 
     private void OnFinishFailed(EditContext editContext)

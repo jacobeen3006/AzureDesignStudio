@@ -1,4 +1,4 @@
-﻿using AzureDesignStudio.SharedModels.Protos;
+using AzureDesignStudio.SharedModels.Protos;
 using Grpc.Net.ClientFactory;
 using Google.Protobuf.WellKnownTypes;
 
@@ -14,35 +14,64 @@ namespace AzureDesignStudio.Services
             _deployClient = _clientFactory.CreateClient<Deploy.DeployClient>("DeployClientWithAuth");
         }
 
+        // A call that never produced an answer: server down, no token, refused at the transport.
+        // The drawers await these from OnInitializedAsync and click handlers, where an escaping
+        // exception leaves a spinner on screen for good; the wrappers answer instead.
+        private static bool IsCallFailure(Exception e) =>
+            e is Grpc.Core.RpcException or InvalidOperationException or HttpRequestException;
+
+        /// <summary>True when the last <see cref="GetLinkedSubscriptions"/> could not be answered -
+        /// its null then means "unknown", not "none linked".</summary>
+        public bool LinkedSubscriptionsUnknown { get; private set; }
+
         public async Task<IList<SubscriptionRes>?> GetLinkedSubscriptions()
         {
-            IList<SubscriptionRes>? linkedSubscriptions = null;
-
-            var response = await _deployClient.LoadSubscriptionInfoAsync(new Empty());
-            if (response.StatusCode == 200)
+            try
             {
-                linkedSubscriptions = response.SubscriptionData?.ToList();
+                var response = await _deployClient.LoadSubscriptionInfoAsync(new Empty());
+                LinkedSubscriptionsUnknown = response.StatusCode != 200;
+                return response.StatusCode == 200 ? response.SubscriptionData?.ToList() : null;
             }
-
-            return linkedSubscriptions;
+            catch (Exception e) when (IsCallFailure(e))
+            {
+                LinkedSubscriptionsUnknown = true;
+                return null;
+            }
         }
 
+        /// <returns>The server's status, or 503 when the server could not be reached.</returns>
         public async Task<int> LinkAzureSubscription(SubscriptionInfo subscriptionInfo)
         {
-            var response = await _deployClient.SaveSubscriptionInfoAsync(subscriptionInfo);
-
-            return response.StatusCode;
+            try
+            {
+                var response = await _deployClient.SaveSubscriptionInfoAsync(subscriptionInfo);
+                return response.StatusCode;
+            }
+            catch (Exception e) when (IsCallFailure(e))
+            {
+                return 503;
+            }
         }
 
-        public async Task<IList<string>> GetResourceGroups(string subscriptionId)
+        /// <returns>The resource group names, or null when they could not be listed (the server
+        /// could not be reached, or Azure refused the linked credential). An empty list is a
+        /// subscription that really has none.</returns>
+        public async Task<IList<string>?> GetResourceGroups(string subscriptionId)
         {
-            var response = await _deployClient.GetResourceGroupsAsync(
-                new GetRgsRequest
-                {
-                    SubscriptionId = subscriptionId
-                });
+            try
+            {
+                var response = await _deployClient.GetResourceGroupsAsync(
+                    new GetRgsRequest
+                    {
+                        SubscriptionId = subscriptionId
+                    });
 
-            return response.ResourceGroupName.ToList();
+                return response.StatusCode == 200 ? response.ResourceGroupName.ToList() : null;
+            }
+            catch (Exception e) when (IsCallFailure(e))
+            {
+                return null;
+            }
         }
 
         public async Task<WhatIfResponse?> WhatIfAsync(string subscriptionId, string rgName, string armTemplate, string parameters,
@@ -72,9 +101,18 @@ namespace AzureDesignStudio.Services
                 request.Location = location;
         }
 
+        /// <summary>Null when the approval could not be recorded. Nothing has been deployed at
+        /// that point - approval precedes the apply - so the caller can say so.</summary>
         public async Task<PlanApprovalResponse?> ApprovePlanAsync(string planHash)
         {
-            return await _deployClient.ApprovePlanAsync(new PlanApprovalRequest { PlanHash = planHash });
+            try
+            {
+                return await _deployClient.ApprovePlanAsync(new PlanApprovalRequest { PlanHash = planHash });
+            }
+            catch (Exception e) when (IsCallFailure(e))
+            {
+                return null;
+            }
         }
 
         /// <summary>Reads the server-side do-not-touch list (v2 13.1). Empty json = no policy.</summary>
@@ -90,12 +128,12 @@ namespace AzureDesignStudio.Services
         }
 
         /// <summary>Deploys the reviewed payload as a deployment-stack (v2 12.3): same what-if token
-        /// and plan hash the review produced; the unmanage policy stays Detach-flavored - Delete is
-        /// refused server-side until the Phase 13 gates ship. <paramref name="bypassOutOfSync"/> is
+        /// and plan hash the review produced; resources the stack stops managing are detached
+        /// (kept in Azure) - delete is refused server-side until the Phase 13 gates ship. <paramref name="bypassOutOfSync"/> is
         /// the review-gated out-of-sync override, only ever sent after the review screen showed
         /// the managed list and the user ticked the box.</summary>
         public async Task<CreateStackResponse?> CreateStackAsync(string subscriptionId, string rgName, string stackName,
-            string armTemplate, string parameters, string whatIfToken, string planHash, string missingAction = "Detach",
+            string armTemplate, string parameters, string whatIfToken, string planHash, string resourcesAction = "detach",
             bool bypassOutOfSync = false)
         {
             try
@@ -109,7 +147,7 @@ namespace AzureDesignStudio.Services
                     Parameters = parameters,
                     WhatIfToken = whatIfToken,
                     PlanHash = planHash,
-                    MissingAction = missingAction,
+                    ResourcesAction = resourcesAction,
                     BypassOutOfSync = bypassOutOfSync,
                 });
             }
@@ -174,7 +212,7 @@ namespace AzureDesignStudio.Services
 
         public async Task CreateDeployment(string subscriptionId, string rgName, string armTemplate, string parameters,
             string whatIfToken, string planHash,
-            Action<string, string> updateStatus,
+            Func<string, string, Task> updateStatus,
             DeployTarget target = DeployTarget.ResourceGroup, string managementGroupId = "", string location = "")
         {
             var request = new DeploymentRequest
@@ -188,26 +226,42 @@ namespace AzureDesignStudio.Services
             };
             ApplyTarget(request, target, managementGroupId, location);
 
-            using var deploymentResponse = _deployClient.CreateDeployment(request);
-            var responseStream = deploymentResponse.ResponseStream;
-            while (await responseStream.MoveNext(default))
+            // The callback is awaited: as an Action it was handed an async lambda, i.e. an
+            // async void whose exceptions nobody could observe.
+            var submitted = false;
+            try
             {
-                var response = responseStream.Current;
-                if (response.DeploymentStatus == "unknown")
+                using var deploymentResponse = _deployClient.CreateDeployment(request);
+                var responseStream = deploymentResponse.ResponseStream;
+                while (await responseStream.MoveNext(default))
                 {
-                    // The server could not confirm ARM's outcome: not a failure - the truth
-                    // lives in Azure until verified. Surface it as such, not via the error gate.
-                    updateStatus("unknown", response.ErrorMessage);
-                    return;
-                }
-                if (response.StatusCode != 200)
-                {
-                    // Something bad happening
-                    updateStatus("error", response.ErrorMessage);
-                    return;
-                }
+                    submitted = true;
+                    var response = responseStream.Current;
+                    if (response.DeploymentStatus == "unknown")
+                    {
+                        // The server could not confirm ARM's outcome: not a failure - the truth
+                        // lives in Azure until verified. Surface it as such, not via the error gate.
+                        await updateStatus("unknown", response.ErrorMessage);
+                        return;
+                    }
+                    if (response.StatusCode != 200)
+                    {
+                        // Something bad happening
+                        await updateStatus("error", response.ErrorMessage);
+                        return;
+                    }
 
-                updateStatus(response.DeploymentStatus, response.ErrorMessage);
+                    await updateStatus(response.DeploymentStatus, response.ErrorMessage);
+                }
+            }
+            catch (Exception e) when (e is Grpc.Core.RpcException or HttpRequestException)
+            {
+                // Before the first message nothing reached ARM as far as this client knows.
+                // After it, the deployment is running and only the stream died: its outcome
+                // is unknown, never "failed", and never a status dialog stuck on "started".
+                await updateStatus(submitted ? "unknown" : "error", submitted
+                    ? "The connection to the server was lost while the deployment was running. It may still be in progress - check its state in Azure."
+                    : "The deployment could not be started: the server is not reachable or refused the request.");
             }
         }
     }

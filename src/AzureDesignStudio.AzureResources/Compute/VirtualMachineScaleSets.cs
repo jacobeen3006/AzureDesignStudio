@@ -84,6 +84,9 @@ namespace AzureDesignStudio.AzureResources.Compute
         /// <summary>
         /// An array of virtual machine profiles.
         /// </summary>
+        [JsonPropertyName("upgradePolicy")]
+        public object UpgradePolicy { get; set; }
+
         [JsonPropertyName("virtualMachineProfile")]
         public object VirtualMachineProfile { get; set; }
 

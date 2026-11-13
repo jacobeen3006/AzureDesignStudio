@@ -21,7 +21,10 @@ public sealed class WorkspaceDecomWindows(WorkspaceDb db)
     public async Task<DecomWindowModel?> LatestAsync()
     {
         await using var ctx = db.CreateContext();
-        return await ctx.DecomWindows.OrderByDescending(w => w.UpdatedAtUtc).FirstOrDefaultAsync();
+        // Ordered in memory: the SQLite provider cannot translate ORDER BY over a
+        // DateTimeOffset column and throws NotSupportedException. One row per window.
+        var windows = await ctx.DecomWindows.AsNoTracking().ToListAsync();
+        return windows.OrderByDescending(w => w.UpdatedAtUtc).FirstOrDefault();
     }
 
     /// <summary>Inserts or refreshes the row keyed by WindowId; the outcome fields always

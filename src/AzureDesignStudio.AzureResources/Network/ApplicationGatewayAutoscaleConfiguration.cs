@@ -17,7 +17,7 @@ namespace AzureDesignStudio.AzureResources.Network
         /// </summary>
         [Required]
         [JsonPropertyName("minCapacity")]
-        public int MinCapacity { get; set; }
+        public int? MinCapacity { get; set; }
 
         /// <summary>
         /// Upper bound on number of Application Gateway capacity.

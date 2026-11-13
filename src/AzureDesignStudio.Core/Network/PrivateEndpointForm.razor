@@ -12,6 +12,21 @@
         <Input Placeholder="group id, e.g. sqlServer" TValue="string" Size="@InputSize.Small"
             @bind-Value="@context.PrivateLinkGroupId"></Input>
     </FormItem>
+    @if (pe.Subnet is null)
+    {
+        <Alert Type="@AlertType.Warning" ShowIcon="true"
+               Message="A private endpoint is created in a subnet. Place it in one." />
+    }
+    else if (pe.LinkedTarget is { } target)
+    {
+        <Alert Type="@AlertType.Info" ShowIcon="true"
+               Message="@($"Connected to '{target.Name}' ({target.ServiceName}) through its link, with group id '{pe.EffectiveGroupId}'.")" />
+    }
+    else if (pe.EffectiveTargetId.Length == 0)
+    {
+        <Alert Type="@AlertType.Warning" ShowIcon="true"
+               Message="No target yet. Draw a link to the resource this endpoint is for, or enter its resource id above." />
+    }
 </Form>
 
 @code {

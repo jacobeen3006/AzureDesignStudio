@@ -1,4 +1,4 @@
-﻿async function diagram2PicAsync(type, width, height) {
+async function diagram2PicAsync(type, width, height) {
     var diagram = document.querySelector(".diagram-canvas");
     var dataUrl = "";
     if (type === "png") {
@@ -109,7 +109,9 @@ window.AdsDropZone = {
             e.stopPropagation();
             clearDropState();
             if (zone.__adsRef) {
-                zone.__adsRef.invokeMethodAsync('HandleDropAtAsync', e.clientX, e.clientY, self.dragKey || '');
+                // The component may have been disposed since it handed over this reference.
+                zone.__adsRef.invokeMethodAsync('HandleDropAtAsync', e.clientX, e.clientY, self.dragKey || '')
+                    .catch(function () { });
             }
         }, true);
     }
@@ -171,6 +173,16 @@ window.AdsStencilDrag = {
         };
 
         document.addEventListener('pointerdown', function (e) {
+            // Any new pointer-down ends whatever drag state is still held, whichever
+            // pointer it belongs to. Touch contacts get a new id every time, so a touch
+            // drag whose release was lost can only ever be cleared by a different
+            // pointer; and a second finger or a pen landing on a tile mid-drag would
+            // otherwise overwrite `active` and leave the first drag's ghost on screen.
+            if (active) {
+                const stale = active;
+                active = null;
+                clear(stale);
+            }
             if (e.button !== 0) {
                 return;
             }
@@ -195,6 +207,16 @@ window.AdsStencilDrag = {
 
         document.addEventListener('pointermove', function (e) {
             if (!active || e.pointerId !== active.pointerId) {
+                return;
+            }
+
+            // Cancel a stale drag when the pointer moves without the primary button held
+            // (bit 0). Testing for "no button at all" kept the drag alive when the left
+            // button was released outside the window while another was still down.
+            if ((e.buttons & 1) === 0) {
+                const stale = active;
+                active = null;
+                clear(stale);
                 return;
             }
 
@@ -231,7 +253,8 @@ window.AdsStencilDrag = {
         }, { passive: false, capture: true });
 
         const finish = function (e, cancelled) {
-            if (!active || (e.pointerId && e.pointerId !== active.pointerId)) {
+            // pointerId 0 is a real id (the mouse, in some browsers), so test its type.
+            if (!active || (typeof e.pointerId === 'number' && e.pointerId !== active.pointerId)) {
                 return;
             }
 
@@ -241,7 +264,11 @@ window.AdsStencilDrag = {
 
             const dropZone = liveZone();
             if (drag.dragging && !cancelled && inZone(e.clientX, e.clientY) && dropZone && dropZone.__adsRef) {
-                dropZone.__adsRef.invokeMethodAsync('HandleDropAtAsync', e.clientX, e.clientY, drag.key);
+                const pending = dropZone.__adsRef.invokeMethodAsync('HandleDropAtAsync', e.clientX, e.clientY, drag.key);
+                // The component may have been disposed since it handed over this reference.
+                if (pending && pending.catch) {
+                    pending.catch(function () { });
+                }
             }
         };
 

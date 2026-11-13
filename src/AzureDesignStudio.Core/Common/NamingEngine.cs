@@ -17,7 +17,8 @@ public sealed record NamingProfile(int MinLength, int MaxLength, string AllowedC
 
     public bool Matches(string name) =>
         name.Length >= MinLength && name.Length <= MaxLength &&
-        name.All(c => AllowedChars.Contains(c) && (!Lowercase || char.IsLower(c) || char.IsAsciiDigit(c)));
+        // "Lowercase" forbids capitals; it does not forbid the separators the profile allows.
+        name.All(c => AllowedChars.Contains(c) && (!Lowercase || !char.IsUpper(c)));
 
     public char Separator => AllowedChars.Contains('-') ? '-' : AllowedChars.Contains('_') ? '_' : '\0';
 }
@@ -40,7 +41,7 @@ public static class NamingEngine
     private static readonly Dictionary<string, NamingProfile> Profiles = new(StringComparer.Ordinal)
     {
         [AdsConstants.StorageAccount] = new(3, 24, NamingProfile.AlphaNumeric, Lowercase: true, GloballyUnique: true),
-        [AdsConstants.SqlServer] = new(3, 15, NamingProfile.AlphaNumeric, Lowercase: true, GloballyUnique: true),
+        [AdsConstants.SqlServer] = new(1, 63, NamingProfile.AlphaNumeric + "-", Lowercase: true, GloballyUnique: true),
         [AdsConstants.CosmosDBAccount] = new(3, 44, NamingProfile.AlphaNumeric + "-", Lowercase: true, GloballyUnique: true),
         [AdsConstants.ContainerRegistry] = new(5, 50, NamingProfile.AlphaNumeric, Lowercase: false, GloballyUnique: true),
         [AdsConstants.KeyVault] = new(3, 24, NamingProfile.AlphaNumeric + "-", Lowercase: false, GloballyUnique: true),

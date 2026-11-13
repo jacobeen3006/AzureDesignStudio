@@ -1,4 +1,4 @@
-﻿syntax = "proto3";
+syntax = "proto3";
 
 option csharp_namespace = "AzureDesignStudio.SharedModels.Protos";
 
@@ -188,13 +188,20 @@ message CreateStackRequest {
 	string parameters = 5;
 	string what_if_token = 6;
 	string plan_hash = 7;
-	string missing_action = 8;
-	string resource_group_action = 9;
-	string deployment_action = 10;
-	bool deny_enabled = 11;
-	repeated string deny_locks = 12;
+	// actionOnUnmanage, in the API's own slots: "detach" or "delete" (delete is refused
+	// server-side until the decommissioning gates ship). Field numbers are unchanged from
+	// the earlier missing/resource_group/deployment names, which did not exist in the API.
+	string resources_action = 8;
+	string resource_groups_action = 9;
+	string management_groups_action = 10;
+	// 11/12 carried a status + lock-list deny model the API never had.
+	reserved 11, 12;
+	reserved "deny_enabled", "deny_locks";
 	// v2 12.3: explicit review-gated out-of-sync bypass; lands inside the hashed stack body.
 	bool bypass_out_of_sync = 13;
+	// denySettings.mode: "none" (default when empty), "denyDelete" or "denyWriteAndDelete".
+	string deny_mode = 14;
+	bool deny_apply_to_child_scopes = 15;
 }
 
 message GetStackRequest {

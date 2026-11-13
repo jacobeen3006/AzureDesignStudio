@@ -123,7 +123,7 @@ public class ScanEngineTests
     }
 
     [Fact]
-    public async Task RunAsync_GroupFails_FailureRecordedScanStillCompletes()
+    public async Task RunAsync_GroupFails_FailureRecordedScanFinishesAsPartial()
     {
         var handler = new FakeHandler((body, _) => body.Contains("bad")
             ? Arg("""{"error":{"code":"BadRequest","message":"nope"}}""", HttpStatusCode.BadRequest)
@@ -133,7 +133,7 @@ public class ScanEngineTests
 
         var checkpoint = await engine.RunAsync(Request("good", "bad"), sink);
 
-        Assert.Equal(["Completed"], sink.Statuses);
+        Assert.Equal(["Partial"], sink.Statuses); // never the baseline a later scan is compared with
         Assert.Single(checkpoint.CompletedQueries);
         Assert.Single(checkpoint.FailedQueries);
         Assert.Contains("BadRequest", checkpoint.FailedQueries.Values.Single());
@@ -161,8 +161,10 @@ public class ScanEngineTests
         // resume: finished group must never be re-queried
         var resumedHandler = new FakeHandler((_, _) => Arg(Page(["/subs/b/rg/a/providers/Microsoft.Test/w/one", "/subs/b/rg/a/providers/Microsoft.Test/w/two"])));
         var resumeSink = new RecordingSink();
-        var resumed = await engine.RunAsync(Request("a", "b"), resumeSink, resume: ScanCheckpoint.FromJson(first.ToJson()));
+        var resumeEngine = new ScanEngine(Graph(resumedHandler), groupSize: 1, maxParallel: 1);
+        var resumed = await resumeEngine.RunAsync(Request("a", "b"), resumeSink, resume: ScanCheckpoint.FromJson(first.ToJson()));
 
+        Assert.Single(resumedHandler.RequestBodies);
         Assert.DoesNotContain(resumedHandler.RequestBodies, b => b.Contains("'a'"));
         Assert.True(resumeSink.Resumed);
         Assert.Equal(2, resumed.CompletedQueries.Count);
@@ -276,5 +278,126 @@ public class ScanEngineTests
         Assert.Equal("AzureUSGovernment", AzureDesignStudio.Discovery.Arm.CloudProfile.ForName("azureusgovernment").Name);
         Assert.Equal("AzureCloud", AzureDesignStudio.Discovery.Arm.CloudProfile.ForName(null).Name);
         Assert.Equal("AzureCloud", AzureDesignStudio.Discovery.Arm.CloudProfile.ForName("bogus").Name);
+    }
+
+    private sealed class ThrowingHandler(Func<string, Exception?> failure, Func<string, HttpResponseMessage> ok) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);
+            if (failure(body) is { } e) throw e;
+            return ok(body);
+        }
+    }
+
+    // A socket error or an HttpClient timeout is one group's failure. It used to escape the
+    // run before ScanFinishedAsync, leaving the scan recorded as Running with no error.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunAsync_TransportFailureOrTimeout_IsAGroupFailureAndTheScanStillFinishes(bool timeout)
+    {
+        Exception failure = timeout
+            ? new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.")
+            : new HttpRequestException("No such host is known.");
+        var handler = new ThrowingHandler(
+            body => body.Contains("bad") ? failure : null,
+            _ => Arg(Page(["/subs/good/rg/a/providers/Microsoft.Test/w/one"])));
+        var sink = new RecordingSink();
+        var engine = new ScanEngine(new ResourceGraphClient(new HttpClient(handler), new FakeCredential(), null, (_, _) => Task.CompletedTask), groupSize: 1);
+
+        var checkpoint = await engine.RunAsync(Request("good", "bad"), sink);
+
+        Assert.Equal(["Partial"], sink.Statuses);
+        Assert.Single(checkpoint.CompletedQueries);
+        Assert.Contains(failure.GetType().Name, Assert.Single(checkpoint.FailedQueries).Value);
+    }
+
+    [Fact]
+    public async Task RunAsync_EveryGroupSucceeding_IsCompleted()
+    {
+        var handler = new FakeHandler((_, _) => Arg(Page(["/subs/s/rg/a/providers/Microsoft.Test/w/one"])));
+        var sink = new RecordingSink();
+        var engine = new ScanEngine(Graph(handler), groupSize: 1);
+
+        var checkpoint = await engine.RunAsync(Request("a", "b"), sink);
+
+        Assert.Equal(["Completed"], sink.Statuses);
+        Assert.Empty(checkpoint.FailedQueries);
+        Assert.False(checkpoint.AnyTruncated);
+    }
+
+    [Fact]
+    public async Task RunAsync_PageThatCouldNotBeStored_IsNotMarkedComplete()
+    {
+        var handler = new FakeHandler((_, _) => Arg(Page(["/subs/s/rg/a/providers/Microsoft.Test/w/one"])));
+        var sink = new RecordingSink { onPage = n => n == 1 ? throw new InvalidOperationException("database is locked") : Task.CompletedTask };
+        var engine = new ScanEngine(Graph(handler), groupSize: 1, maxParallel: 1);
+
+        var checkpoint = await engine.RunAsync(Request("a", "b"), sink);
+
+        // The group whose page was lost must be queried again by the next run.
+        Assert.Single(checkpoint.CompletedQueries);
+        Assert.Equal(1, checkpoint.Rows);
+        Assert.Contains("database is locked", Assert.Single(checkpoint.FailedQueries).Value);
+        Assert.DoesNotContain(Assert.Single(checkpoint.FailedQueries).Key, checkpoint.CompletedQueries);
+    }
+
+    private sealed class SnapshotSink : IScanSink
+    {
+        public readonly List<int> CompletedAtPersist = [];
+        public CancellationToken FinishToken;
+        public string? FinishStatus;
+        public Func<Task>? OnPage;
+
+        public Task ScanStartedAsync(ScanRequest request, ScanCheckpoint checkpoint, bool isResume, CancellationToken ct) => Task.CompletedTask;
+
+        public async Task PagePersistedAsync(string queryKey, IReadOnlyList<InventoryItem> page, ScanCheckpoint checkpoint, CancellationToken ct)
+        {
+            // What a real sink does: serialise the checkpoint and store it with the page.
+            var stored = ScanCheckpoint.FromJson(checkpoint.ToJson())!;
+            await Task.Yield();
+            lock (CompletedAtPersist) CompletedAtPersist.Add(stored.CompletedQueries.Count);
+            Assert.Contains(queryKey, stored.CompletedQueries);
+            if (OnPage is { } cb) await cb();
+        }
+
+        public Task ScanFinishedAsync(string status, ScanCheckpoint checkpoint, CancellationToken ct)
+        {
+            FinishStatus = status;
+            FinishToken = ct;
+            ct.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+    }
+
+    // Each stored checkpoint must hold exactly the groups stored so far - never one whose
+    // rows are still in flight, never an older snapshot landing after a newer one.
+    [Fact]
+    public async Task RunAsync_ParallelGroups_StoreCheckpointsInOrder()
+    {
+        var handler = new FakeHandler((_, _) => Arg(Page(["/subs/s/rg/a/providers/Microsoft.Test/w/one"])));
+        var sink = new SnapshotSink();
+        var engine = new ScanEngine(Graph(handler), groupSize: 1, maxParallel: 4);
+        var subs = Enumerable.Range(0, 24).Select(i => $"sub{i}").ToArray();
+
+        var checkpoint = await engine.RunAsync(Request(subs), sink);
+
+        Assert.Equal(24, checkpoint.CompletedQueries.Count);
+        Assert.Equal(Enumerable.Range(1, 24), sink.CompletedAtPersist);
+    }
+
+    [Fact]
+    public async Task RunAsync_Cancelled_StoresTheTerminalStatusWithALiveToken()
+    {
+        var handler = new FakeHandler((_, _) => Arg(Page(["/subs/s/rg/a/providers/Microsoft.Test/w/one"])));
+        var cts = new CancellationTokenSource();
+        var sink = new SnapshotSink { OnPage = () => { cts.Cancel(); return Task.CompletedTask; } };
+        var engine = new ScanEngine(Graph(handler), groupSize: 1, maxParallel: 1);
+
+        await engine.RunAsync(Request("a", "b"), sink, ct: cts.Token);
+
+        Assert.Equal("Canceled", sink.FinishStatus);
+        Assert.False(sink.FinishToken.IsCancellationRequested);
     }
 }

@@ -13,7 +13,9 @@ public static class WindowsSecretStore
     public const string TargetPrefix = "AzureDesignStudio/";
 
     private const int CRED_TYPE_GENERIC = 1;
-    private const int CRED_PERSIST_LOCAL_MACHINE = 3;
+    // wincred.h: SESSION = 1, LOCAL_MACHINE = 2, ENTERPRISE = 3. The value 3 that stood here
+    // is ENTERPRISE, which roams the secret with the user's domain profile.
+    private const int CRED_PERSIST_LOCAL_MACHINE = 2;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct CREDENTIAL

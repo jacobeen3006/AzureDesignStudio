@@ -1,4 +1,4 @@
-﻿using AntDesign;
+using AntDesign;
 using AzureDesignStudio.Core;
 using AzureDesignStudio.Core.DTO;
 using AzureDesignStudio.Core.Models;
@@ -165,14 +165,34 @@ namespace AzureDesignStudio.Components
                         }
                         else
                         {
+                            var free = vnet.NextFreeSubnetPrefix();
+                            if (free is null)
+                            {
+                                messageService.Error(new MessageConfig
+                                {
+                                    Content = $"No free /24 subnet available inside '{vnet.Name}'. " +
+                                              "Add a larger address space or remove existing subnets.",
+                                    Key = "ads-subnet-exhausted",
+                                    Duration = 8,
+                                });
+                                return;
+                            }
                             provisionedVnet = vnet;
                             provisionedSubnet = new SubnetModel
                             {
                                 Name = dedicatedName,
-                                AddressPrefix = vnet.NextFreeSubnetPrefix(),
+                                AddressPrefix = free,
                             };
                             overlappedGroup = provisionedSubnet;
                         }
+                    }
+
+                    // A subnet dropped from the palette takes the next free range of the network
+                    // it lands in, rather than the fixed 10.0.0.0/24 every new subnet starts with.
+                    if (node is SubnetModel droppedSubnet && overlappedGroup is VirtualNetworkModel hostVnet
+                        && hostVnet.NextFreeSubnetPrefix() is { } freePrefix)
+                    {
+                        droppedSubnet.AddressPrefix = freePrefix;
                     }
 
                     var (result, message) = ((IAzureNode)node).IsDrappable(overlappedGroup!);
@@ -214,9 +234,15 @@ namespace AzureDesignStudio.Components
                         messageService.Info($"{provisionedSubnet.Name} was created automatically in {provisionedVnet!.Name}.");
                     }
                 }
+                else if (string.IsNullOrWhiteSpace(stencil.ReferenceArchPath))
+                {
+                    // A gallery entry with no design behind it: requesting "" fetched the app's
+                    // own page and reported a JSON error.
+                    messageService.Info($"The '{stencil.Name}' reference architecture is not included in this build.");
+                }
                 else
                 {
-                    await LoadReferenceArch(stencil.ReferenceArchPath!);
+                    await LoadReferenceArch(stencil.ReferenceArchPath);
                 }
             }
             catch (NotImplementedException)
@@ -227,31 +253,27 @@ namespace AzureDesignStudio.Components
 
         private async Task LoadReferenceArch(string refArchPath)
         {
-            messageService.Loading("Loading the design ...", 0);
+            // Keyed so the outcome replaces the notice instead of leaving it on screen.
+            const string messageKey = "ads-design-load";
+            messageService.Loading(new MessageConfig { Content = "Loading the design ...", Key = messageKey, Duration = 0 });
+            string? failure;
             try
             {
                 var httpClient = _clientFactory.CreateClient("AzureDesignStudio.ResourceAccess");
                 var diagramGraph = await httpClient.GetFromJsonAsync<DiagramGraph>(refArchPath);
-                if (diagramGraph == null)
-                {
-                    messageService.Error("The reference architecture file could not be read.");
-                    return;
-                }
-
-                // Programmatic replace: never recorded, and prior history belongs to the old design.
-                adsContext.Diagram.History.Suspend(() =>
-                {
-                    adsContext.Diagram.Nodes.Clear();
-                    adsContext.Diagram.Links.Clear();
-                    adsContext.Diagram.Groups.Clear();
-                    DataModelFactory.LoadDiagramFromDto(adsContext.Diagram, diagramGraph, _mapper);
-                });
-                adsContext.Diagram.History.Clear();
+                failure = diagramGraph == null
+                    ? "The reference architecture file could not be read."
+                    : await AzureDesignStudio.Services.CanvasLoader.ReplaceAsync(adsContext.Diagram, diagramGraph, _mapper);
             }
             catch (Exception ex)
             {
-                messageService.Error($"Failed to load the reference architecture: {ex.Message}");
+                failure = ex.Message;
             }
+
+            if (failure is null)
+                messageService.Success(new MessageConfig { Content = "The design is loaded.", Key = messageKey, Duration = 2 });
+            else
+                messageService.Error(new MessageConfig { Content = $"Failed to load the reference architecture: {failure}", Key = messageKey, Duration = 6 });
         }
         #endregion
 

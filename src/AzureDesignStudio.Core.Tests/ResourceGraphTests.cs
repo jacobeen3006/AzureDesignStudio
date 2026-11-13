@@ -92,6 +92,39 @@ public class ResourceGraphTests
         Assert.Equal(1, second.RootElement.GetProperty("options").GetProperty("$skipToken").GetProperty("min").GetInt32());
     }
 
+    // What the service sends for an ordinary large result: every page but the last carries a
+    // $skipToken while resultTruncated stays "false". Paging on resultTruncated stopped here
+    // after page one and reported 1,000 rows as the complete answer.
+    [Fact]
+    public async Task QueryAllAsync_FollowsSkipTokenWhenResultTruncatedIsFalse()
+    {
+        var (client, handler, _) = Create((_, i) => i switch
+        {
+            0 => ArgJson(Page(1000, truncated: false, skipToken: "\"page-2\"", total: 2500)),
+            1 => ArgJson(Page(1000, truncated: false, skipToken: "\"page-3\"", total: 2500)),
+            _ => ArgJson(Page(500, truncated: false, total: 2500)),
+        });
+
+        var result = await client.QueryAllAsync("Resources | project id");
+
+        Assert.Equal(2500, result.Rows.Count);
+        Assert.False(result.Truncated);
+        Assert.Equal(3, handler.RequestBodies.Count);
+        using var third = JsonDocument.Parse(handler.RequestBodies.ToArray()[2]);
+        Assert.Equal("page-3", third.RootElement.GetProperty("options").GetProperty("$skipToken").GetString());
+    }
+
+    [Fact]
+    public async Task QueryAllAsync_RepeatedSkipToken_StopsAndReportsTruncation()
+    {
+        var (client, handler, _) = Create((_, _) => ArgJson(Page(1000, truncated: false, skipToken: "\"same\"", total: 5000)));
+
+        var result = await client.QueryAllAsync("Resources | project id");
+
+        Assert.True(result.Truncated);
+        Assert.Equal(2, handler.RequestBodies.Count); // no infinite loop
+    }
+
     [Fact]
     public async Task QueryAllAsync_TruncatedWithoutToken_StopsAndReports()
     {

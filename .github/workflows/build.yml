@@ -31,6 +31,7 @@ jobs:
         dotnet restore src/AzureDesignStudio --locked-mode
         dotnet restore src/AzureDesignStudio.Mcp --locked-mode
         dotnet restore src/AzureDesignStudio.Core.Tests --locked-mode
+        dotnet restore src/AzureDesignStudio.Server.Tests --locked-mode
 
     # Three holes, three lines: a tracked lock the restore had to rewrite
     # (diff catches it), a lock the restore just created that was never
@@ -48,14 +49,28 @@ jobs:
       # project targets net10.0-windows and cannot build on ubuntu runners.
       # Server + WASM + MCP + Tests transitively cover Core, AzureResources,
       # SharedModels, SourceGeneration, Workspace and Discovery.
+      #
+      # RunAOTCompilation=false: the WASM client turns AOT on in Release, which
+      # needs the wasm-tools workload (NETSDK1147 without it) and several
+      # minutes of compile. The Docker step below installs the workload and
+      # does the full AOT build, so AOT is still exercised once per run.
       run: |
-        dotnet build src/AzureDesignStudio.Server -c Release
-        dotnet build src/AzureDesignStudio -c Release
+        dotnet build src/AzureDesignStudio.Server -c Release -p:RunAOTCompilation=false
+        dotnet build src/AzureDesignStudio -c Release -p:RunAOTCompilation=false
         dotnet build src/AzureDesignStudio.Mcp -c Release
         dotnet build src/AzureDesignStudio.Core.Tests -c Release
+        dotnet build src/AzureDesignStudio.Server.Tests -c Release -p:RunAOTCompilation=false
 
     - name: Test (offline)
       run: dotnet test src/AzureDesignStudio.Core.Tests -c Release --no-build --filter "Category!=LiveAzure"
+
+    # Server.Tests references the Server, which hosts the WASM client: the same
+    # AOT switch as the build above, or the test run would rebuild with AOT on.
+    - name: Test (server RPCs, no Azure)
+      run: dotnet test src/AzureDesignStudio.Server.Tests -c Release --no-build -p:RunAOTCompilation=false
+
+    - name: Test (stencil drag state machine)
+      run: node --test src/AzureDesignStudio/JsTests/*.test.cjs
 
     - name: Build the Docker image
       shell: pwsh
@@ -75,22 +90,29 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # avoid shallow clone so nbgv can do its work.
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '10.0.x'
+        global-json-file: global.json
 
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
+      uses: github/codeql-action/init@v4
       with:
         languages: csharp
+        build-mode: manual
 
-    - name: Autobuild
-      uses: github/codeql-action/autobuild
+    # Explicit build instead of autobuild: autobuild picks the solution, and the
+    # MAUI desktop project in it cannot build on an ubuntu runner.
+    - name: Build
+      run: |
+        dotnet build src/AzureDesignStudio.Server -c Release -p:RunAOTCompilation=false
+        dotnet build src/AzureDesignStudio.Mcp -c Release
 
     - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
+      uses: github/codeql-action/analyze@v4
       with:
         category: '/language:csharp'
 
@@ -139,7 +161,7 @@ jobs:
     - name: Build Desktop
       run: >
         dotnet build src/AzureDesignStudio.Desktop/AzureDesignStudio.Desktop.csproj
-        -c Release --no-restore -p:RunAOTCompilation=false
+        -c Release -p:RunAOTCompilation=false
 
     - name: Format (changed files)
       shell: pwsh

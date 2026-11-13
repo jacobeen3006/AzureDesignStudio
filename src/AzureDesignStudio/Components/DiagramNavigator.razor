@@ -13,14 +13,18 @@
             @foreach (var rect in ModelRects)
             {
                 <rect class="@(rect.IsGroup ? "ads-navigator-group" : "ads-navigator-node")"
-                      x="@rect.X" y="@rect.Y" width="@rect.W" height="@rect.H"></rect>
+                      x="@N(rect.X)" y="@N(rect.Y)" width="@N(rect.W)" height="@N(rect.H)"></rect>
             }
-            <rect class="ads-navigator-viewport" x="@Viewport.X" y="@Viewport.Y" width="@Viewport.W" height="@Viewport.H"></rect>
+            <rect class="ads-navigator-viewport" x="@N(Viewport.X)" y="@N(Viewport.Y)" width="@N(Viewport.W)" height="@N(Viewport.H)"></rect>
         </svg>
     </div>
 }
 
 @code {
+    // SVG attributes take a '.' decimal separator whatever the UI culture; a comma-decimal
+    // locale otherwise wrote x="12,5" and the minimap rectangles vanished.
+    private static string N(double value) => value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
     private const double Width = 200;
     private const double Height = 140;
 

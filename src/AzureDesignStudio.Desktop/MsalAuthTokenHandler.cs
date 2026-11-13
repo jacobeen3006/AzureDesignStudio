@@ -10,9 +10,21 @@ public sealed class MsalAuthTokenHandler(AdsTokenBroker broker) : DelegatingHand
 {
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        var token = await broker.GetServerTokenAsync();
-        if (token != null)
-            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        // The bearer token is a credential for the signed-in user. Cleartext is fine on the
+        // loopback h2c listener (it never leaves the machine); to any other host over http it
+        // would cross the network readable. Such a ServerUrl gets no token - the call then
+        // answers "not signed in" instead of leaking one.
+        if (MayCarryToken(request.RequestUri))
+        {
+            var token = await broker.GetServerTokenAsync();
+            if (token != null)
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        }
+
         return await base.SendAsync(request, cancellationToken);
     }
+
+    internal static bool MayCarryToken(Uri? uri) =>
+        uri is { IsAbsoluteUri: true }
+        && (uri.Scheme == Uri.UriSchemeHttps || (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback));
 }

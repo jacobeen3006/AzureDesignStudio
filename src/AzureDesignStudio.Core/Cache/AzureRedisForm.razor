@@ -11,7 +11,7 @@
         </RadioGroup>
     </FormItem>
     <FormItem Label="Capacity">
-        <InputNumber @bind-Value="@context.Capacity" Min="0" Max="5"></InputNumber>
+        <InputNumber @bind-Value="@context.Capacity" Min="@(context.Family == "P" ? 1 : 0)" Max="@(context.Family == "P" ? 5 : 6)"></InputNumber>
     </FormItem>
 </Form>
 

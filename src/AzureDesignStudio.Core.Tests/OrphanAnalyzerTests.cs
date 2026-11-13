@@ -44,6 +44,60 @@ public class OrphanAnalyzerTests
         Assert.Contains(findings, f => f.ResourceId.EndsWith("p1"));
     }
 
+    // A Resource Graph row as the service returns it: managedBy is a column beside properties,
+    // and a VM names its disks by managedDisk.id. Read only from properties, managedBy was
+    // never found - every attached disk was reported as an orphan and no VM-to-disk edge existed.
+    private static InventoryItem FromArg(string id, string type, string managedBy, string propertiesJson) =>
+        InventoryNormalizer.FromArgRow(System.Text.Json.JsonDocument.Parse(
+            "{\"id\":\"" + id + "\",\"name\":\"" + id.Split('/')[^1] + "\",\"type\":\"" + type + "\",\"location\":\"westeurope\",\"resourceGroup\":\"rg\",\"subscriptionId\":\"s\",\"tags\":{},\"managedBy\":\"" + managedBy + "\",\"properties\":" + propertiesJson + "}").RootElement);
+
+    private const string OsDisk = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/disks/vm1_OsDisk";
+    private const string DataDisk = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/disks/vm1_data0";
+    private const string SpareDisk = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/disks/spare";
+
+    private static InventoryItem[] VmWithDisksAsResourceGraphReturnsThem() =>
+    [
+        FromArg(Vm, "microsoft.compute/virtualmachines", "", """
+            {"storageProfile":{"osDisk":{"name":"vm1_OsDisk","osType":"Linux","managedDisk":{"id":"@OS@","storageAccountType":"Premium_LRS"}},
+                               "dataDisks":[{"lun":0,"name":"vm1_data0","managedDisk":{"id":"@DATA@"}}]}}
+            """.Replace("@OS@", OsDisk).Replace("@DATA@", DataDisk)),
+        FromArg(OsDisk, "microsoft.compute/disks", Vm, """{"diskState":"Attached","diskSizeGB":30}"""),
+        FromArg(DataDisk, "microsoft.compute/disks", Vm, """{"diskState":"Attached","diskSizeGB":128}"""),
+        FromArg(SpareDisk, "microsoft.compute/disks", "", """{"diskState":"Unattached","diskSizeGB":64}"""),
+    ];
+
+    [Fact]
+    public void ResourceGraphRows_OnlyTheUnattachedDiskIsAnOrphan()
+    {
+        var orphans = OrphanAnalyzer.Analyze(VmWithDisksAsResourceGraphReturnsThem())
+            .Where(f => f.Kind == FindingKind.Orphan).Select(f => f.ResourceId).ToArray();
+
+        Assert.Equal(new[] { SpareDisk }, orphans);
+    }
+
+    [Fact]
+    public void ResourceGraphRows_VmIsLinkedToItsOsAndDataDisks()
+    {
+        var graph = TopologyDeriver.Derive(VmWithDisksAsResourceGraphReturnsThem());
+
+        var attached = graph.Edges.Where(e => e.Kind == TopologyEdgeKind.AttachedTo).ToList();
+        Assert.Contains(attached, e => Same(e.From, Vm) && Same(e.To, OsDisk));
+        Assert.Contains(attached, e => Same(e.From, Vm) && Same(e.To, DataDisk));
+        Assert.Contains(attached, e => Same(e.From, DataDisk) && Same(e.To, Vm)); // from the disk's own managedBy
+        Assert.DoesNotContain(attached, e => Same(e.From, SpareDisk) || Same(e.To, SpareDisk));
+        Assert.DoesNotContain(graph.Nodes.Values, n => n.External); // every reference resolved to a scanned resource
+
+        static bool Same(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ManagedByInsidePropertiesIsLeftAsItIs()
+    {
+        var item = FromArg(DataDisk, "microsoft.compute/disks", Vm, """{"managedBy":"already-there"}""");
+
+        Assert.Equal("already-there", item.Raw!.Value.GetProperty("managedBy").GetString());
+    }
+
     [Fact]
     public void AttachedResources_ProduceNothing()
     {
@@ -80,12 +134,12 @@ public class OrphanAnalyzerTests
     [Fact]
     public void LoadBalancer_WithoutListeners_IsIdle()
     {
-        var lb = Item("/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/loadBalancers/lb1",
-            "Microsoft.Compute/loadBalancers", """{"frontendIPConfigurations":[]}""");
+        var lb = Item("/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/lb1",
+            "Microsoft.Network/loadBalancers", """{"frontendIPConfigurations":[]}""");
         Assert.Contains(OrphanAnalyzer.Analyze([lb]), f => f.Kind == FindingKind.Idle);
 
-        var used = Item("/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/loadBalancers/lb1",
-            "Microsoft.Compute/loadBalancers", """{"loadBalancingRules":[{"name":"rdp"}]}""");
+        var used = Item("/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/lb1",
+            "Microsoft.Network/loadBalancers", """{"loadBalancingRules":[{"name":"rdp"}]}""");
         Assert.DoesNotContain(OrphanAnalyzer.Analyze([used]), f => f.Kind == FindingKind.Idle);
     }
 

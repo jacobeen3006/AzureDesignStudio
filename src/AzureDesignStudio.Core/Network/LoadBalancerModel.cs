@@ -74,6 +74,40 @@ namespace AzureDesignStudio.Core.Network
             get => _loadBalancer.Properties.BackendAddressPools[0].Name;
             set => _loadBalancer.Properties.BackendAddressPools[0].Name = value;
         }
+        private PublicIpModel? LinkedPublicIp => LinkedNodes.OfType<PublicIpModel>().FirstOrDefault();
+
+        /// <summary>A frontend has to be somewhere: a linked public IP makes a public load
+        /// balancer, a subnet around it an internal one. With neither Azure refuses it
+        /// (FrontendIPConfigurationHasNoSubnetOrPublicIPAddressOrPublicIPPrefix).</summary>
+        public override bool IsValid => LinkedPublicIp is not null || Group is SubnetModel;
+
+        protected override void PopulateArmAttributes()
+        {
+            base.PopulateArmAttributes();
+
+            var frontend = _loadBalancer.Properties.FrontendIPConfigurations[0];
+            if (LinkedPublicIp is { } address)
+            {
+                frontend.Properties = new FrontendIPConfigurationPropertiesFormat
+                {
+                    PublicIPAddress = new PublicIPAddress { Id = address.ResourceId },
+                };
+                _loadBalancer.DependsOn = [address.ResourceId];
+            }
+            else if (Group is SubnetModel subnet)
+            {
+                frontend.Properties = new FrontendIPConfigurationPropertiesFormat
+                {
+                    PrivateIPAllocationMethod = "Dynamic",
+                    Subnet = new Subnet { Id = subnet.ResourceId },
+                };
+                _loadBalancer.DependsOn = [subnet.ResourceId];
+            }
+            else
+            {
+                throw new Exception($"{ServiceName} '{Name}' needs a frontend: link a public IP to it, or place it in a subnet.");
+            }
+        }
         public override AzureNodeDto GetNodeDto(IMapper mapper)
         {
             return mapper.Map<LoadBalancerModelDto>(this);

@@ -130,7 +130,7 @@ public class AdoptEngineTests
     public void TypeTable_ClaimsWiredNetworkStencilsAndAks()
     {
         // These three were skipped by early probes: their exports only succeed with a
-        // throwaway subnet/public-IP wiring, which CreateProbe now fabricates.
+        // throwaway subnet/public-IP wiring. The table now reads each model's own ARM type.
         Assert.Equal("app-gateway", AdoptEngine.StencilKeyByArmType["Microsoft.Network/applicationGateways"]);
         Assert.Equal("azure-bastions", AdoptEngine.StencilKeyByArmType["Microsoft.Network/bastionHosts"]);
         Assert.Equal("azure-firewall", AdoptEngine.StencilKeyByArmType["Microsoft.Network/azureFirewalls"]);

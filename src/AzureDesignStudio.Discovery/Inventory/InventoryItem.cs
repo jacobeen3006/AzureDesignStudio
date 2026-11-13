@@ -58,6 +58,19 @@ public static class InventoryNormalizer
 
         JsonElement? raw = row.TryGetProperty("properties", out var p) && p.ValueKind == JsonValueKind.Object ? p.Clone() : null;
 
+        // ARM reports who a resource is managed by (the VM a disk is attached to, the AKS
+        // cluster behind a node resource group) as a top-level field. Every analyzer reads it
+        // from Raw, so it is carried there - otherwise each disk reads as unattached.
+        var managedBy = Str(row, "managedBy");
+        if (managedBy.Length > 0 && (raw is null || !raw.Value.TryGetProperty("managedBy", out _)))
+        {
+            var merged = raw is null
+                ? new System.Text.Json.Nodes.JsonObject()
+                : System.Text.Json.Nodes.JsonObject.Create(raw.Value)!;
+            merged["managedBy"] = managedBy;
+            raw = JsonSerializer.SerializeToElement(merged);
+        }
+
         return new InventoryItem(
             Str(row, "id"), Str(row, "name"), Str(row, "type"), Str(row, "location"),
             Str(row, "resourceGroup"), Str(row, "subscriptionId"), tags, raw);
@@ -70,7 +83,9 @@ public static class InventoryNormalizer
         foreach (var i in items.OrderBy(i => i.Id, StringComparer.OrdinalIgnoreCase))
             joined.Append(i.Id).Append('\u001f').Append(i.Type).Append('\u001f').Append(i.Name)
                   .Append('\u001f').Append(i.Location).Append('\u001f')
-                  .Append(string.Join(';', i.Tags.OrderBy(k => k.Key))).Append('\u001e');
+                  // Ordinal: the default comparer orders by the current culture, so the same
+                  // inventory hashed differently on machines with different regional settings.
+                  .Append(string.Join(';', i.Tags.OrderBy(k => k.Key, StringComparer.Ordinal))).Append('\u001e');
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(joined.ToString())));
     }
 }

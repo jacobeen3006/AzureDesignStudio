@@ -88,27 +88,56 @@ public class DecomExecutionTests
             DecomExecution.ExecutionHash("w1", PlanHash, "sub-1", Purge, ["/subs/1/rgs/a"]));
     }
 
+    // In ARM the last path segment is the lock's name. The window lock therefore has to be
+    // written under the same name the runbook, the lock listing and the release all look for.
     [Fact]
-    public void LockIdFor_IsDeterministicAndNormalized()
+    public void LockUri_AddressesTheLockByItsWindowName()
     {
-        Assert.Equal(DecomExecution.LockIdFor("w1", "/subs/1/rgs/a"), DecomExecution.LockIdFor("w1", "  /subs/1/rgs/a  "));
-        Assert.Equal(DecomExecution.LockIdFor("w1", "/subs/1/rgs/a"), DecomExecution.LockIdFor("w1", "/SUBS/1/RGS/A"));
-    }
+        var lockName = ProtectionWindowPlanner.LockNameFor("w1");
 
-    [Fact]
-    public void LockIdFor_IsDistinctPerScopeAndWindow()
-    {
-        Assert.NotEqual(DecomExecution.LockIdFor("w1", "/subs/1/rgs/a"), DecomExecution.LockIdFor("w1", "/subs/1/rgs/b"));
-        Assert.NotEqual(DecomExecution.LockIdFor("w1", "/subs/1/rgs/a"), DecomExecution.LockIdFor("w2", "/subs/1/rgs/a"));
-    }
+        var uri = DecomExecution.LockUri("https://management.azure.com/", "/subs/1/rgs/a", lockName);
 
-    [Fact]
-    public void LockUri_HasTheArmLockShape()
-    {
-        var id = new Guid("11111111-2222-3333-4444-555555555555");
         Assert.Equal(
-            "https://management.azure.com/subs/1/rgs/a/providers/Microsoft.Authorization/locks/11111111-2222-3333-4444-555555555555?api-version=2016-09-01",
-            DecomExecution.LockUri("https://management.azure.com/", "/subs/1/rgs/a", id));
+            $"https://management.azure.com/subs/1/rgs/a/providers/Microsoft.Authorization/locks/{lockName}?api-version=2016-09-01",
+            uri);
+    }
+
+    [Fact]
+    public void LandedLockIsRecognisedAsTheWindowsOwnWhenListedBack()
+    {
+        var lockName = ProtectionWindowPlanner.LockNameFor("w1");
+        var uri = new Uri(DecomExecution.LockUri("https://management.azure.com/", "/subs/1/rgs/a", lockName));
+
+        // ARM lists a lock with name == the segment it was PUT under and id == its path.
+        var listed = JsonSerializer.Serialize(new
+        {
+            value = new[] { new { name = uri.Segments[^1], id = uri.AbsolutePath } },
+        });
+
+        var (ours, foreign) = DecomExecution.ParseLockState(listed, lockName);
+        Assert.True(ours);
+        Assert.Empty(foreign);
+    }
+
+    [Theory]
+    [InlineData("/subscriptions/11111111-1111-1111-1111-111111111111", true)]
+    [InlineData("/SUBSCRIPTIONS/11111111-1111-1111-1111-111111111111/resourceGroups/rg-a", true)]
+    [InlineData("  /subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-a/providers/Microsoft.Compute/virtualMachines/vm1  ", true)]
+    [InlineData("/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-a", false)]  // another subscription
+    [InlineData("/subscriptions/11111111-1111-1111-1111-1111111111110/resourceGroups/rg-a", false)] // prefix of a longer id
+    [InlineData("/providers/Microsoft.Management/managementGroups/mg", false)]
+    [InlineData("subscriptions/11111111-1111-1111-1111-111111111111", false)]
+    [InlineData("/subscriptions/11111111-1111-1111-1111-111111111111/", false)]
+    [InlineData("/subscriptions/11111111-1111-1111-1111-111111111111//resourceGroups/rg-a", false)]
+    [InlineData("/subscriptions/11111111-1111-1111-1111-111111111111/../22222222-2222-2222-2222-222222222222", false)]
+    [InlineData("/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-a?api-version=1", false)]
+    [InlineData("/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-a#x", false)]
+    [InlineData("/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/%2e%2e", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsScopeInSubscription_AcceptsOnlyPlainIdsUnderTheSubscription(string? scope, bool expected)
+    {
+        Assert.Equal(expected, DecomExecution.IsScopeInSubscription(scope, "11111111-1111-1111-1111-111111111111"));
     }
 
     [Fact]
@@ -149,64 +178,58 @@ public class DecomExecutionTests
     }
 
     [Fact]
-    public void ParseLockState_OursOnly_YieldsOursAndTheLockId()
+    public void ParseLockState_OursOnly_YieldsOurs()
     {
-        var (ours, foreign, id) = DecomExecution.ParseLockState(
-            """{"value":[{"name":"ads-decom-abc","id":"/subs/1/rgs/a/providers/Microsoft.Authorization/locks/11111111-2222-3333-4444-555555555555"}]}""",
+        var (ours, foreign) = DecomExecution.ParseLockState(
+            """{"value":[{"name":"ads-decom-abc","id":"/subs/1/rgs/a/providers/Microsoft.Authorization/locks/ads-decom-abc"}]}""",
             "ads-decom-abc");
         Assert.True(ours);
         Assert.Empty(foreign);
-        Assert.Equal(new Guid("11111111-2222-3333-4444-555555555555"), id);
     }
 
     [Fact]
     public void ParseLockState_OursAndForeign_SeparatesByOrdinalName()
     {
-        var (ours, foreign, id) = DecomExecution.ParseLockState(
-            """{"value":[{"name":"operator-lock","id":"/subs/1/rgs/a/providers/Microsoft.Authorization/locks/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},{"name":"ads-decom-abc","id":"/subs/1/rgs/a/providers/Microsoft.Authorization/locks/11111111-2222-3333-4444-555555555555"}]}""",
+        var (ours, foreign) = DecomExecution.ParseLockState(
+            """{"value":[{"name":"operator-lock","id":"/subs/1/rgs/a/providers/Microsoft.Authorization/locks/operator-lock"},{"name":"ads-decom-abc","id":"/subs/1/rgs/a/providers/Microsoft.Authorization/locks/ads-decom-abc"}]}""",
             "ads-decom-abc");
         Assert.True(ours);
         Assert.Equal(["operator-lock"], foreign);
-        Assert.Equal(new Guid("11111111-2222-3333-4444-555555555555"), id);
     }
 
     [Fact]
     public void ParseLockState_ForeignOnly_LeavesTheWindowUnmatched()
     {
-        var (ours, foreign, id) = DecomExecution.ParseLockState(
-            """{"value":[{"name":"operator-lock","id":"/subs/1/rgs/a/providers/Microsoft.Authorization/locks/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}]}""",
+        var (ours, foreign) = DecomExecution.ParseLockState(
+            """{"value":[{"name":"operator-lock","id":"/subs/1/rgs/a/providers/Microsoft.Authorization/locks/operator-lock"}]}""",
             "ads-decom-abc");
         Assert.False(ours);
         Assert.Equal(["operator-lock"], foreign);
-        Assert.Null(id);
     }
 
     [Fact]
     public void ParseLockState_NameMatchIsOrdinal_NotCaseInsensitive()
     {
-        var (ours, foreign, id) = DecomExecution.ParseLockState(
-            """{"value":[{"name":"ADS-DECOM-ABC","id":"/subs/1/rgs/a/providers/Microsoft.Authorization/locks/11111111-2222-3333-4444-555555555555"}]}""",
+        var (ours, foreign) = DecomExecution.ParseLockState(
+            """{"value":[{"name":"ADS-DECOM-ABC","id":"/subs/1/rgs/a/providers/Microsoft.Authorization/locks/ADS-DECOM-ABC"}]}""",
             "ads-decom-abc");
         Assert.False(ours);
         Assert.Equal(["ADS-DECOM-ABC"], foreign);
-        Assert.Null(id);
     }
 
     [Fact]
-    public void ParseLockState_EmptyValueArray_YieldsNoOursNoForeignNoId()
+    public void ParseLockState_EmptyValueArray_YieldsNoOursNoForeign()
     {
-        var (ours, foreign, id) = DecomExecution.ParseLockState("""{"value":[]}""", "ads-decom-abc");
+        var (ours, foreign) = DecomExecution.ParseLockState("""{"value":[]}""", "ads-decom-abc");
         Assert.False(ours);
         Assert.Empty(foreign);
-        Assert.Null(id);
     }
 
     [Fact]
-    public void ParseLockState_MissingValueProperty_YieldsNoOursNoForeignNoId()
+    public void ParseLockState_MissingValueProperty_YieldsNoOursNoForeign()
     {
-        var (ours, foreign, id) = DecomExecution.ParseLockState("""{}""", "ads-decom-abc");
+        var (ours, foreign) = DecomExecution.ParseLockState("""{}""", "ads-decom-abc");
         Assert.False(ours);
         Assert.Empty(foreign);
-        Assert.Null(id);
     }
 }

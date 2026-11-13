@@ -32,9 +32,10 @@ namespace AzureDesignStudio.Core.Network
         protected override ResourceBase ArmResource => _dnsZone;
         public override Type? DataFormType => typeof(DnsZoneForm);
 
-        // DNS zones are global resources: no location is deployed.
+        // DNS zones are global resources; ARM takes the literal location "global" for them.
+        // (An empty string was written before, which is neither omitted nor valid.)
         public override bool UseResourceGroupLocation { get => false; set { } }
-        public override string Location { get => string.Empty; set { } }
+        public override string Location { get => "global"; set { } }
 
         // The zone name must be a valid domain name, e.g. contoso.com.
         private static readonly Regex DomainNameRegex =

@@ -61,14 +61,25 @@ public sealed class ResourceGraphClient
             foreach (var row in page.Rows) rows.Add(row);
             totalRecords = page.TotalRecords;
 
-            if (!page.ResultTruncated) break;
+            // The token alone says whether another page exists. resultTruncated is not a
+            // "more pages" flag: the service sends "false" on an ordinary paged response
+            // and reserves "true" for a result it cut short - so paging on it stopped
+            // every inventory query at its first 1,000 rows and called that complete.
             if (page.SkipToken is null)
             {
-                // Truncated but unpageable (limit/sample operators or all-dynamic columns):
-                // hard cap reached - report it instead of looping forever.
+                // Cut short and unpageable (limit/sample operators, no id column): the
+                // hard cap was reached - report it rather than pass it off as complete.
+                truncated = page.ResultTruncated;
+                break;
+            }
+
+            // A token that repeats would page forever; treat it as an incomplete result.
+            if (skipToken is not null && JsonNode.DeepEquals(skipToken, page.SkipToken))
+            {
                 truncated = true;
                 break;
             }
+
             skipToken = page.SkipToken; // independent node from Parse; safe to carry forward
         }
 
@@ -173,9 +184,13 @@ public sealed class ResourceGraphClient
 
     private static TimeSpan? RetryAfter(HttpResponseMessage response)
     {
-        if (response.Headers.RetryAfter is { } ra)
-            return ra.Delta ?? (ra.Date is { } date ? date - DateTimeOffset.UtcNow : null);
-        return null;
+        if (response.Headers.RetryAfter is not { } ra)
+            return null;
+
+        // A date that has already passed (clock skew, a slow response) must not become a
+        // negative delay: Task.Delay throws ArgumentOutOfRangeException for one.
+        var wait = ra.Delta ?? (ra.Date is { } date ? date - DateTimeOffset.UtcNow : null);
+        return wait is { } w && w < TimeSpan.Zero ? TimeSpan.Zero : wait;
     }
 
     private TimeSpan ExponentialBackoff(int attempt)

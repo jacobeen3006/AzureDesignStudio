@@ -48,8 +48,8 @@ namespace AzureDesignStudio.Core.CognitiveServices
         [DisplayName("Subdomain")]
         public string CustomSubDomainName
         {
-            get => _account.Properties.CustomSubDomainName;
-            set => _account.Properties.CustomSubDomainName = value;
+            get => _customSubDomainName;
+            set => _customSubDomainName = value ?? string.Empty;
         }
         [MapToDto]
         [DisplayName("Network access")]
@@ -73,11 +73,13 @@ namespace AzureDesignStudio.Core.CognitiveServices
         {
             base.PopulateArmAttributes();
 
-            // The subdomain is globally unique and defaults to the resource name.
-            if (string.IsNullOrEmpty(_account.Properties.CustomSubDomainName))
-            {
-                _account.Properties.CustomSubDomainName = Name;
-            }
+            // The subdomain is globally unique and defaults to the resource name. The default is
+            // worked out at every export: written back into the property, it froze at the first
+            // export's name and was then saved as though the user had typed it.
+            _account.Properties.CustomSubDomainName =
+                string.IsNullOrEmpty(_customSubDomainName) ? Name : _customSubDomainName;
         }
+
+        private string _customSubDomainName = string.Empty;
     }
 }

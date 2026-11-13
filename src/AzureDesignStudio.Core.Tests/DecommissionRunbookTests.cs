@@ -73,16 +73,52 @@ public class DecommissionRunbookTests
         var cli = GenerateFor(plan, inventory).CliScript();
 
         var protect = cli.IndexOf("az lock create", StringComparison.Ordinal);
-        var detach = cli.IndexOf("az resource exists", StringComparison.Ordinal);
+        var detach = cli.IndexOf("az resource show --ids", StringComparison.Ordinal);
         var release = cli.IndexOf("az lock delete", StringComparison.Ordinal);
-        var purgeVm = cli.IndexOf($"az resource delete --id \"{Vm}\"", StringComparison.Ordinal);
-        var purgeNic = cli.IndexOf($"az resource delete --id \"{Nic}\"", StringComparison.Ordinal);
-        var purgeVnet = cli.IndexOf($"az resource delete --id \"{Vnet}\"", StringComparison.Ordinal);
+        var purgeVm = cli.IndexOf($"az resource delete --ids \"{Vm}\"", StringComparison.Ordinal);
+        var purgeNic = cli.IndexOf($"az resource delete --ids \"{Nic}\"", StringComparison.Ordinal);
+        var purgeVnet = cli.IndexOf($"az resource delete --ids \"{Vnet}\"", StringComparison.Ordinal);
 
         Assert.True(protect >= 0 && protect < detach);
         Assert.True(detach < release);
         // lock release precedes any purge, and purge follows the planner's own stage order
         Assert.True(release < purgeVm && purgeVm < purgeNic && purgeNic < purgeVnet);
+    }
+
+    // The scripts are meant to be run. az has no `--lock`, `--scope` or `--id` options and no
+    // `resource exists` command; the script built from those stopped at its first line.
+    [Fact]
+    public void Scripts_UseOptionsTheToolsActuallyHave()
+    {
+        var inventory = new[] { VmItem(), NicItem(), DiskItem(), VnetItem() };
+        var runbook = GenerateFor(PlanAll(inventory, new[] { Vm, Nic, Disk, Vnet }), inventory);
+        var cli = runbook.CliScript();
+        var powershell = runbook.PowerShellScript();
+
+        Assert.Contains("az lock create --name \"ads-decom-", cli);
+        Assert.Contains("--lock-type CanNotDelete", cli);
+        Assert.Contains($"--resource \"{Vm}\"", cli);
+        Assert.Contains($"az resource show --ids \"{Vm}\" --query id --output tsv", cli);
+        Assert.Contains($"az resource delete --ids \"{Vm}\"", cli);
+        foreach (var notAnOption in new[] { " --lock ", " --scope ", " --id ", "az resource exists" })
+            Assert.DoesNotContain(notAnOption, cli);
+
+        Assert.Contains("-LockLevel CanNotDelete", powershell);
+        Assert.Contains("-LockNotes \"", powershell);
+        Assert.Contains("New-AzResourceLock -Scope", powershell);
+    }
+
+    // Both sides of the PowerShell gate are DateTimeOffset: [DateTime]::Parse yields local time
+    // and -lt ignores Kind, which opened the purge early west of UTC.
+    [Fact]
+    public void PowerShellPurgeGateComparesInstantsNotLocalClockReadings()
+    {
+        var inventory = new[] { VmItem(), NicItem(), DiskItem(), VnetItem() };
+        var powershell = GenerateFor(PlanAll(inventory, new[] { Vm, Nic, Disk, Vnet }), inventory).PowerShellScript();
+
+        Assert.Contains("[DateTimeOffset]::UtcNow -lt [DateTimeOffset]::Parse(\"", powershell);
+        Assert.DoesNotContain("[DateTime]::Parse", powershell);
+        Assert.DoesNotContain("Get-Date", powershell);
     }
 
     [Fact]
@@ -146,7 +182,7 @@ public class DecommissionRunbookTests
 
         var rb = GenerateFor(plan, inventory);
         var cli = rb.CliScript();
-        Assert.Contains($"az resource delete --id \"{Vnet}\"", cli);
+        Assert.Contains($"az resource delete --ids \"{Vnet}\"", cli);
         Assert.DoesNotContain($"resource delete --id \"{SubnetA}\"", cli);
         Assert.Contains($"{SubnetA} dies with {Vnet}", rb.Markdown());
     }
@@ -217,11 +253,11 @@ public class DecommissionRunbookTests
         var inventory = new[] { VmItem(), NicItem() };
         var plan = PlanAll(inventory, new[] { Vm, Nic });
         var rb = GenerateFor(plan, inventory,
-            new RunbookOptions(Now, TimeSpan.FromDays(7), StackName: "ads-decom-stack", StackLocation: "westeurope", ExistingLocks: []));
+            new RunbookOptions(Now, TimeSpan.FromDays(7), StackName: "ads-decom-stack", ExistingLocks: []));
 
         Assert.NotNull(rb.StackDetachJson);
-        Assert.Contains("\"Detach\"", rb.StackDetachJson);
-        Assert.DoesNotContain("\"Delete\"", rb.StackDetachJson);
+        Assert.Contains("\"resources\":\"detach\"", rb.StackDetachJson);
+        Assert.DoesNotContain("\"delete\"", rb.StackDetachJson);
         Assert.Contains("ads-decom-stack", rb.Markdown());
     }
 

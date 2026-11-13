@@ -60,7 +60,7 @@ public static class OrphanAnalyzer
                         "NSG is not associated with any subnet or network interface"));
                     break;
 
-                case "microsoft.compute/loadbalancers":
+                case "microsoft.network/loadbalancers":
                     if (props is null || !HasActiveConfig(props.Value, "loadBalancingRules") && !HasActiveConfig(props.Value, "frontendIPConfigurations"))
                         findings.Add(new(item.Id, item.Type, FindingKind.Idle,
                             "load balancer has no listeners or frontends"));

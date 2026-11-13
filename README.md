@@ -45,7 +45,7 @@ Azure Design Studio won the **3rd Place Winner award** of Microsoft Global Hacka
 
 ---
 
-## 🏗️ Solution Structure (11 projects)
+## 🏗️ Solution Structure (12 projects)
 
 ```
 AzureDesignStudio.sln
@@ -56,6 +56,7 @@ AzureDesignStudio.sln
 ├── AzureDesignStudio.AzureResources   — CLS-compliant Azure resource type definitions
 ├── AzureDesignStudio.SourceGeneration — Roslyn source generator for DTO/mapping profiles
 ├── AzureDesignStudio.Core.Tests       — xUnit unit tests
+├── AzureDesignStudio.Server.Tests     — xUnit tests of the gRPC services and the client's service wrappers
 ├── AzureDesignStudio.Workspace        — SQLite workspace store for designs, scans, plans and audit
 ├── AzureDesignStudio.Discovery        — Tenant analysis engines (scan, drift, guardrails, decommission)
 ├── AzureDesignStudio.Mcp              — Stdio MCP server with its read-only workspace tools
@@ -78,7 +79,7 @@ AzureDesignStudio.sln
 | **ORM** | Entity Framework Core (InMemory dev / SQL Server prod) |
 | **Mapping** | AutoMapper 12 + custom Roslyn source generator |
 | **Secrets** | Azure Key Vault (production) |
-| **Telemetry** | Azure Application Insights |
+| **Telemetry** | Azure Application Insights, server only and only when a connection string is configured. The client sends none. |
 | **IaC generation** | Azure.ResourceManager SDK, Azure.Deployments.Core |
 | **Bicep** | Azure.Bicep.Decompiler (import existing .bicep files) |
 | **CI** | GitHub Actions, CodeQL, Nerdbank.GitVersioning |
@@ -94,7 +95,6 @@ AzureDesignStudio.sln
 | `Microsoft.AspNetCore.Components.WebAssembly` 8.0.1 | WASM host |
 | `Azure.Bicep.Decompiler` 0.15.31 | Bicep → ARM conversion |
 | `Azure.ResourceManager` | Azure SDK for ARM deployment |
-| `BlazorApplicationInsights` 2.2.0 | Client-side telemetry |
 | `Nerdbank.GitVersioning` 3.5.119 | Automatic versioning |
 
 ---
@@ -199,8 +199,20 @@ This eliminates manual DTO boilerplate when adding new Azure resource types.
 ## 🚀 Deployment
 
 ### Docker
-- `DockerBuild.ps1` — build script
-- `Dockerfile` — containerizes the Server project
+- `src/AzureDesignStudio.Server/Dockerfile` — containerizes the Server project. The build context is the
+  **repository root** (the central `global.json` / `Directory.*.props` files live there); the image listens on port 80.
+- `src/DockerBuild.ps1 [-Tag name]` — computes the version with `nbgv` and builds the image (CI and release use this).
+- `.dockerignore` (repository root) — keeps `.git`, build output and unrelated projects out of the context.
+- **Configuration the container needs:** a database - either `KeyVaultName` naming a vault that holds the
+  `ads-main` connection string (and the `KeyVaultKeyName` key used to encrypt linked-subscription secrets),
+  or `ConnectionStrings__ads-main` directly - plus the `AzureAd__*` app registration. Without a database
+  it stops with a message saying what is missing. To try the image with nothing configured:
+
+  ```bash
+  docker run --rm -p 8080:80 -e Database__Provider=InMemory ads-server
+  ```
+
+  The in-memory database keeps nothing across restarts; it is for testing only.
 
 ### Kubernetes
 - `Configurations/main/deployment.yaml` — K8s deployment
@@ -208,8 +220,9 @@ This eliminates manual DTO boilerplate when adding new Azure resource types.
 - `Configurations/main/ingress.yaml` — K8s ingress
 
 ### CI (GitHub Actions)
-- `build.yml` — build, test, publish
-- `codeql-analysis.yml` — CodeQL security scanning (manual trigger)
+- `build.yml` — locked restore, build, offline tests (.NET + the JS drag tests), Docker image, CodeQL, Desktop (Windows)
+- `publish.yml` — tagged releases: WASM zip, server image, Windows MSIX
+- `codeql-analysis.yml` — CodeQL security scanning (pull requests, monthly, manual)
 
 ### Versioning
 - Nerdbank.GitVersioning via `version.json`
@@ -238,13 +251,22 @@ This eliminates manual DTO boilerplate when adding new Azure resource types.
 # Full solution build (Windows; includes the MAUI desktop app)
 dotnet build src/AzureDesignStudio.sln
 
-# Everything except the MAUI desktop app (same set CI builds; Linux-safe)
-dotnet build src/AzureDesignStudio.Server -c Release && dotnet build src/AzureDesignStudio -c Release && dotnet build src/AzureDesignStudio.Core.Tests -c Release
+# Everything except the MAUI desktop app (same set CI builds; Linux-safe).
+# RunAOTCompilation=false: Release turns on WASM AOT, which needs `dotnet workload install wasm-tools`.
+dotnet build src/AzureDesignStudio.Server -c Release -p:RunAOTCompilation=false && dotnet build src/AzureDesignStudio -c Release -p:RunAOTCompilation=false && dotnet build src/AzureDesignStudio.Mcp -c Release && dotnet build src/AzureDesignStudio.Core.Tests -c Release
 
 # Run unit tests
 dotnet test src/AzureDesignStudio.Core.Tests --filter "Category!=LiveAzure"
+dotnet test src/AzureDesignStudio.Server.Tests
 
-# Build Docker image
+# Run the stencil drag state-machine tests (Node 20+)
+node --test src/AzureDesignStudio/JsTests/*.test.cjs
+
+# Run the server locally (Development): https://localhost:7203, http://localhost:5203,
+# plus http://localhost:5204 (HTTP/2 cleartext) for the Desktop app.
+dotnet run --project src/AzureDesignStudio.Server
+
+# Build Docker image (context = repository root)
 docker build -f src/AzureDesignStudio.Server/Dockerfile .
 
 # Package the Windows MSIX installer

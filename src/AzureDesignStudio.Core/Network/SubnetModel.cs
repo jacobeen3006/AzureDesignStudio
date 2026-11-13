@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AzureDesignStudio.AzureResources.Base;
 using AzureDesignStudio.AzureResources.Network;
 using AzureDesignStudio.Core.Web;
@@ -42,9 +42,13 @@ namespace AzureDesignStudio.Core.Network
                 if (Group is not VirtualNetworkModel vnet)
                     throw new Exception($"Subnet needs to be in a vnet.");
 
-                return $"[resourceId('{_subnet.Type}', '{vnet.Name}','{Name}')]";
+                return $"[resourceId('{_subnet.Type}', '{vnet.Name}','{ArmName}')]";
             }
         }
+
+        /// <summary>The name written to the template: a reserved subnet name always in its
+        /// documented spelling (AzureFirewallSubnet), anything else as typed.</summary>
+        public string ArmName => DedicatedSubnets.Canonical(Name);
 
         public override (bool result, string message) IsDrappable(GroupModel overlappedGroup)
         {
@@ -108,12 +112,19 @@ namespace AzureDesignStudio.Core.Network
             if (Group is not VirtualNetworkModel vnet)
                 throw new Exception($"Subnet must be in a vnet.");
 
-            ArmResource.Name = $"{vnet.Name}/{Name}";
+            ArmResource.Name = $"{vnet.Name}/{ArmName}";
             _subnet.Location = null;
             _subnet.DependsOn = new List<string>()
             {
                 vnet.ResourceId,
             };
+            // Subnets of one network are created one after another: Azure refuses concurrent
+            // changes to a network's subnets (AnotherOperationInProgress) - something a
+            // template validation does not catch, only a real deployment.
+            var siblings = vnet.Subnets;
+            var index = siblings.IndexOf(this);
+            if (index > 0)
+                _subnet.DependsOn.Add(siblings[index - 1].ResourceId);
             _subnet.Properties.ServiceEndpoints = new List<ServiceEndpointPropertiesFormat>();
             _subnet.Properties.Delegations = new List<Delegation>();
 

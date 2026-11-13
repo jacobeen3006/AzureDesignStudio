@@ -39,7 +39,9 @@ public sealed class ChangeFeedCollector(ResourceGraphClient graph)
         + " operation = tostring(properties.changeAttributes.operation),"
         + " changesCount = toint(properties.changeAttributes.changesCount),"
         + " changedProperties = properties.changes"
-        + $" | where changeTime > datetime({since.ToUniversalTime():yyyy-MM-ddTHH:mm:ss.fffZ})"
+        // Invariant: ":" is the culture's time separator ("12.34.56" under fi-FI is not KQL)
+        // and the year follows the culture's calendar (Buddhist, Hijri).
+        + $" | where changeTime > datetime({since.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ", System.Globalization.CultureInfo.InvariantCulture)})"
         + " | order by changeTime desc"
         + " | project id, changeTime, targetResourceId, targetResourceType, changeType,"
         + " correlationId, changedBy, changedByType, clientType, operation, changesCount, changedProperties";
@@ -83,6 +85,7 @@ public sealed class ChangeFeedCollector(ResourceGraphClient graph)
     {
         value = default;
         return row.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String
-            && DateTimeOffset.TryParse(v.GetString(), out value);
+            && DateTimeOffset.TryParse(v.GetString(), System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal, out value);
     }
 }

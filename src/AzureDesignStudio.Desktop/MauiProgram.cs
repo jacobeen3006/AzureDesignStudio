@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Headers;
-using BlazorApplicationInsights;
 using AzureDesignStudio.Core.DTO;
 using AzureDesignStudio.Services;
 using AzureDesignStudio.Workspace;
@@ -38,6 +37,9 @@ public static class MauiProgram
 
         builder.Configuration.AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
         var serverUrl = builder.Configuration["ServerUrl"] ?? "http://localhost:5204";
+        if (!MsalAuthTokenHandler.MayCarryToken(Uri.TryCreate(serverUrl, UriKind.Absolute, out var serverUri) ? serverUri : null))
+            System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ads_desktop_crash.log"),
+                $"[{DateTime.Now:O}] CONFIG\nServerUrl '{serverUrl}' is neither https nor a loopback address: no sign-in token will be sent to it, so signed-in features will not work. Use https for a remote server.\n\n");
         var resourceRoot = builder.Configuration["ResourceRoot"] ?? "/";
 
         var webViewOrigin = new Uri("https://0.0.0.1/");
@@ -113,7 +115,6 @@ public static class MauiProgram
 
         builder.Services.AddMauiBlazorWebView();
         builder.Services.AddAntDesign();
-        builder.Services.AddBlazorApplicationInsights();
         builder.Services.AddSingleton<AdsContext>();
         builder.Services.AddSingleton<AzureDesignStudio.Services.AdsCommandService>();
         builder.Services.AddAutoMapper(typeof(AzureNodeProfile));
@@ -183,10 +184,25 @@ internal sealed class FileLoggerProvider(string path) : ILoggerProvider
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Warning;
+        // One writer at a time, and a failed write is dropped: two threads appending at once
+        // collide with an IOException, which the logging pipeline rethrows at the call site -
+        // including inside catch blocks whose only job was to log.
+        private static readonly object WriteLock = new();
+
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
             if (!IsEnabled(logLevel)) return;
-            System.IO.File.AppendAllText(path, $"[{DateTime.Now:O}] {logLevel} {eventId}\n{formatter(state, exception)}\n{exception}\n\n");
+            var entry = $"[{DateTime.Now:O}] {logLevel} {eventId}\n{formatter(state, exception)}\n{exception}\n\n";
+            lock (WriteLock)
+            {
+                try
+                {
+                    System.IO.File.AppendAllText(path, entry);
+                }
+                catch (Exception e) when (e is System.IO.IOException or UnauthorizedAccessException)
+                {
+                }
+            }
         }
     }
 }

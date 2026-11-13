@@ -117,8 +117,10 @@ public sealed class ScanDiffer
     {
         var leaves = new SortedDictionary<string, string>(StringComparer.Ordinal);
         leaves["location"] = JsonSerializer.Serialize(item.Location);
+        // Azure tag keys are case-insensitive: "Environment" and "environment" are one tag,
+        // so re-casing a key is not a removed tag plus an added one.
         foreach (var (k, v) in item.Tags.OrderBy(t => t.Key, StringComparer.Ordinal))
-            leaves[$"tags.{k}"] = JsonSerializer.Serialize(v);
+            leaves[$"tags.{k.ToLowerInvariant()}"] = JsonSerializer.Serialize(v);
         if (item.Raw is { } raw)
             Walk(raw, "properties", leaves);
         return leaves;
@@ -128,14 +130,23 @@ public sealed class ScanDiffer
     {
         switch (value.ValueKind)
         {
+            // An empty object or array has no leaves of its own, so it is recorded as one:
+            // otherwise [] -> absent, {} -> [] and "rules": [] -> one rule's worth of leaves
+            // with nothing on the other side all went unseen or half-seen.
             case JsonValueKind.Object:
+                var any = false;
                 foreach (var prop in value.EnumerateObject())
+                {
+                    any = true;
                     Walk(prop.Value, $"{path}.{prop.Name}", leaves);
+                }
+                if (!any) leaves[path] = "{}";
                 break;
             case JsonValueKind.Array:
                 var i = 0;
                 foreach (var el in value.EnumerateArray())
                     Walk(el, $"{path}[{i++}]", leaves);
+                if (i == 0) leaves[path] = "[]";
                 break;
             default:
                 leaves[path] = value.GetRawText();

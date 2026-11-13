@@ -20,40 +20,55 @@ public static class LegacyDesignImporter
 
         var imported = 0;
         var directoryEmpty = true;
-        using var db = workspace.CreateContext();
 
-        foreach (var path in Directory.EnumerateFiles(legacyDirectory, "*.adsdesign.json"))
+        foreach (var path in Directory.EnumerateFiles(legacyDirectory, "*.adsdesign.json").ToList())
         {
             Entry? entry = null;
             try
             {
                 entry = JsonSerializer.Deserialize<Entry>(File.ReadAllText(path), SerializerOptions);
             }
-            catch (Exception e) when (e is JsonException or IOException)
+            catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
             {
                 // Corrupted v1 entry: same rule as the old store - drop it, never crash.
             }
 
-            if (entry != null && !string.IsNullOrWhiteSpace(entry.Name)
-                && !db.Designs.Any(d => d.Name == entry.Name))
+            // One design, one transaction, and the file goes only after its row is stored.
+            // Saving everything at the end - after every file was already deleted - lost the
+            // whole batch when a single entry failed (no Data, or a name used twice).
+            if (entry is { Data: not null } && !string.IsNullOrWhiteSpace(entry.Name))
             {
-                db.Designs.Add(new DesignRecord { Name = entry.Name, Data = entry.Data, SavedAt = entry.SavedAt });
-                imported++;
+                try
+                {
+                    using var db = workspace.CreateContext();
+                    if (!db.Designs.Any(d => d.Name == entry.Name))
+                    {
+                        db.Designs.Add(new DesignRecord { Name = entry.Name, Data = entry.Data, SavedAt = entry.SavedAt });
+                        db.SaveChanges();
+                        imported++;
+                    }
+                }
+                catch (Exception e) when (e is Microsoft.EntityFrameworkCore.DbUpdateException or Microsoft.Data.Sqlite.SqliteException)
+                {
+                    // Not stored: keep the file so the next start can try again.
+                    directoryEmpty = false;
+                    continue;
+                }
             }
 
             try
             {
                 File.Delete(path);
-                directoryEmpty = Directory.EnumerateFiles(legacyDirectory).Any() == false &&
-                                 Directory.EnumerateDirectories(legacyDirectory).Any() == false;
             }
-            catch (IOException)
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
                 directoryEmpty = false;
             }
         }
 
-        db.SaveChanges();
+        directoryEmpty = directoryEmpty
+            && !Directory.EnumerateFiles(legacyDirectory).Any()
+            && !Directory.EnumerateDirectories(legacyDirectory).Any();
 
         if (directoryEmpty)
         {
@@ -61,7 +76,7 @@ public static class LegacyDesignImporter
             {
                 Directory.Delete(legacyDirectory);
             }
-            catch (IOException)
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
             }
         }

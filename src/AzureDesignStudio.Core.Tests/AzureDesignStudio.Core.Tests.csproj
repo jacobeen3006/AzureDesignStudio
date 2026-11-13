@@ -34,6 +34,10 @@
     <Content Include="..\AzureDesignStudio\wwwroot\ads-stencils.json" Link="ads-stencils.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <!-- The Gallery's reference architectures, verified by GalleryDesignTests. -->
+    <Content Include="..\AzureDesignStudio\wwwroot\gallery\*.json" Link="gallery\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <!-- Analyzer donor via the WASM app's Azure.Bicep.Decompiler; keep out. -->

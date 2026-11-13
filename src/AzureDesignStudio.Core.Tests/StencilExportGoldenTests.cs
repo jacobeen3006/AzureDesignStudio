@@ -107,14 +107,18 @@ namespace AzureDesignStudio.Core.Tests
                         ((dynamic)model).RuntimeStack = "dotnet|v6.0";
                         break;
                     }
-                // App gateway needs a linked public IP.
+                // App gateway needs its own subnet and a linked public IP.
                 case AppGatewayModel gw:
                     {
+                        TestPlacement.NewSubnet(subnetName: "ads-appgw").AddChild(gw);
                         var pip = new PublicIpModel { Name = "ads-gw-pip" };
                         var diagram = new BlazorDiagram();
                         diagram.Links.Add(new Blazor.Diagrams.Core.Models.LinkModel(new SinglePortAnchor(pip.Ports[1]), new SinglePortAnchor(gw.Ports[0])));
                         break;
                     }
+                default:
+                    TestPlacement.MakeExportable(model);
+                    break;
             }
 
             return (IAzureResource)model;

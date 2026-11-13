@@ -22,8 +22,10 @@ namespace AzureDesignStudio.AzureResources.ApiManagement
         /// <summary>
         /// Capacity of the SKU (number of deployed units of the SKU). For Consumption SKU capacity must be specified as 0.
         /// </summary>
+        // Nullable so an explicit 0 (required for the Consumption SKU) is written; a plain int 0
+        // is dropped by the template serializer as a default value.
         [Required]
         [JsonPropertyName("capacity")]
-        public int Capacity { get; set; }
+        public int? Capacity { get; set; }
     }
 }

@@ -35,8 +35,8 @@ public class DeploymentStackTests
     [Fact]
     public void Build_IsDeterministic_AndParameterOrderIrrelevant()
     {
-        var a = DeploymentStack.Build("stack-a", "westeurope", Template, DefaultPolicy, """{"b":{"value":2},"a":{"value":1}}""");
-        var b = DeploymentStack.Build("stack-a", "westeurope", Template, DefaultPolicy, """{"a":{"value":1},"b":{"value":2}}""");
+        var a = DeploymentStack.Build("stack-a", Template, DefaultPolicy, """{"b":{"value":2},"a":{"value":1}}""");
+        var b = DeploymentStack.Build("stack-a", Template, DefaultPolicy, """{"a":{"value":1},"b":{"value":2}}""");
 
         Assert.True(a.Success, Codes(a));
         Assert.Equal(a.PlanHash, b.PlanHash);
@@ -48,14 +48,19 @@ public class DeploymentStackTests
     [Fact]
     public void Build_HashChangesWithEveryIdentityInput()
     {
-        var baseBody = DeploymentStack.Build("stack-a", "westeurope", Template, DefaultPolicy);
-        var renamed = DeploymentStack.Build("stack-b", "westeurope", Template, DefaultPolicy);
-        var moved = DeploymentStack.Build("stack-a", "northeurope", Template, DefaultPolicy);
-        var edited = DeploymentStack.Build("stack-a", "westeurope", Template.Replace("1.0.0.0", "2.0.0.0"), DefaultPolicy);
-        var repolicyed = DeploymentStack.Build("stack-a", "westeurope", Template, new StackPolicy(StackUnmanageAction.Ignore));
+        var baseBody = DeploymentStack.Build("stack-a", Template, DefaultPolicy);
+        var renamed = DeploymentStack.Build("stack-b", Template, DefaultPolicy);
+        var edited = DeploymentStack.Build("stack-a", Template.Replace("1.0.0.0", "2.0.0.0"), DefaultPolicy);
+        var denied = DeploymentStack.Build("stack-a", Template,
+            DefaultPolicy with { DenySettings = new StackDenySettings(StackDenyMode.DenyDelete) });
+        var childScoped = DeploymentStack.Build("stack-a", Template,
+            DefaultPolicy with { DenySettings = new StackDenySettings(StackDenyMode.DenyDelete, ApplyToChildScopes: true) });
 
         Assert.StartsWith("sha256:", baseBody.PlanHash);
-        AssertDistinct(baseBody.PlanHash, renamed.PlanHash, moved.PlanHash, edited.PlanHash, repolicyed.PlanHash);
+        AssertDistinct(baseBody.PlanHash, renamed.PlanHash, edited.PlanHash, denied.PlanHash, childScoped.PlanHash);
+        // The name travels in the URL, not the body - the hash still binds it, so an approval
+        // for one stack cannot be replayed against another with the same request.
+        Assert.Equal(baseBody.Json, renamed.Json);
     }
 
     private static void AssertDistinct(params string[] values)
@@ -69,46 +74,43 @@ public class DeploymentStackTests
     [InlineData("x", null)]
     public void Build_ValidatesName(string name, string? expectedCode)
     {
-        var body = DeploymentStack.Build(name, "westeurope", Template, DefaultPolicy);
+        var body = DeploymentStack.Build(name, Template, DefaultPolicy);
         Assert.Equal(expectedCode is null, body.Diagnostics.All(d => d.Severity != ArmDiagnosticSeverity.Error));
         if (expectedCode is not null)
             Assert.Contains(expectedCode, Codes(body));
     }
 
     [Fact]
-    public void Build_RejectsMissingLocationAndMalformedTemplate()
+    public void Build_RejectsMalformedTemplateAndParameters()
     {
-        var noLoc = DeploymentStack.Build("s", " ", Template, DefaultPolicy);
-        Assert.Contains("StackLocationMissing", Codes(noLoc));
-
-        var badJson = DeploymentStack.Build("s", "westeurope", "{oops", DefaultPolicy);
+        var badJson = DeploymentStack.Build("s", "{oops", DefaultPolicy);
         Assert.Contains("StackTemplateMalformed", Codes(badJson));
         // A rejected input still yields parseable bytes (the hash step runs unconditionally):
         // the omitted template leaves no dangling comma behind.
         using var parsed = JsonDocument.Parse(badJson.Json);
         Assert.False(parsed.RootElement.GetProperty("properties").TryGetProperty("template", out _));
 
-        var notObject = DeploymentStack.Build("s", "westeurope", "[1,2]", DefaultPolicy);
+        var notObject = DeploymentStack.Build("s", "[1,2]", DefaultPolicy);
         Assert.Contains("StackTemplateMalformed", Codes(notObject));
 
-        var badParams = DeploymentStack.Build("s", "westeurope", Template, DefaultPolicy, "null");
+        var badParams = DeploymentStack.Build("s", Template, DefaultPolicy, "null");
         Assert.Contains("StackParametersMalformed", Codes(badParams));
     }
 
     [Theory]
-    [InlineData("missing")]
-    [InlineData("resourceGroup")]
-    [InlineData("deployment")]
+    [InlineData("resources")]
+    [InlineData("resourceGroups")]
+    [InlineData("managementGroups")]
     public void Build_RefusesDeleteActionsUntilPhase13(string slot)
     {
         var policy = slot switch
         {
-            "missing" => new StackPolicy(StackUnmanageAction.Delete),
-            "resourceGroup" => new StackPolicy(StackUnmanageAction.Detach, StackUnmanageAction.Delete),
+            "resources" => new StackPolicy(StackUnmanageAction.Delete),
+            "resourceGroups" => new StackPolicy(StackUnmanageAction.Detach, StackUnmanageAction.Delete),
             _ => new StackPolicy(StackUnmanageAction.Detach, StackUnmanageAction.Detach, StackUnmanageAction.Delete),
         };
 
-        var body = DeploymentStack.Build("s", "westeurope", Template, policy);
+        var body = DeploymentStack.Build("s", Template, policy);
 
         Assert.False(body.Success);
         var diag = Assert.Single(body.Diagnostics, d => d.Code == "StackDeleteActionLocked");
@@ -117,39 +119,46 @@ public class DeploymentStackTests
     }
 
     [Fact]
-    public void Build_EnforcesDenySettingsContract()
+    public void Build_WritesDenySettingsInTheApisOwnTerms()
     {
-        var emptyLocks = DeploymentStack.Build("s", "westeurope", Template,
-            DefaultPolicy with { DenySettings = new StackDenySettings(true, []) });
-        Assert.Contains("StackDenyLocksRequired", Codes(emptyLocks));
+        // denySettings is { mode, applyToChildScopes }. The earlier { status, locks[] } model
+        // does not exist in the API.
+        string Deny(StackDenySettings? settings)
+        {
+            var body = DeploymentStack.Build("s", Template, DefaultPolicy with { DenySettings = settings });
+            Assert.True(body.Success, Codes(body));
+            using var doc = JsonDocument.Parse(body.Json);
+            return doc.RootElement.GetProperty("properties").GetProperty("denySettings").GetRawText();
+        }
 
-        var locked = DeploymentStack.Build("s", "westeurope", Template,
-            DefaultPolicy with { DenySettings = new StackDenySettings(true, [StackDenyLock.NotDeletionAndChildUsage, StackDenyLock.NotDeletion]) });
-        Assert.True(locked.Success, Codes(locked));
-        // Locks are emitted in a stable order regardless of input order.
-        Assert.Contains("""locks":["NotDeletion","NotDeletionAndChildUsage"]""", locked.Json);
+        Assert.Equal("""{"mode":"none","applyToChildScopes":false}""", Deny(null)); // required member: stated, not omitted
+        Assert.Equal("""{"mode":"denyDelete","applyToChildScopes":false}""", Deny(new StackDenySettings(StackDenyMode.DenyDelete)));
+        Assert.Equal("""{"mode":"denyWriteAndDelete","applyToChildScopes":true}""",
+            Deny(new StackDenySettings(StackDenyMode.DenyWriteAndDelete, ApplyToChildScopes: true)));
     }
 
     [Fact]
     public void Build_EmitsArmStackShape()
     {
-        var body = DeploymentStack.Build("stack-a", "westeurope", Template,
-            DefaultPolicy with { Missing = StackUnmanageAction.Ignore });
+        // "Deployment Stacks - Create Or Update At Resource Group", api-version 2024-03-01:
+        // { properties: { actionOnUnmanage: { resources, resourceGroups, managementGroups },
+        //                 denySettings: { mode, ... }, template, parameters } }
+        // with no name, type or apiVersion in the body and no location for a group-scoped stack.
+        var body = DeploymentStack.Build("stack-a", Template, DefaultPolicy);
         Assert.True(body.Success, Codes(body));
+        Assert.Equal("2024-03-01", DeploymentStack.ApiVersion);
 
         using var doc = JsonDocument.Parse(body.Json);
         var root = doc.RootElement;
-        Assert.Equal("stack-a", root.GetProperty("name").GetString());
-        Assert.Equal("westeurope", root.GetProperty("location").GetString());
-        Assert.Equal("Microsoft.Resources/deploymentStacks", root.GetProperty("type").GetString());
-        Assert.Equal(DeploymentStack.ApiVersion, root.GetProperty("apiVersion").GetString());
+        Assert.Equal(new[] { "properties" }, root.EnumerateObject().Select(p => p.Name));
 
-        var actions = root.GetProperty("properties").GetProperty("policy").GetProperty("actionOnUnmanage");
-        Assert.Equal("Detach", actions.GetProperty("resourceGroup").GetString());
-        Assert.Equal("Detach", actions.GetProperty("deployment").GetString());
-        Assert.Equal("Ignore", actions.GetProperty("missing").GetString());
-        Assert.Equal("1.0.0.0", root.GetProperty("properties").GetProperty("template").GetProperty("contentVersion").GetString());
-        Assert.False(root.GetProperty("properties").TryGetProperty("denySettings", out _));
+        var properties = root.GetProperty("properties");
+        Assert.False(properties.TryGetProperty("policy", out _));
+        var actions = properties.GetProperty("actionOnUnmanage");
+        Assert.Equal(new[] { "resources", "resourceGroups", "managementGroups" }, actions.EnumerateObject().Select(p => p.Name));
+        Assert.All(actions.EnumerateObject(), slot => Assert.Equal("detach", slot.Value.GetString()));
+        Assert.Equal("none", properties.GetProperty("denySettings").GetProperty("mode").GetString());
+        Assert.Equal("1.0.0.0", properties.GetProperty("template").GetProperty("contentVersion").GetString());
     }
 
     [Fact]
@@ -256,8 +265,8 @@ public class DeploymentStackTests
     [Fact]
     public async Task Client_CreateOrUpdate_SendsEngineBytesAndFollowsAsyncOperationLro()
     {
-        var body = DeploymentStack.Build("ads-stack", "westeurope", Template, DefaultPolicy);
-        const string asyncUrl = "https://management.azure.com/operationLocations/async-42?api-version=2021-04-01";
+        var body = DeploymentStack.Build("ads-stack", Template, DefaultPolicy);
+        const string asyncUrl = "https://management.azure.com/operationLocations/async-42?api-version=2024-03-01";
         var handler = new FakeHandler((_, call) => call switch
         {
             0 => Json("""{"properties":{"provisioningState":"Creating"}}""", HttpStatusCode.Created, asyncOperation: asyncUrl),
@@ -269,7 +278,7 @@ public class DeploymentStackTests
 
         Assert.Equal("PUT", handler.Methods[0]);
         Assert.Equal(
-            "https://management.azure.com/subscriptions/sub-1/resourcegroups/rg1/providers/Microsoft.Resources/deploymentStacks/ads-stack?api-version=2021-04-01",
+            "https://management.azure.com/subscriptions/sub-1/resourcegroups/rg1/providers/Microsoft.Resources/deploymentStacks/ads-stack?api-version=2024-03-01",
             handler.Uris[0]);
         Assert.Equal(body.Json, handler.Bodies[0]); // the engine's exact bytes reach ARM
         Assert.Equal(3, handler.Uris.Count);
@@ -278,10 +287,95 @@ public class DeploymentStackTests
         Assert.Contains("Succeeded", result);
     }
 
+    // What ARM really does with Azure-AsyncOperation: the monitor answers 200 on every poll,
+    // "InProgress" until the operation ends, and never returns the resource. Treating the first
+    // 200 as the result handed {"status":"InProgress"} back as the stack document.
+    [Theory]
+    [InlineData("Succeeded", "succeeded")]
+    [InlineData("Failed", "failed")]
+    public async Task Client_CreateOrUpdate_PollsTheStatusMonitorThenReadsTheStack(string monitorStatus, string stackState)
+    {
+        const string asyncUrl = "https://management.azure.com/operationStatuses/op-1?api-version=2024-03-01";
+        var handler = new FakeHandler((_, call) => call switch
+        {
+            0 => Json("""{"properties":{"provisioningState":"creating"}}""", HttpStatusCode.Created, asyncOperation: asyncUrl),
+            1 => Json("""{"status":"InProgress"}"""),
+            2 => Json("""{"status":"Running"}"""),
+            3 => Json("{\"status\":\"" + monitorStatus + "\"}"),
+            _ => Json("{\"name\":\"ads-stack\",\"properties\":{\"provisioningState\":\"" + stackState + "\"}}"),
+        });
+
+        var result = await Client(handler).CreateOrUpdateAsync("sub-1", "rg1", "ads-stack", "{}");
+
+        Assert.Equal(new[] { "PUT", "GET", "GET", "GET", "GET" }, handler.Methods);
+        Assert.Equal(new[] { asyncUrl, asyncUrl, asyncUrl }, handler.Uris.Skip(1).Take(3));
+        Assert.Equal(handler.Uris[0], handler.Uris[4]); // the resource itself, once the monitor is terminal
+        Assert.Contains(stackState, result);
+        Assert.DoesNotContain("InProgress", result);
+    }
+
+    [Fact]
+    public async Task Client_CreateOrUpdate_MonitorThatNeverFinishes_TimesOut()
+    {
+        var handler = new FakeHandler((_, call) => call == 0
+            ? Json("{}", HttpStatusCode.Created, asyncOperation: "https://management.azure.com/operationStatuses/op-2?api-version=2024-03-01")
+            : Json("""{"status":"InProgress"}"""));
+
+        var error = await Assert.ThrowsAsync<ResourceGraphException>(
+            () => Client(handler).CreateOrUpdateAsync("sub-1", "rg1", "ads-stack", "{}"));
+
+        Assert.Equal("Timeout", error.Code);
+    }
+
+    private static ArmTransport Transport(FakeHandler handler) =>
+        new(new HttpClient(handler), new FakeCredential(), ArmEndpointSet.AzureCloud, (_, _) => Task.CompletedTask);
+
+    [Fact]
+    public async Task Transport_GetList_FollowsNextLinkOnTheSameHost()
+    {
+        var handler = new FakeHandler((_, call) => call switch
+        {
+            0 => Json("""{"value":[{"n":1}],"nextLink":"https://management.azure.com/things?page=2"}"""),
+            1 => Json("""{"value":[{"n":2}],"nextLink":""}"""),
+            _ => Json("""{"value":[{"n":99}]}"""),
+        });
+
+        var items = await Transport(handler).GetListAsync("https://management.azure.com/things", "value");
+
+        Assert.Equal(2, items.Count);
+        Assert.Equal(2, handler.Uris.Count);
+    }
+
+    [Fact]
+    public async Task Transport_GetList_RepeatedNextLink_FailsInsteadOfLoopingForever()
+    {
+        var handler = new FakeHandler((_, _) =>
+            Json("""{"value":[{"n":1}],"nextLink":"https://management.azure.com/things?page=2"}"""));
+
+        var error = await Assert.ThrowsAsync<ResourceGraphException>(
+            () => Transport(handler).GetListAsync("https://management.azure.com/things", "value"));
+
+        Assert.Equal("PagingLoop", error.Code);
+        Assert.Equal(2, handler.Uris.Count);
+    }
+
+    [Fact]
+    public async Task Transport_GetList_NextLinkOnAnotherHost_IsNotFollowedWithTheToken()
+    {
+        var handler = new FakeHandler((_, _) =>
+            Json("""{"value":[{"n":1}],"nextLink":"https://attacker.example/things?page=2"}"""));
+
+        var error = await Assert.ThrowsAsync<ResourceGraphException>(
+            () => Transport(handler).GetListAsync("https://management.azure.com/things", "value"));
+
+        Assert.Equal("PagingHostChanged", error.Code);
+        Assert.Single(handler.Uris);
+    }
+
     [Fact]
     public async Task Client_CreateOrUpdate_FollowsLocationLroAndGetReadsTheSameUrl()
     {
-        const string pollUrl = "https://management.azure.com/operationLocations/loc-7?api-version=2021-04-01";
+        const string pollUrl = "https://management.azure.com/operationLocations/loc-7?api-version=2024-03-01";
         var handler = new FakeHandler((_, call) => call switch
         {
             0 => Json("{}", HttpStatusCode.Accepted, location: pollUrl),
@@ -314,13 +408,17 @@ public class DeploymentStackTests
     public void TryParse_WireFormsRejectGuesses()
     {
         Assert.True(DeploymentStack.TryParseAction("detach", out var action) && action == StackUnmanageAction.Detach);
-        Assert.True(DeploymentStack.TryParseAction("IGNORE", out action) && action == StackUnmanageAction.Ignore);
+        Assert.True(DeploymentStack.TryParseAction("DELETE", out action) && action == StackUnmanageAction.Delete);
+        Assert.False(DeploymentStack.TryParseAction("ignore", out _)); // never an API value
         Assert.False(DeploymentStack.TryParseAction("", out _));   // blank: no silent default at the wire
         Assert.False(DeploymentStack.TryParseAction("1", out _));  // a numeric protocol-guess is refused, not Delete
         Assert.False(DeploymentStack.TryParseAction("bogus", out _));
         Assert.False(DeploymentStack.TryParseAction(null, out _));
-        Assert.True(DeploymentStack.TryParseDenyLock("notdeletion", out var denyLock) && denyLock == StackDenyLock.NotDeletion);
-        Assert.False(DeploymentStack.TryParseDenyLock("5", out _));
+        Assert.True(DeploymentStack.TryParseDenyMode("denydelete", out var mode) && mode == StackDenyMode.DenyDelete);
+        Assert.True(DeploymentStack.TryParseDenyMode("denyWriteAndDelete", out mode) && mode == StackDenyMode.DenyWriteAndDelete);
+        Assert.True(DeploymentStack.TryParseDenyMode("none", out mode) && mode == StackDenyMode.None);
+        Assert.False(DeploymentStack.TryParseDenyMode("NotDeletion", out _)); // the invented lock names
+        Assert.False(DeploymentStack.TryParseDenyMode("2", out _));
     }
 
     // ---- v2 12.3 closer: bypass rides the hashed body; managed lists parse from both
@@ -329,15 +427,15 @@ public class DeploymentStackTests
     [Fact]
     public void Build_BypassMemberRidesInsideHashedBody_AfterParameters()
     {
-        var def = DeploymentStack.Build("stack-a", "westeurope", Template, DefaultPolicy);
-        var bypass = DeploymentStack.Build("stack-a", "westeurope", Template, DefaultPolicy, "{}", bypassOutOfSyncError: true);
-        var bypassNoParams = DeploymentStack.Build("stack-a", "westeurope", Template, DefaultPolicy, bypassOutOfSyncError: true);
+        var def = DeploymentStack.Build("stack-a", Template, DefaultPolicy);
+        var bypass = DeploymentStack.Build("stack-a", Template, DefaultPolicy, "{}", bypassOutOfSyncError: true);
+        var bypassNoParams = DeploymentStack.Build("stack-a", Template, DefaultPolicy, bypassOutOfSyncError: true);
 
-        // Golden default: the pre-bypass bytes are byte-identical to the pinned shape.
-        Assert.Equal("""{"name":"stack-a","location":"westeurope","type":"Microsoft.Resources/deploymentStacks","apiVersion":"2021-04-01","properties":{"template":{"$schema":"https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#","contentVersion":"1.0.0.0","resources":[]},"policy":{"actionOnUnmanage":{"resourceGroup":"Detach","deployment":"Detach","missing":"Detach"}}}}""", def.Json);
+        // Golden default: the bytes sent for the default policy, with no bypass member at all.
+        Assert.Equal("""{"properties":{"actionOnUnmanage":{"resources":"detach","resourceGroups":"detach","managementGroups":"detach"},"denySettings":{"mode":"none","applyToChildScopes":false},"template":{"$schema":"https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#","contentVersion":"1.0.0.0","resources":[]}}}""", def.Json);
 
-        Assert.Contains("\"parameters\":{},\"bypassStackOutOfSyncError\":true,\"policy\"", bypass.Json);
-        Assert.Contains("\"bypassStackOutOfSyncError\":true,\"policy\"", bypassNoParams.Json);
+        Assert.EndsWith("\"parameters\":{},\"bypassStackOutOfSyncError\":true}}", bypass.Json);
+        Assert.EndsWith("\"resources\":[]},\"bypassStackOutOfSyncError\":true}}", bypassNoParams.Json);
         // The member rides inside the hashed body: the sha256: approval binds the bypass too.
         Assert.NotEqual(def.PlanHash, bypass.PlanHash);
     }

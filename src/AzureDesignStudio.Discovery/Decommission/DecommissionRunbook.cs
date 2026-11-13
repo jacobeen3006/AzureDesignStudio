@@ -11,7 +11,6 @@ public sealed record RunbookOptions(
     DateTimeOffset Now,
     TimeSpan PurgeDelay,
     string? StackName = null,
-    string? StackLocation = null,
     IReadOnlyList<ArmLock>? ExistingLocks = null)
 {
     /// <summary>Undo window defaults to 7 days ([71]: the T in T+N).</summary>
@@ -95,10 +94,11 @@ public static class DecommissionRunbook
         string? stackJson = null;
         string? stackHash = null;
         var caveats = new List<string>(plan.Caveats);
-        if (options.StackName is { Length: > 0 } && options.StackLocation is { Length: > 0 })
+        // A resource-group stack inherits its group's location, so the name alone is enough.
+        if (options.StackName is { Length: > 0 })
         {
-            var body = DeploymentStack.Build(options.StackName, options.StackLocation, EmptyTemplate,
-                new StackPolicy(Missing: StackUnmanageAction.Detach));
+            var body = DeploymentStack.Build(options.StackName, EmptyTemplate,
+                new StackPolicy(Resources: StackUnmanageAction.Detach));
             if (body.Success)
             {
                 stackJson = body.Json;
@@ -138,9 +138,13 @@ public static class DecommissionRunbook
                     ? "Already-protected resources are skipped, never double-locked."
                     : "Lock evidence was not supplied: verify with `az lock list` before applying.",
             ],
+            // Command shapes follow the published references (az lock, az resource, Az.Resources):
+            // az takes the lock level as --lock-type and the locked resource as --resource <id>
+            // (it has no --lock or --scope), and ids as --ids. A script built from the earlier
+            // spellings stopped at its first command.
             protection.Apply.Select(p => new RunbookLine(p.Scope,
-                $"az lock create --name \"{p.Name}\" --lock CanNotDelete --notes \"{Quote(p.Notes)}\" --scope \"{p.Scope}\"",
-                $"New-AzResourceLock -Scope \"{p.Scope}\" -LockName \"{p.Name}\" -Level CanNotDelete -Notes \"{Quote(p.Notes)}\"",
+                $"az lock create --name \"{p.Name}\" --lock-type CanNotDelete --notes \"{Quote(p.Notes)}\" --resource \"{p.Scope}\"",
+                $"New-AzResourceLock -Scope \"{p.Scope}\" -LockName \"{p.Name}\" -LockLevel CanNotDelete -LockNotes \"{Quote(p.Notes)}\" -Force",
                 $"lock {p.Name} exists on the resource")).ToList()));
 
         var detachChecklist = new List<string>
@@ -153,15 +157,15 @@ public static class DecommissionRunbook
         };
         stages.Add(new RunbookStage("Stage 1 - Detach (unmanage; resources keep running)", detachChecklist,
             staged.Select(id => new RunbookLine(id,
-                $"az resource exists --id \"{id}\"",
+                $"az resource show --ids \"{id}\" --query id --output tsv",
                 $"$null -ne (Get-AzResource -ResourceId \"{id}\" -ErrorAction SilentlyContinue)",
-                "exists = true (detach must not destroy)")).ToList()));
+                "prints the resource id (detach must not destroy; a missing resource fails the command)")).ToList()));
 
         stages.Add(new RunbookStage(
             "Stage 2a - Release the decommission window locks",
             [$"Run only after the purge window opens and the [62] approval naming {planHash} is live. Only the window lock {protection.LockName} is released - operator locks are left in place by name."],
             protectedIds.Select(id => new RunbookLine(id,
-                $"az lock delete --name \"{protection.LockName}\" --scope \"{id}\"",
+                $"az lock delete --name \"{protection.LockName}\" --resource \"{id}\"",
                 $"Remove-AzResourceLock -Scope \"{id}\" -LockName \"{protection.LockName}\" -Force",
                 "window lock gone; foreign locks untouched")).ToList()));
 
@@ -172,7 +176,7 @@ public static class DecommissionRunbook
                 $"Stage 2b.{i + 1} - Purge batch {i + 1} of {plan.Stages.Count} (irreversible)",
                 [$"Every id in this batch is safe to delete once all earlier batches are done. {batch.Count} resource(s)."],
                 batch.Select(id => new RunbookLine(Canonical(id),
-                    $"az resource delete --id \"{Canonical(id)}\"",
+                    $"az resource delete --ids \"{Canonical(id)}\"",
                     $"Remove-AzResource -ResourceId \"{Canonical(id)}\" -Force",
                     "exists = false")).ToList()));
         }
@@ -184,7 +188,7 @@ public static class DecommissionRunbook
                 "Re-attach: redeploy the original stack/template so IaC manages the resources again.",
             ],
             protectedIds.Select(id => new RunbookLine(id,
-                $"az lock delete --name \"{protection.LockName}\" --scope \"{id}\"",
+                $"az lock delete --name \"{protection.LockName}\" --resource \"{id}\"",
                 $"Remove-AzResourceLock -Scope \"{id}\" -LockName \"{protection.LockName}\" -Force",
                 "window lock gone")).ToList()));
 
@@ -326,7 +330,10 @@ internal static class RunbookRenderer
             if (stage.Title.StartsWith("Stage 2", StringComparison.Ordinal))
                 sb.Append(cli
                     ? $"if [ \"$(date -u +%s)\" -lt {r.PurgeNotBefore.ToUnixTimeSeconds()} ]; then echo \"purge window not open before {r.PurgeNotBefore:O}\"; exit 1; fi\n"
-                    : $"if ((Get-Date).ToUniversalTime() -lt [DateTime]::Parse(\"{r.PurgeNotBefore:O}\")) {{ throw \"purge window not open before {r.PurgeNotBefore:O}\" }}\n");
+                    // DateTimeOffset on both sides. [DateTime]::Parse turns the offset string into
+                    // LOCAL time and -lt compares ticks without regard to Kind, so against a UTC
+                    // "now" the gate opened early by the machine's UTC offset west of Greenwich.
+                    : $"if ([DateTimeOffset]::UtcNow -lt [DateTimeOffset]::Parse(\"{r.PurgeNotBefore:O}\", [Globalization.CultureInfo]::InvariantCulture)) {{ throw \"purge window not open before {r.PurgeNotBefore:O}\" }}\n");
             else if (stage.Title.StartsWith("Abort", StringComparison.Ordinal))
                 Comment("Abort path: run instead of any purge batch.");
             foreach (var l in stage.Lines)

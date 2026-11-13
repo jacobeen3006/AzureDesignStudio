@@ -42,8 +42,13 @@ public sealed class TenantScanSession(
     public async Task<IReadOnlyList<ResourceSnapshotRecord>> GetSnapshotsAsync(string scanId)
     {
         var rows = await Scans.GetSnapshotsAsync(scanId);
-        // a resumed scan can re-run query groups; last write for a resource id wins
-        return rows.DistinctBy(r => r.ResourceId, StringComparer.OrdinalIgnoreCase).ToList();
+        // A resumed scan can re-run query groups; the last write for a resource id wins.
+        // Rows arrive ordered by type and name, so the newest is picked by row id - taking
+        // the first of each group kept the OLDEST copy.
+        return rows
+            .GroupBy(r => r.ResourceId, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.MaxBy(r => r.Id)!)
+            .ToList();
     }
 
     /// <summary>Starts (or resumes) a scan in the background; false when one is already running.</summary>
@@ -65,8 +70,20 @@ public sealed class TenantScanSession(
         ScanCheckpoint? resumePoint = null;
         if (resume)
         {
-            var existing = await Scans.GetResumableAsync();
-            if (existing?.CheckpointJson is { } json) resumePoint = ScanCheckpoint.FromJson(json);
+            try
+            {
+                var existing = await Scans.GetResumableAsync();
+                if (existing?.CheckpointJson is { } json) resumePoint = ScanCheckpoint.FromJson(json);
+            }
+            catch (Exception e)
+            {
+                // Running was already set: an unreadable checkpoint or a locked database
+                // here left it set, and every later scan was refused until restart.
+                Running = false;
+                LastError = $"The previous scan cannot be resumed: {e.Message}";
+                StateChanged?.Invoke();
+                return false;
+            }
         }
 
         var progress = new Progress<ScanProgress>(p =>

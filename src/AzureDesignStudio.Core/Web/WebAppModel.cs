@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AzureDesignStudio.AzureResources.Base;
 using AzureDesignStudio.AzureResources.Web;
 using AzureDesignStudio.Core.Attributes;
@@ -40,7 +40,7 @@ namespace AzureDesignStudio.Core.Web
             }
         };
         protected override ResourceBase ArmResource => _webapp;
-        public virtual string Kind => _webapp.Kind;
+        public virtual string Kind => "app";
         [Required, DisplayName("Publish"), MapToDto]
         public string Publish { get; set; } = "code";
         [Required, DisplayName("Runtime"), MapToDto]
@@ -203,6 +203,11 @@ namespace AzureDesignStudio.Core.Web
 
             servicePlan.Kind = ServicePlanOS;
 
+            // A serverless SKU left behind by a Function App that has since been removed or
+            // switched to dedicated hosting cannot run a web app.
+            if (servicePlan.IsServerless && !servicePlan.SkuFollowsFunctionApp)
+                servicePlan.UseDedicatedSku(AppServicePlanModel.DefaultDedicatedSku);
+
             return servicePlan;
         }
 
@@ -216,6 +221,10 @@ namespace AzureDesignStudio.Core.Web
             }
 
             var appSvcPlan = CreateHostingPlan();
+            // Kind is virtual: a Function App reports "functionapp[,linux]". The resource used
+            // to keep the "app" it was constructed with, so every Function App was exported -
+            // and deployed - as a plain Web App.
+            _webapp.Kind = Kind;
             _webapp.Properties.SiteConfig = CreateSiteConfig();
             _webapp.Properties.ServerFarmId = appSvcPlan.ResourceId;
             _webapp.DependsOn = new List<string> { appSvcPlan.ResourceId };
@@ -224,6 +233,11 @@ namespace AzureDesignStudio.Core.Web
             {
                 _webapp.DependsOn.Add(subnet.ResourceId);
                 _webapp.Properties.VirtualNetworkSubnetId = subnet.ResourceId;
+            }
+            else
+            {
+                // The plan may have been moved out of a subnet since the last export.
+                _webapp.Properties.VirtualNetworkSubnetId = null;
             }
         }
     }

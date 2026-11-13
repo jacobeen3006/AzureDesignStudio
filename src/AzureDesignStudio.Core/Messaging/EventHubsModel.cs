@@ -28,7 +28,7 @@ namespace AzureDesignStudio.Core.Messaging
             Sku = new()
             {
                 Name = "Standard",
-                Tier = "Regional"
+                Tier = "Standard"
             },
             Properties = new(),
         };
@@ -39,7 +39,14 @@ namespace AzureDesignStudio.Core.Messaging
         public string Sku
         {
             get => _eventHubs.Sku.Name;
-            set => _eventHubs.Sku.Name = value;
+            set
+            {
+                if (string.IsNullOrEmpty(value))
+                    return;
+                // A namespace's tier always equals its sku name (Basic, Standard, Premium).
+                _eventHubs.Sku.Name = value;
+                _eventHubs.Sku.Tier = value;
+            }
         }
         [MapToDto]
         [DisplayName("Disable auto ingestion")]

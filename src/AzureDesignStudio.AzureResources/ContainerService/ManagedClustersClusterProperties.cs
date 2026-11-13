@@ -38,8 +38,16 @@ namespace AzureDesignStudio.AzureResources.ContainerService
         /// <summary>
         /// Default agent pool properties.
         /// </summary>
-        [JsonPropertyName("defaultAgentPoolProfile")]
+        // The model edits one pool; the API's member is the array agentPoolProfiles, and
+        // "defaultAgentPoolProfile" is not a member at all.
+        [JsonIgnore]
         public ManagedClustersAgentPoolProfile DefaultAgentPoolProfile { get; set; }
+
+        [JsonPropertyName("agentPoolProfiles")]
+        public IList<ManagedClustersAgentPoolProfile> AgentPoolProfiles { get; set; }
+
+        [JsonPropertyName("networkProfile")]
+        public ManagedClustersNetworkProfile NetworkProfile { get; set; }
 
         /// <summary>
         /// The current provisioning state.

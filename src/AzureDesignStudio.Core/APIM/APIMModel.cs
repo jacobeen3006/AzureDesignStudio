@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AzureDesignStudio.AzureResources.ApiManagement;
 using AzureDesignStudio.AzureResources.Base;
 using AzureDesignStudio.Core.Attributes;
@@ -39,7 +39,7 @@ public class APIMModel : AzureNodeBase
     [Required, DisplayName("Sku Capacity"), MapToDto]
     public int SkuCapacity
     {
-        get => _apimService.Sku.Capacity;
+        get => _apimService.Sku.Capacity ?? 0;
         set => _apimService.Sku.Capacity = value;
     }
     [Required, DisplayName("Publisher Email"), MapToDto]
@@ -98,6 +98,13 @@ public class APIMModel : AzureNodeBase
                 SubnetResourceId = subnet.ResourceId
             };
             _apimService.DependsOn = new List<string> { subnet.ResourceId };
+        }
+        else
+        {
+            // Moved out of its subnet since the last export: the old network configuration
+            // and dependency must not ride along into the next template.
+            _apimService.Properties.VirtualNetworkConfiguration = null;
+            _apimService.DependsOn = null;
         }
     }
 }

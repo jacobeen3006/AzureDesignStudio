@@ -45,7 +45,7 @@ AzureDesignStudio.sln
 | **ORM** | Entity Framework Core (SQLite workspace store / InMemory dev / SQL Server prod) |
 | **Mapping** | AutoMapper 12 + custom Roslyn source generator |
 | **Secrets** | Azure Key Vault (production) |
-| **Telemetry** | Azure Application Insights |
+| **Telemetry** | Azure Application Insights, server only and only when a connection string is configured. The client sends none. |
 | **IaC generation** | Azure.ResourceManager SDK, Azure.Deployments.Core |
 | **Bicep** | Azure.Bicep.Decompiler (import existing .bicep files) |
 | **CI** | GitHub Actions, CodeQL, Nerdbank.GitVersioning |
@@ -61,7 +61,6 @@ AzureDesignStudio.sln
 | `Microsoft.AspNetCore.Components.WebAssembly` 7.0.4 | WASM host |
 | `Azure.Bicep.Decompiler` 0.15.31 | Bicep → ARM conversion |
 | `Azure.ResourceManager` | Azure SDK for ARM deployment |
-| `BlazorApplicationInsights` 2.2.0 | Client-side telemetry |
 | `Nerdbank.GitVersioning` 3.5.119 | Automatic versioning |
 
 ---

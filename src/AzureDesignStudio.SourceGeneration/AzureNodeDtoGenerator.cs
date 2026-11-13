@@ -1,4 +1,4 @@
-﻿using AzureDesignStudio.SourceGeneration.Models;
+using AzureDesignStudio.SourceGeneration.Models;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -158,7 +158,7 @@ namespace AzureDesignStudio.SourceGeneration
             if (template.HasErrors)
             {
                 var errors = string.Join(" | ", template.Messages.Select(x => x.Message));
-                throw new InvalidOperationException($"Template parse error: {template.Messages}");
+                throw new InvalidOperationException($"Template parse error: {errors}");
             }
 
             var source = template.Render(model, memberRenamer: member => member.Name);

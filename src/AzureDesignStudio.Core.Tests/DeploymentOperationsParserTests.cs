@@ -20,6 +20,48 @@ public class DeploymentOperationsParserTests
             + "\",\"resourceName\":\"" + name + "\"},\"properties\":{\"statusCode\":\"" + statusCode + "\"}" + timestampPart + "}";
     }
 
+    // The shape Deployment Operations - List returns: everything about an operation sits under
+    // "properties". The parser read targetResource and timestamp from the entry root, so every
+    // real entry was skipped as "deployment-level" and the monitor showed no resources at all.
+    [Fact]
+    public void ArmShape_ReadsTargetStateStatusAndTimestampFromProperties()
+    {
+        var (operations, diagnostics) = DeploymentOperationsParser.Parse("""
+        {"value":[
+          {"id":"/subscriptions/s/resourceGroups/rg/providers/Microsoft.Resources/deployments/d/operations/A1","operationId":"A1",
+           "properties":{"provisioningOperation":"Create","provisioningState":"Succeeded","timestamp":"2026-10-01T10:00:05.123Z","statusCode":"Created",
+                         "targetResource":{"id":"/subscriptions/s/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/sa1","resourceType":"Microsoft.Storage/storageAccounts","resourceName":"sa1"}}},
+          {"operationId":"A2",
+           "properties":{"provisioningOperation":"Create","provisioningState":"Running","timestamp":"2026-10-01T10:00:01Z",
+                         "targetResource":{"resourceType":"Microsoft.Network/virtualNetworks","resourceName":"vnet1"}}},
+          {"operationId":"A3",
+           "properties":{"provisioningOperation":"Create","provisioningState":"Failed","timestamp":"2026-10-01T10:00:09Z","statusCode":"Conflict",
+                         "targetResource":{"resourceType":"Microsoft.Network/virtualNetworks","resourceName":"vnet1"}}},
+          {"operationId":"A4","properties":{"provisioningOperation":"EvaluateDeploymentOutput","provisioningState":"Succeeded","timestamp":"2026-10-01T10:00:10Z"}}
+        ]}
+        """);
+
+        Assert.Empty(diagnostics);
+        Assert.Equal(2, operations.Count);
+
+        var vnet = operations.Single(o => o.ResourceKey == "microsoft.network/virtualnetworks/vnet1");
+        Assert.Equal(ResourceApplyState.Failed, vnet.State); // newest timestamp wins
+        Assert.Equal("Conflict", vnet.StatusCode);
+        Assert.Equal(new DateTimeOffset(2026, 10, 1, 10, 0, 9, TimeSpan.Zero), vnet.TimestampUtc);
+
+        var storage = operations.Single(o => o.ResourceKey == "microsoft.storage/storageaccounts/sa1");
+        Assert.Equal(ResourceApplyState.Succeeded, storage.State);
+        Assert.Equal("Created", storage.StatusCode);
+    }
+
+    [Fact]
+    public void EntryThatIsNotAnObject_IsSkippedNotThrown()
+    {
+        var (operations, _) = DeploymentOperationsParser.Parse("""{"value":["oops",42,null,{"properties":{"provisioningState":"Succeeded","targetResource":{"resourceType":"T/x","resourceName":"n"}}}]}""");
+
+        Assert.Single(operations);
+    }
+
     [Fact]
     public void DisplayStatuses_MapToResourceStates()
     {

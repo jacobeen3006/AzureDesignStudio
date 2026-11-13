@@ -109,6 +109,7 @@ public sealed class AdsMcpTools(AdsWorkspace workspace, ILogger<AdsMcpTools> log
         var caveats = new List<string>
         {
             "the workspace cost cache holds cached Azure Retail Prices meter rows (unit prices), not actual spend",
+            "totalRetailPrice and the bucket figures add up unit prices across meters with different units (per hour, per GB, per 10K operations); they are not a cost estimate and must not be reported as one",
         };
         if (scanId is not null)
             caveats.Add("scan_id does not filter the cost cache (it is global per meter)");

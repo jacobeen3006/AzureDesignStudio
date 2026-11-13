@@ -4,28 +4,37 @@
 
 <Form Model="@expressRouteCircuit" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })" Size="@FormSize.Small">
     <NameAndLocation Node="@context" />
-    <FormItem>
-        <RadioGroup @bind-Value="@context.ServiceProvider" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
-            <Radio RadioButton Value="@("Equinix")">Equinix</Radio>
-            <Radio RadioButton Value="@("Globalreach")">Global Reach</Radio>
-            <Radio RadioButton Value="@("BT")">BT</Radio>
-            <Radio RadioButton Value="@("Microsoft")">Microsoft</Radio>
-        </RadioGroup>
+    <FormItem Label="Provider">
+        <Input TValue="string" @bind-Value="@context.ServiceProvider" Size="@InputSize.Small" Placeholder="Equinix" />
     </FormItem>
-    <FormItem>
-        <RadioGroup @bind-Value="@context.SkuName" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
-            <Radio RadioButton Value="@("Standard50Mbps")">Standard 50 Mbps</Radio>
-            <Radio RadioButton Value="@("Standard100Mbps")">Standard 100 Mbps</Radio>
-            <Radio RadioButton Value="@("Premium100Mbps")">Premium 100 Mbps</Radio>
-            <Radio RadioButton Value="@("Premium200Mbps")">Premium 200 Mbps</Radio>
-        </RadioGroup>
+    <FormItem Label="Peering location">
+        <Input TValue="string" @bind-Value="@context.PeeringLocation" Size="@InputSize.Small" Placeholder="Amsterdam" />
     </FormItem>
-    <FormItem>
+    <FormItem Label="Bandwidth">
+        <SimpleSelect @bind-Value="@Bandwidth" Size="@InputSize.Small">
+            <SelectOptions>
+                @foreach (var mbps in ExpressRouteCircuitModel.Bandwidths)
+                {
+                    <SimpleSelectOption Label="@(mbps >= 1000 ? $"{mbps / 1000} Gbps" : $"{mbps} Mbps")" Value="@mbps.ToString()" />
+                }
+            </SelectOptions>
+        </SimpleSelect>
+    </FormItem>
+    <FormItem Label="Tier">
         <RadioGroup @bind-Value="@context.SkuTier" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("Local")">Local</Radio>
             <Radio RadioButton Value="@("Standard")">Standard</Radio>
             <Radio RadioButton Value="@("Premium")">Premium</Radio>
         </RadioGroup>
     </FormItem>
+    <FormItem Label="Billing">
+        <RadioGroup @bind-Value="@context.SkuFamily" ButtonStyle="@RadioButtonStyle.Solid" Size="@InputSize.Small">
+            <Radio RadioButton Value="@("MeteredData")">Metered</Radio>
+            <Radio RadioButton Value="@("UnlimitedData")">Unlimited</Radio>
+        </RadioGroup>
+    </FormItem>
+    <Alert Type="@AlertType.Info" ShowIcon="true"
+           Message="The provider and peering location must be a pair your provider offers; Azure checks the combination when the circuit is created." />
 </Form>
 
 @code {
@@ -35,4 +44,10 @@
     public Diagram Diagram { get; set; } = null!;
 
     private ExpressRouteCircuitModel expressRouteCircuit => (ExpressRouteCircuitModel)Node;
+
+    private string Bandwidth
+    {
+        get => expressRouteCircuit.BandwidthInMbps.ToString();
+        set => expressRouteCircuit.BandwidthInMbps = int.TryParse(value, out var mbps) ? mbps : expressRouteCircuit.BandwidthInMbps;
+    }
 }

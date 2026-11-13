@@ -22,8 +22,13 @@ public sealed record ResourceOperation(string ResourceKey, ResourceApplyState St
 /// Per-resource apply state from ARM's deployment-operations payload (v2 plan 11.2/[52][56]
 /// monitor): each operation maps to a state, and per resource the newest timestamp wins -
 /// a resource that started, failed and was retried reports the retry's state, never the old
-/// failure. Unrecognized display statuses stay Unknown rather than being coerced to failed.
+/// failure. Unrecognized states stay Unknown rather than being coerced to failed.
 /// Malformed payloads produce a diagnostic, never an exception.
+///
+/// ARM nests everything about an operation under <c>properties</c>
+/// (<c>targetResource</c>, <c>provisioningState</c>, <c>statusCode</c>, <c>timestamp</c>).
+/// The flat <c>targetResource</c>/<c>displayStatus.display</c>/<c>timestamp</c> shape this
+/// parser first read is still accepted, so callers that normalise entries keep working.
 /// </summary>
 public static class DeploymentOperationsParser
 {
@@ -76,9 +81,15 @@ public static class DeploymentOperationsParser
 
         var latest = new Dictionary<string, ResourceOperation>(StringComparer.OrdinalIgnoreCase);
         var diagnostics = new List<ArmDiagnostic>();
-        foreach (var entry in value)
+        foreach (var node in value)
         {
-            if (entry?["targetResource"] is not JsonNode target)
+            if (node is not JsonObject entry)
+            {
+                continue;
+            }
+
+            var properties = entry["properties"] as JsonObject;
+            if ((properties?["targetResource"] ?? entry["targetResource"]) is not JsonObject target)
             {
                 continue; // deployment-level operations carry no resource to track
             }
@@ -92,21 +103,23 @@ public static class DeploymentOperationsParser
 
             var key = $"{type}/{name}".ToLowerInvariant();
 
-            var display = entry["displayStatus"]?["display"]?.GetValueKind() == JsonValueKind.String
-                ? entry["displayStatus"]!["display"]!.GetValue<string>()
-                : "";
+            var display = Str(properties, "provisioningState");
+            if (display.Length == 0)
+            {
+                display = Str(entry["displayStatus"], "display");
+            }
+
             var state = Map(display);
             if (display.Length > 0 && state == ResourceApplyState.Unknown)
             {
                 diagnostics.Add(new(ArmDiagnosticSeverity.Warning, "UnrecognizedOperationState",
-                    $"ARM reported display status '{display}' for '{key}'; it stays Unknown."));
+                    $"ARM reported status '{display}' for '{key}'; it stays Unknown."));
             }
 
+            var statusCode = Str(properties, "statusCode");
             var operation = new ResourceOperation(key, state,
-                entry["properties"]?["statusCode"]?.GetValueKind() == JsonValueKind.String
-                    ? entry["properties"]!["statusCode"]!.GetValue<string>()
-                    : null,
-                ParseTimestamp(entry["timestamp"]));
+                statusCode.Length > 0 ? statusCode : null,
+                ParseTimestamp(properties?["timestamp"] ?? entry["timestamp"]));
 
             if (!latest.TryGetValue(key, out var existing) || IsNewer(operation.TimestampUtc, existing.TimestampUtc))
             {
@@ -138,7 +151,8 @@ public static class DeploymentOperationsParser
             return null;
         }
 
-        return DateTimeOffset.TryParse(node.GetValue<string>(), out var parsed) ? parsed : null;
+        return DateTimeOffset.TryParse(node.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed) ? parsed : null;
     }
 
     private static string Str(JsonNode? node, string property) =>

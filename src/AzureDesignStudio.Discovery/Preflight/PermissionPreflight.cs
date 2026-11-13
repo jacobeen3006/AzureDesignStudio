@@ -77,10 +77,18 @@ public sealed class PermissionPreflight(ArmTransport transport, ResourceGraphCli
         {
             return new DataSourceProbe(source, displayName, role, unlocks, ProbeStatus.NotAvailable, Explain(e, role));
         }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException and not OperationCanceledException)
+        // A timeout is a TaskCanceledException the caller did not ask for. (The previous
+        // filter, "TaskCanceledException and not OperationCanceledException", could never be
+        // true - the first derives from the second - so one probe timing out failed them all.)
+        catch (Exception e) when (e is HttpRequestException || (e is OperationCanceledException && !ct.IsCancellationRequested))
         {
             return new DataSourceProbe(source, displayName, role, unlocks, ProbeStatus.AvailableWithCaveat,
                 $"network problem: {e.Message}");
+        }
+        catch (Azure.Identity.AuthenticationFailedException e)
+        {
+            return new DataSourceProbe(source, displayName, role, unlocks, ProbeStatus.NotAvailable,
+                $"sign-in failed: {e.Message}");
         }
     }
 

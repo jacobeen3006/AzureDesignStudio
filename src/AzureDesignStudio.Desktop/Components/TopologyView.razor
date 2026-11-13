@@ -47,16 +47,16 @@ else
             </div>
 
             <div style="overflow:auto;border:1px solid #f0f0f0;height:min(560px,60vh);">
-                <svg width="@($"{layout.Width * scale:0.##}")" height="@($"{layout.Height * scale:0.##}")"
-                     viewBox="0 0 @($"{layout.Width:0.#}") @($"{layout.Height:0.#}")"
+                <svg width="@N(layout.Width * scale)" height="@N(layout.Height * scale)"
+                     viewBox="@($"0 0 {N(layout.Width)} {N(layout.Height)}")"
                      style="display:block;touch-action:none;background:#fbfbfd;"
                      @onwheel="ZoomAsync" @onpointermove="PointerMoveAsync" @onpointerup="PointerUpAsync">
                     @foreach (var c in layout.Containers)
                     {
-                        <rect x="@c.X" y="@c.Y" width="@c.W" height="@c.H" rx="10"
+                        <rect x="@N(c.X)" y="@N(c.Y)" width="@N(c.W)" height="@N(c.H)" rx="10"
                               fill="@TopologyLayout.FrameFill(c.Id)" stroke="@TopologyLayout.FrameStroke(c.Id)" stroke-width="1.5"
                               stroke-dasharray="@(TopologyLayout.IsLane(c.Id) ? "6 4" : null)" opacity="0.9" />
-                        @((MarkupString)$"<text x=\"{c.X + 10:0.#}\" y=\"{c.Y + 20:0.#}\" font-size=\"13\" font-weight=\"600\" fill=\"#555\">{Enc(Short(c.Label, 46))}</text>")
+                        @((MarkupString)$"<text x=\"{N(c.X + 10)}\" y=\"{N(c.Y + 20)}\" font-size=\"13\" font-weight=\"600\" fill=\"#555\">{Enc(Short(c.Label, 46))}</text>")
                     }
                     @foreach (var e in graph!.Edges)
                     {
@@ -64,7 +64,7 @@ else
                         {
                             continue;
                         }
-                        <line x1="@(a.X + NodeW / 2)" y1="@(a.Y + NodeH / 2)" x2="@(b.X + NodeW / 2)" y2="@(b.Y + NodeH / 2)"
+                        <line x1="@N(a.X + NodeW / 2)" y1="@N(a.Y + NodeH / 2)" x2="@N(b.X + NodeW / 2)" y2="@N(b.Y + NodeH / 2)"
                               stroke="@TopologyLayout.EdgeColor(e.Kind)" stroke-width="1.4" opacity="0.75" />
                     }
                     @foreach (var n in layout.Nodes)
@@ -74,15 +74,15 @@ else
                         <g style="cursor:grab" @onpointerdown="@(ev => PointerDownAsync(n, ev))">
                             @if (drag?.NodeId == n.Node.Id)
                             {
-                                <rect x="@(x - 2)" y="@(y - 2)" width="@(NodeW + 4)" height="@(NodeH + 4)" rx="9"
+                                <rect x="@N(x - 2)" y="@N(y - 2)" width="@N(NodeW + 4)" height="@N(NodeH + 4)" rx="9"
                                       fill="none" stroke="#1677ff" stroke-width="2" />
                             }
-                            <rect x="@x" y="@y" width="@NodeW" height="@NodeH" rx="7"
+                            <rect x="@N(x)" y="@N(y)" width="@N(NodeW)" height="@N(NodeH)" rx="7"
                                   fill="@(n.Node.External ? "#f5f5f5" : "#ffffff")"
                                   stroke="@stroke" stroke-width="1.4"
                                   stroke-dasharray="@(n.Node.External ? "5 3" : null)" />
-                            @((MarkupString)$"<text x=\"{x + 38:0.#}\" y=\"{y + 21:0.#}\" font-size=\"12.5\" font-weight=\"600\" fill=\"#222\">{Enc(Short(n.Node.Name, 21))}</text>")
-                            @((MarkupString)$"<text x=\"{x + 38:0.#}\" y=\"{y + 38:0.#}\" font-size=\"10.5\" fill=\"#888\">{Enc(Short(n.Node.Type, 28))}</text>")
+                            @((MarkupString)$"<text x=\"{N(x + 38)}\" y=\"{N(y + 21)}\" font-size=\"12.5\" font-weight=\"600\" fill=\"#222\">{Enc(Short(n.Node.Name, 21))}</text>")
+                            @((MarkupString)$"<text x=\"{N(x + 38)}\" y=\"{N(y + 38)}\" font-size=\"10.5\" fill=\"#888\">{Enc(Short(n.Node.Type, 28))}</text>")
                         </g>
                     }
                 </svg>
@@ -320,6 +320,10 @@ else
     private static string Short(string s, int max) => s.Length <= max ? s : s[..(max - 1)] + "…";
 
     private static string Enc(string s) => WebUtility.HtmlEncode(s);
+
+    // SVG coordinates take a '.' decimal separator. Formatting with the current culture wrote
+    // "12,5" under a comma-decimal locale (pl-PL, de-DE), which is not a number in SVG.
+    private static string N(double value) => value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 
     private static string NameOf(string id) => id.Contains('/') ? id[(id.LastIndexOf('/') + 1)..] : id;
 

@@ -10,8 +10,9 @@ on:
     tags: ['v*']
   workflow_dispatch: {}
 
+# The SDK comes from global.json (pinned band + workload set) in every job; a
+# floating 10.0.x install moves to the next feature band, which global.json rejects.
 env:
-  DOTNET_VERSION: '10.0.x'
   DESKTOP_TFM: net10.0-windows10.0.19041.0
 
 jobs:
@@ -20,10 +21,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # avoid shallow clone so nbgv can do its work.
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: ${{ env.DOTNET_VERSION }}
+        global-json-file: global.json
+    # Release turns on AOT for the client; without the workload publish stops at NETSDK1147.
+    - name: Install wasm-tools workload
+      run: dotnet workload install wasm-tools
     - name: Publish
       run: dotnet publish src/AzureDesignStudio -c Release -o out/wasm --nologo
     - name: Zip site (wwwroot contents at archive root, plus web.config)
@@ -40,8 +46,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # avoid shallow clone so nbgv can do its work.
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        global-json-file: global.json
+    # .git stays out of the Docker context, so the script computes the version
+    # with nbgv on the runner and hands it to the in-container build.
     - name: Docker build
-      run: docker build -f src/AzureDesignStudio.Server/Dockerfile -t ads-server:${{ github.ref_name }} .
+      shell: pwsh
+      run: |
+        dotnet tool install -g nbgv
+        ./src/DockerBuild.ps1 -Tag "ads-server:${{ github.ref_name }}"
     - name: Push (requires registry vars and secrets)
       if: vars.REGISTRY != ''
       env:
@@ -59,12 +76,16 @@ jobs:
       MSIX_PFX: ${{ secrets.MSIX_PFX_BASE64 }}
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # avoid shallow clone so nbgv can do its work.
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: ${{ env.DOTNET_VERSION }}
-    - name: Install MAUI workload
-      run: dotnet workload install maui-windows
+        global-json-file: global.json
+    # wasm-tools as well: the Desktop project references the WASM client, whose
+    # Release configuration enables AOT.
+    - name: Install MAUI and wasm-tools workloads
+      run: dotnet workload install maui-windows wasm-tools
     - name: Stamp package version from tag
       if: startsWith(github.ref, 'refs/tags/v')
       shell: pwsh

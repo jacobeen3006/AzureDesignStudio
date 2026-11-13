@@ -1,11 +1,11 @@
-﻿@using AzureDesignStudio.Core.Models
+@using AzureDesignStudio.Core.Models
 @using Blazor.Diagrams.Core
 @using Blazor.Diagrams.Core.Models
 @using AzureDesignStudio.Core.Components
 
 <Form Model="@bastion" LabelCol="@(new ColLayoutParam { Span = 6 })" WrapperCol="@(new ColLayoutParam { Span = 18 })" Size="@FormSize.Small">
     <NameAndLocation Node="@context" />
-    @if (context.Group is not SubnetModel subnet || !subnet.Name.Equals("AzureBastionSubnet"))
+    @if (context.Group is not SubnetModel subnet || !DedicatedSubnets.Is(subnet, DedicatedSubnets.AzureBastion))
     {
         <FormItem>
             <Alert Type="@AlertType.Warning" ShowIcon

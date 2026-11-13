@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AzureDesignStudio.AzureResources.Base;
 using AzureDesignStudio.AzureResources.Web;
 using AzureDesignStudio.Core.Attributes;
@@ -41,7 +41,9 @@ namespace AzureDesignStudio.Core.Web
             if (siteConfig.AppSettings == null)
                 siteConfig.AppSettings = new List<NameValuePair>();
 
-            var stacks = RuntimeStack.Split("|");
+            // A container-published app has no runtime stack (the form hides the picker), so
+            // RuntimeStack is null here; it is only read on the code path.
+            var stacks = Stacks();
             if (Publish != "code" || (stacks[0] == "dotnet" && stacks[1] == "v3.1"))
             {
                 siteConfig.AppSettings.Add(new()
@@ -59,7 +61,7 @@ namespace AzureDesignStudio.Core.Web
                 });
             }
 
-            StorageAccount.Name = "astg" + Name.ToLower();
+            StorageAccount.Name = StorageAccountNameFor(Name);
             siteConfig.AppSettings.Add(new()
             {
                 Name = "AzureWebJobsStorage",
@@ -91,11 +93,41 @@ namespace AzureDesignStudio.Core.Web
                 });
             }
         }
+        /// <summary>Runtime name and version from "name|version"; always two entries.</summary>
+        private string[] Stacks()
+        {
+            var parts = (RuntimeStack ?? string.Empty).Split('|');
+            return [parts[0], parts.Length > 1 ? parts[1] : string.Empty];
+        }
+
+        /// <summary>
+        /// Name of the backing storage account: 3-24 characters, lower-case letters and digits
+        /// only. "astg" + the app name broke that for any name with a hyphen ("orders-func") or
+        /// longer than 20 characters. A name that already fits is used as it always was; one
+        /// that has to be cleaned or cut gets a short hash of the original so two apps whose
+        /// names clean to the same text do not share an account.
+        /// </summary>
+        public static string StorageAccountNameFor(string appName)
+        {
+            const string prefix = "astg";
+            const int maxLength = 24;
+            appName ??= string.Empty;
+
+            var cleaned = new string(appName.ToLowerInvariant().Where(c => c is (>= 'a' and <= 'z') or (>= '0' and <= '9')).ToArray());
+            if (cleaned.Length == appName.Length && prefix.Length + cleaned.Length <= maxLength)
+                return prefix + cleaned;
+
+            var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(appName)))[..6].ToLowerInvariant();
+            var room = maxLength - prefix.Length - hash.Length;
+            return prefix + cleaned[..Math.Min(cleaned.Length, room)] + hash;
+        }
+
         protected override void CreateSiteConfigForLinuxCode(ref SiteConfig siteConfig)
         {
             if (Publish == "code")
             {
-                var stacks = RuntimeStack.Split("|");
+                var stacks = Stacks();
 
                 siteConfig.LinuxFxVersion = stacks[0] switch
                 {
@@ -149,7 +181,10 @@ namespace AzureDesignStudio.Core.Web
         }
         protected override void CreateSiteConfigForWinCode(ref SiteConfig siteConfig)
         {
-            var stacks = RuntimeStack.Split("|");
+            if (Publish != "code")
+                return;
+
+            var stacks = Stacks();
 
             switch (stacks[0])
             {
@@ -210,15 +245,23 @@ namespace AzureDesignStudio.Core.Web
                 case "premium":
                     {
                         servicePlan.Kind = ServicePlanOS;
-                        servicePlan.SkuName = "EP1";
-                        servicePlan.SkuTier = "ElasticPremium";
+                        // An Elastic Premium size already on the plan (EP2, EP3) is kept.
+                        if (servicePlan.SkuTier != "ElasticPremium")
+                        {
+                            servicePlan.SkuName = "EP1";
+                            servicePlan.SkuTier = "ElasticPremium";
+                        }
                         break;
                     }
                 case "asp":
                     {
                         servicePlan.Kind = ServicePlanOS;
-                        servicePlan.SkuName = "P1V2";
-                        servicePlan.SkuTier = "PremiumV2";
+                        // Dedicated hosting runs on whatever size the plan has. Every export
+                        // used to force P1V2 here, overwriting the plan's own SKU - and the
+                        // SKU of every web app sharing the plan. Only a serverless SKU left
+                        // by an earlier hosting choice is replaced.
+                        if (servicePlan.IsServerless)
+                            servicePlan.UseDedicatedSku(AppServicePlanModel.DefaultDedicatedSku);
                         break;
                     }
                 default:

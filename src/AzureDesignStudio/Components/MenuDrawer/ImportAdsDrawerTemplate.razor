@@ -1,6 +1,7 @@
 @inherits FeedbackComponent<string, string>
 @using AzureDesignStudio.Core.Common
 @using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
 
 <Text style="font-size:16px;">Import a text design (.ads.json)</Text>
 <br />
@@ -23,19 +24,24 @@
     private string text = string.Empty;
     private string? error;
 
-    private Task HandleFileSelected(InputFileChangeEventArgs e)
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
     {
         error = null;
         try
         {
+            // Asynchronously: a browser file stream throws NotSupportedException on a
+            // synchronous read, so picking a file used to fail every time.
             using var reader = new StreamReader(e.File.OpenReadStream(MaxFileBytes));
-            text = reader.ReadToEnd();
+            text = await reader.ReadToEndAsync();
         }
         catch (IOException)
         {
             error = "The selected file is larger than 2 MB - it cannot be a design.";
         }
-        return Task.CompletedTask;
+        catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException or JSException)
+        {
+            error = "The selected file could not be read.";
+        }
     }
 
     private async Task HandleLoadClick()
@@ -49,6 +55,11 @@
         catch (AdsDesignFormatException e)
         {
             error = e.Message;
+            return;
+        }
+        catch (Exception e) when (e is FormatException or System.Text.Json.JsonException or InvalidOperationException)
+        {
+            error = "The text is not a readable design.";
             return;
         }
 

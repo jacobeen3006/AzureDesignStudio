@@ -1,4 +1,4 @@
-﻿using AntDesign;
+using AntDesign;
 using AzureDesignStudio.Models;
 using AzureDesignStudio.Services;
 using AzureDesignStudio.SharedModels.Protos;
@@ -36,7 +36,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private DeploymentParameters _deployParams = null!;
         private Form<DeploymentParameters> _paramsForm = null!;
         private SubscriptionRes? _linkedSubscription = null;
-        private IList<string> _resourceGroupNames = null!;
+        private IList<string> _resourceGroupNames = [];
         private bool _paramFormLoading = true;
         private bool _showDeployStatus = false;
         private DeployStepStatus _stepsStatus = new();
@@ -144,9 +144,11 @@ namespace AzureDesignStudio.Components.MenuDrawer
                 _deployParams = new DeploymentParameters();
                 _showDeployParams = true;
 
-                _resourceGroupNames = await _deployService.GetResourceGroups(_linkedSubscription.SubscriptionId);
-
+                var names = await _deployService.GetResourceGroups(_linkedSubscription.SubscriptionId);
+                _resourceGroupNames = names ?? [];
                 _paramFormLoading = false;
+                if (names is null)
+                    _messageService.Error("The resource groups could not be listed: the server is not reachable, or Azure refused the linked subscription's credential.");
             }
             else
             {
