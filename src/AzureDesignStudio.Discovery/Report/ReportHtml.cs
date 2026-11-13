@@ -116,6 +116,9 @@ public static class ReportHtml
             sb.Append("<tr><td>").Append(E(GovernanceStatus.Label(source))).Append("</td><td>")
                 .Append(E(GovernanceStatus.Line(m.GovernanceSources, source, CountOf(m, source)))).Append("</td></tr>");
         sb.Append("</table>");
+        // Rows this build cannot read are not listed; say they exist rather than "no findings".
+        if (GovernanceStatus.MalformedNote(m.GovernanceMalformed) is { } malformed)
+            sb.Append("<p>").Append(E(malformed)).Append("</p>");
 
         var findings = GovernanceStatus.Ordered(m.Governance ?? []);
         if (findings.Count > 0)
@@ -134,7 +137,7 @@ public static class ReportHtml
         var known = GovernanceSources.All.Select(source => states.TryGetValue(source, out var state) ? state.State : null).ToList();
         if (known.All(state => state == SourceState.NotRequested))
             return;
-        if (findings.Count == 0 && known.Contains(SourceState.Collected))
+        if (findings.Count == 0 && m.GovernanceMalformed <= 0 && known.Contains(SourceState.Collected))
             sb.Append("<p>No governance findings were found in the collected sources.</p>");
         sb.Append("<ul>");
         foreach (var caveat in GovernanceCaveats.All)

@@ -16,6 +16,10 @@
             <span>@GovernanceStatus.Line(Sources, source, CountOf(source))</span>
         </div>
     }
+    @if (GovernanceStatus.MalformedNote(Malformed) is { } malformedNote)
+    {
+        <div style="padding:2px 0;color:#d46b08;">@malformedNote</div>
+    }
 </div>
 
 @if (Findings.Count > 0)
@@ -84,15 +88,13 @@
 }
 
 <h4 style="margin-top:12px;">Defender plans</h4>
-@if (DefenderPlans is null)
+@* "Listed none" only when the Defender source was collected: a failed or unfinished Defender
+   source leaves the list empty or partial, which the note qualifies with the source's state. *@
+@if (GovernanceStatus.DefenderPlansNote(Sources, DefenderPlans) is { } plansNote)
 {
-    <div style="font-size:13px;color:var(--ads-text-muted);">Defender plans were not read for this scan.</div>
+    <div style="font-size:13px;color:var(--ads-text-muted);">@plansNote</div>
 }
-else if (DefenderPlans.Count == 0)
-{
-    <div style="font-size:13px;color:var(--ads-text-muted);">Resource Graph listed no Defender plans for the scanned subscriptions.</div>
-}
-else
+@if (DefenderPlans is { Count: > 0 })
 {
     <table style="width:100%;font-size:13px;">
         @foreach (var plan in DefenderPlans)
@@ -127,6 +129,10 @@ else
     [Parameter] public IReadOnlyList<DefenderPlan>? DefenderPlans { get; set; }
 
     [Parameter] public IReadOnlyList<string> Caveats { get; set; } = [];
+
+    /// <summary>How many stored rows could not be read (unknown source or severity); they are not
+    /// in <see cref="Findings"/>.</summary>
+    [Parameter] public int Malformed { get; set; }
 
     private const int PageSize = 100;
     private static readonly GovernanceSeverity[] Severities = [GovernanceSeverity.High, GovernanceSeverity.Medium, GovernanceSeverity.Low];
@@ -170,6 +176,8 @@ else
             return "No findings match these filters.";
         if (Sources is null)
             return "Governance findings were not collected for this scan.";
+        if (Malformed > 0)
+            return "No readable findings stored."; // the note under the status lines counts the rest
 
         IReadOnlyList<string> inScope = sourceFilter.Length == 0 ? GovernanceSources.All : [sourceFilter];
         var states = inScope.Select(s => Sources.TryGetValue(s, out var state) ? state.State : null).ToList();

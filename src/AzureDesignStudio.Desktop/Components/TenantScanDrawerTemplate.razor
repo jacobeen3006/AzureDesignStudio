@@ -472,7 +472,7 @@
             }
             else if (govScanId is not null)
             {
-                <GovernanceFindingsView Findings="govFindings" Sources="govSources" DefenderPlans="govPlans" Caveats="govCaveats" />
+                <GovernanceFindingsView Findings="govFindings" Sources="govSources" DefenderPlans="govPlans" Caveats="govCaveats" Malformed="govMalformed" />
             }
         }
     }
@@ -1051,6 +1051,7 @@
     private IReadOnlyDictionary<string, SourceState>? govSources;
     private IReadOnlyList<DefenderPlan>? govPlans;
     private IReadOnlyList<string> govCaveats = [];
+    private int govMalformed;
     private string? govError;
 
     // Phase 9 UI integration (v2 9.1/9.3/9.4/9.5): per-tab workspace-snapshot reads; the only
@@ -1459,6 +1460,7 @@
         govSources = null;
         govPlans = null;
         govCaveats = [];
+        govMalformed = 0;
         govError = null;
         if (govScanId is null) return;
         try
@@ -1468,9 +1470,9 @@
             govFindings = findings;
             govSources = manifest?.Sources;
             govPlans = manifest?.DefenderPlans;
-            govCaveats = malformed == 0
-                ? GovernanceCaveats.All
-                : [.. GovernanceCaveats.All, $"{malformed} stored governance row(s) could not be read (unknown source or severity) and are not shown."];
+            govCaveats = GovernanceCaveats.All;
+            // The view names the unreadable rows under the status lines, as report.html does.
+            govMalformed = malformed;
         }
         catch (Exception e) { govError = e.Message; }
     }
@@ -2296,9 +2298,10 @@
         string? driftError;
         IReadOnlyList<GovernanceFinding>? governance;
         IReadOnlyDictionary<string, SourceState>? governanceSources;
+        int governanceMalformed;
         try
         {
-            (_, exposure, audit, driftList, policyNote, driftError, governance, governanceSources) = await CollectReportSectionsAsync(scan);
+            (_, exposure, audit, driftList, policyNote, driftError, governance, governanceSources, governanceMalformed) = await CollectReportSectionsAsync(scan);
         }
         catch (Exception e)
         {
@@ -2341,7 +2344,7 @@
             sb.AppendLine($"- [{d.Status}] {d.ResourceId}: {d.ChangedAt.UtcDateTime:yyyy-MM-dd HH:mm} UTC by {(string.IsNullOrEmpty(d.ChangedBy) ? "unknown actor" : d.ChangedBy)}");
         if (drift.Count == 0) sb.AppendLine(driftError is null ? "- none recorded" : $"- not evaluated: {driftError}");
         sb.AppendLine();
-        AppendGovernanceMarkdown(sb, governance, governanceSources);
+        AppendGovernanceMarkdown(sb, governance, governanceSources, governanceMalformed);
         sb.AppendLine();
         sb.AppendLine("Spend figures are not part of this snapshot report - the drawer's Cost tab queries Cost Management on demand and prints source, window, currency and as-of with its numbers.");
 
@@ -2365,14 +2368,17 @@
     }
 
     // Wave B3: the same per-source states as report.html (GovernanceStatus), so a source that was
-    // not requested, failed, stopped early or predates governance never reads as "none found".
+    // not requested, failed, stopped early or predates governance never reads as "none found";
+    // stored rows this build cannot read are named, never dropped silently.
     private static void AppendGovernanceMarkdown(System.Text.StringBuilder sb,
-        IReadOnlyList<GovernanceFinding>? governance, IReadOnlyDictionary<string, SourceState>? sources)
+        IReadOnlyList<GovernanceFinding>? governance, IReadOnlyDictionary<string, SourceState>? sources, int malformed)
     {
         var findings = GovernanceStatus.Ordered(governance ?? []);
         sb.AppendLine($"## Governance findings ({(governance is null ? "not collected" : findings.Count.ToString(System.Globalization.CultureInfo.InvariantCulture))})");
         foreach (var source in GovernanceSources.All)
             sb.AppendLine($"- {GovernanceStatus.Label(source)}: {GovernanceStatus.Line(sources, source, findings.Count(f => GovernanceStatus.KeyOf(f.Source) == source))}");
+        if (GovernanceStatus.MalformedNote(malformed) is { } unreadable)
+            sb.AppendLine($"- {unreadable}");
         foreach (var f in findings)
             sb.AppendLine($"- [{f.Severity}] {GovernanceStatus.Label(GovernanceStatus.KeyOf(f.Source))} {f.ResourceId} ({f.Category}): {f.Title}{(string.IsNullOrWhiteSpace(f.Detail) ? "" : " - " + f.Detail)}");
         if (sources is null)
@@ -2380,7 +2386,7 @@
         var states = GovernanceSources.All.Select(s => sources.TryGetValue(s, out var state) ? state.State : null).ToList();
         if (states.All(s => s == SourceState.NotRequested))
             return;
-        if (findings.Count == 0 && states.Contains(SourceState.Collected))
+        if (findings.Count == 0 && malformed <= 0 && states.Contains(SourceState.Collected))
             sb.AppendLine("- no governance findings in the collected sources");
         foreach (var cav in GovernanceCaveats.All) sb.AppendLine($"  caveat: {cav}");
     }
@@ -2389,7 +2395,8 @@
     // fail-soft notes - so the two artifacts can never disagree about what was measured.
     private async Task<(IReadOnlyList<InventoryItem> Items, IReadOnlyList<ExposureFinding> Exposure,
         ManagementAudit Audit, IReadOnlyList<LiveDriftItem>? Drift, string PolicyNote, string? DriftError,
-        IReadOnlyList<GovernanceFinding>? Governance, IReadOnlyDictionary<string, SourceState>? GovernanceSources)>
+        IReadOnlyList<GovernanceFinding>? Governance, IReadOnlyDictionary<string, SourceState>? GovernanceSources,
+        int GovernanceMalformed)>
         CollectReportSectionsAsync(ScanRecord scan)
     {
         var items = reportItems;
@@ -2416,11 +2423,13 @@
         try { drift = await Feed.DriftSinceScanAsync(scan.Id, scanSince); }
         catch (Exception e) { driftError = e.Message; }
         // Both null = not collected (the scan predates governance); otherwise the stored findings
-        // with the manifest's state per source, read together.
-        var (findings, _, manifest) = await GovernanceOfAsync(scan.Id, scan.ManifestJson);
+        // with the manifest's state per source, read together, and how many stored rows could not
+        // be read (they are not in the findings, so both reports name them).
+        var (findings, malformed, manifest) = await GovernanceOfAsync(scan.Id, scan.ManifestJson);
         var governanceSources = manifest?.Sources;
         return (items, exposure, audit, drift, policyNote, driftError,
-            governanceSources is null ? null : findings, governanceSources);
+            governanceSources is null ? null : findings, governanceSources,
+            governanceSources is null ? 0 : malformed);
     }
 
     // v2 9.6 closer: the same governance payload as report.html + report.json +
@@ -2433,7 +2442,7 @@
             return;
         try
         {
-            var (items, exposure, audit, driftList, _, _, governance, governanceSources) = await CollectReportSectionsAsync(scan);
+            var (items, exposure, audit, driftList, _, _, governance, governanceSources, governanceMalformed) = await CollectReportSectionsAsync(scan);
             IReadOnlyList<SpendBucket>? spendBuckets = null;
             SpendProvenance? spendProvenance = null;
             var spendOk = costResults.Where(c => c.Result is not null).ToList();
@@ -2457,6 +2466,7 @@
             {
                 Governance = governance,
                 GovernanceSources = governanceSources,
+                GovernanceMalformed = governanceMalformed,
             };
             var files = ReportBundle.Build(model);
             var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads",

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using AzureDesignStudio.Discovery.Cost;
 using AzureDesignStudio.Discovery.Drift;
 using AzureDesignStudio.Discovery.Exposure;
@@ -32,6 +33,13 @@ public sealed record ReportModel(
     /// <see cref="AzureDesignStudio.Discovery.Governance.GovernanceSources"/> name (case-insensitive);
     /// null = not collected.</summary>
     public IReadOnlyDictionary<string, SourceState>? GovernanceSources { get; init; }
+
+    /// <summary>How many governance rows stored with the scan could not be read (a source or
+    /// severity this build does not know, e.g. one a newer version wrote). They are not in
+    /// <see cref="Governance"/>, so the report names them instead of claiming no findings.
+    /// report.json carries it only when it is not zero.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int GovernanceMalformed { get; init; }
 
     public int ExposureCount => Exposure?.Count ?? 0;
 

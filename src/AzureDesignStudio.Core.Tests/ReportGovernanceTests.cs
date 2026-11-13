@@ -75,6 +75,18 @@ public class ReportGovernanceTests
     }
 
     [Fact]
+    public void Json_CarriesTheUnreadableRowCount_OnlyWhenThereAreSome()
+    {
+        var collected = With([], (GovernanceSources.Advisor, Collected(0)), (GovernanceSources.Policy, Collected(0)),
+            (GovernanceSources.Defender, Collected(0)));
+        using (var clean = JsonDocument.Parse(ReportBundle.Build(collected)[ReportBundle.JsonFile]))
+            Assert.False(clean.RootElement.TryGetProperty("governanceMalformed", out _));
+
+        using var doc = JsonDocument.Parse(ReportBundle.Build(collected with { GovernanceMalformed = 2 })[ReportBundle.JsonFile]);
+        Assert.Equal(2, doc.RootElement.GetProperty("governanceMalformed").GetInt32());
+    }
+
+    [Fact]
     public void Json_NotRequestedScan_StillSaysWhy()
     {
         var model = With([], (GovernanceSources.Advisor, NotRequested), (GovernanceSources.Policy, NotRequested),
@@ -160,6 +172,24 @@ public class ReportGovernanceTests
     }
 
     [Fact]
+    public void Html_UnreadableRows_AreCounted_NeverNoFindings()
+    {
+        // A stored row this build cannot read (e.g. a source or severity a newer version wrote) is
+        // not shown, so the report must say it exists instead of "no governance findings".
+        var html = ReportHtml.Render(With([],
+            (GovernanceSources.Advisor, Collected(2)), (GovernanceSources.Policy, Collected(0)), (GovernanceSources.Defender, Collected(0)))
+            with { GovernanceMalformed = 2 });
+
+        Assert.Contains("<p>2 stored governance row(s) could not be read (unknown source or severity) and are not shown.</p>", html);
+        Assert.DoesNotContain("No governance findings were found", html);
+        Assert.Contains(GovernanceCaveats.All[0], html);
+
+        var clean = ReportHtml.Render(With([],
+            (GovernanceSources.Advisor, Collected(0)), (GovernanceSources.Policy, Collected(0)), (GovernanceSources.Defender, Collected(0))));
+        Assert.DoesNotContain("could not be read", clean);
+    }
+
+    [Fact]
     public void Html_LegacyScan_ReadsNotCollected_NeverZero()
     {
         var html = ReportHtml.Render(Bare());
@@ -236,5 +266,81 @@ public class ReportGovernanceTests
         Assert.Equal("unknown", GovernanceStatus.Brief(new Dictionary<string, SourceState>(), GovernanceSources.Defender, 0));
 
         Assert.Equal(["Advisor", "Policy", "Defender"], GovernanceSources.All.Select(GovernanceStatus.Label).ToArray());
+    }
+
+    [Fact]
+    public void MalformedNote_NamesTheUnreadableRows_OnlyWhenThereAreSome()
+    {
+        Assert.Null(GovernanceStatus.MalformedNote(0));
+        Assert.Equal("3 stored governance row(s) could not be read (unknown source or severity) and are not shown.",
+            GovernanceStatus.MalformedNote(3));
+    }
+
+    // --- Defender plans (drawer) ---
+
+    private static readonly DefenderPlan VmPlan = new("s1", "VirtualMachines", "Standard");
+
+    private static Dictionary<string, SourceState> DefenderIs(SourceState state) =>
+        new(StringComparer.OrdinalIgnoreCase) { [GovernanceSources.Defender] = state };
+
+    [Fact]
+    public void DefenderPlans_NotRead_SayNotRead()
+    {
+        Assert.Equal("Defender plans were not read for this scan.", GovernanceStatus.DefenderPlansNote(null, null));
+        Assert.Equal("Defender plans were not read for this scan.", GovernanceStatus.DefenderPlansNote(DefenderIs(NotRequested), null));
+    }
+
+    [Fact]
+    public void DefenderPlans_Collected_SayNoneOnlyWhenNoneWereListed()
+    {
+        Assert.Equal("Resource Graph listed no Defender plans for the scanned subscriptions.",
+            GovernanceStatus.DefenderPlansNote(DefenderIs(Collected(0)), []));
+        Assert.Null(GovernanceStatus.DefenderPlansNote(DefenderIs(Collected(0)), [VmPlan])); // the list speaks for itself
+    }
+
+    [Fact]
+    public void DefenderPlans_Unavailable_AreNotReadInFull_NeverNone()
+    {
+        // The Defender worker keeps a group's plans only when both of its queries succeed, so a
+        // failed Defender source leaves an empty list that is not "Resource Graph listed none".
+        Assert.Equal("Defender plans were not read in full. Unavailable: Forbidden: denied",
+            GovernanceStatus.DefenderPlansNote(DefenderIs(new SourceState(SourceState.Unavailable, 0, "Forbidden: denied")), []));
+        Assert.Equal("Defender plans were not read in full; the plans listed are only those that were read. Unavailable: Forbidden: denied",
+            GovernanceStatus.DefenderPlansNote(DefenderIs(new SourceState(SourceState.Unavailable, 0, "Forbidden: denied")), [VmPlan]));
+    }
+
+    [Fact]
+    public void DefenderPlans_Incomplete_QualifyThePartialList()
+    {
+        var incomplete = DefenderIs(new SourceState(SourceState.Incomplete, 0, "1 of 3 subscription groups were read."));
+
+        Assert.Equal("Defender plans were not read in full; the plans listed are only those that were read. "
+            + "Incomplete: the scan stopped before this source finished; 1 of 3 subscription groups were read.",
+            GovernanceStatus.DefenderPlansNote(incomplete, [VmPlan]));
+        Assert.Equal("Defender plans were not read in full. "
+            + "Incomplete: the scan stopped before this source finished; 1 of 3 subscription groups were read.",
+            GovernanceStatus.DefenderPlansNote(incomplete, []));
+    }
+
+    [Fact]
+    public void DefenderPlans_AnyStateButCollected_NeverSaysNoneWereListed()
+    {
+        IReadOnlyDictionary<string, SourceState>?[] notCollected =
+        [
+            null,
+            new Dictionary<string, SourceState>(),
+            DefenderIs(NotRequested),
+            DefenderIs(new SourceState("some-future-state", 0, null)),
+            DefenderIs(new SourceState(SourceState.Unavailable, 0, null)),
+            DefenderIs(new SourceState(SourceState.Incomplete, 0, null)),
+        ];
+
+        foreach (var sources in notCollected)
+        {
+            var note = GovernanceStatus.DefenderPlansNote(sources, []);
+            Assert.NotNull(note);
+            Assert.StartsWith("Defender plans were not read in full. ", note);
+            Assert.DoesNotContain("listed no", note);
+        }
     }
 }

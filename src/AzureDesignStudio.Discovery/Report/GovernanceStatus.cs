@@ -62,6 +62,35 @@ public static class GovernanceStatus
         };
     }
 
+    /// <summary>The note for stored governance rows this build cannot read; null when there are none.</summary>
+    public static string? MalformedNote(int rows) =>
+        rows <= 0
+            ? null
+            : $"{rows.ToString(CultureInfo.InvariantCulture)} stored governance row(s) could not be read (unknown source or severity) and are not shown.";
+
+    /// <summary>
+    /// What to say above the Defender plan tiers (<see cref="ScanManifest.DefenderPlans"/>); null
+    /// when the list speaks for itself. The scan keeps a subscription group's plans only when both
+    /// Defender queries of that group succeeded, so the list is complete only when the Defender
+    /// source was collected: only then does an empty list mean Resource Graph listed none.
+    /// Otherwise the plans were not read in full and the note gives the source's status line.
+    /// </summary>
+    public static string? DefenderPlansNote(IReadOnlyDictionary<string, SourceState>? sources, IReadOnlyList<DefenderPlan>? plans)
+    {
+        if (plans is null)
+            return "Defender plans were not read for this scan.";
+
+        var collected = sources is not null
+            && sources.TryGetValue(GovernanceSources.Defender, out var state)
+            && state.State == SourceState.Collected;
+        if (collected)
+            return plans.Count == 0 ? "Resource Graph listed no Defender plans for the scanned subscriptions." : null;
+
+        return "Defender plans were not read in full"
+            + (plans.Count > 0 ? "; the plans listed are only those that were read" : "")
+            + ". " + Line(sources, GovernanceSources.Defender, 0);
+    }
+
     /// <summary>The stored source key (<see cref="GovernanceSources"/>) of a finding's source.</summary>
     public static string KeyOf(GovernanceSource source) => source switch
     {
