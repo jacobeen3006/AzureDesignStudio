@@ -42,7 +42,7 @@ AzureDesignStudio/
 │   ├── AzureDesignStudio.Server.Tests/ # xUnit tests of the gRPC services called directly (InMemory EF, fake ServerCallContext; no Azure, no network)
 │   ├── AzureDesignStudio.Workspace/    # SQLite workspace (EF Core): designs/scans/snapshots/cost cache/plans/audit
 │   ├── AzureDesignStudio.Discovery/    # Tenant analysis engines: scans/drift, exposure, guardrails, decommission planner/runbook, MCP tool engine
-│   ├── AzureDesignStudio.Mcp/          # Stdio MCP server: 13 read-only tools over the workspace (plan-only decom; never mutates)
+│   ├── AzureDesignStudio.Mcp/          # Stdio MCP server: 14 read-only tools over the workspace (plan-only decom; never mutates)
 │   ├── AzureDesignStudio.Desktop/      # MAUI BlazorWebView host (reuses App.razor); runs Services in-process, no server
 │   │   └── Platforms/Windows|MacCatalyst/ # OS-only code: Credential Manager vs Keychain secret store, Mac paths/token cache
 │   └── BuildMacDmg.sh                  # macOS: universal Release build + ad-hoc/Developer ID signing + .dmg (artifacts/)
@@ -63,6 +63,7 @@ AzureDesignStudio/
 | Fix build/packages | `Directory.Packages.props` + `Directory.Build.props` | Versions central; csproj declares `Include=` only |
 | CI/CD | .github/workflows/build.yml + Server/Dockerfile | Docker build via DockerBuild.ps1 (repo-root context, root `.dockerignore`) |
 | IPv4 ranges / subnet allocation | Core/Network/Ipv4Cidr.cs + VirtualNetworkModel.NextFreeSubnetPrefix/NewSubnet | Strict CIDR parsing; reserved subnet names via `DedicatedSubnets` |
+| Design linter (Well-Architected) | Core/Validation/DesignLinter.cs (rule table) + DesignCheck.cs (stored payload → report) | Rules use only data the models hold; Warning/Info, never Error; same report in the validation drawer and `ads_design_lint` |
 | MCP tool surface | AzureDesignStudio.Mcp/ + Discovery/Mcp/AdsToolEngine.cs | Read-only workspace truth for agents; engines pure/tested, host thin + ReadOnly SQLite |
 
 ## CONVENTIONS

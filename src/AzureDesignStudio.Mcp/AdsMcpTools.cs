@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using AzureDesignStudio.Core.Common;
 using AzureDesignStudio.Core.DTO;
+using AzureDesignStudio.Core.Validation;
 using AzureDesignStudio.Discovery.Inventory;
 using AzureDesignStudio.Discovery.Mcp;
 using AzureDesignStudio.Discovery.Unmanaged;
@@ -13,8 +14,8 @@ using ModelContextProtocol.Server;
 namespace AzureDesignStudio.Mcp;
 
 /// <summary>
-/// The 13 read-only tools of the local MCP server (v2 [93]): workspace truth (scans,
-/// inventory, diffs, changes, cost cache, designs, exposure, reachability, unmanaged,
+/// The 14 read-only tools of the local MCP server (v2 [93]): workspace truth (scans,
+/// inventory, diffs, changes, cost cache, designs, design lint, exposure, reachability, unmanaged,
 /// decommission planning, windows) over the desktop workspace database. No tool here
 /// mutates the workspace or calls ARM; the decommission tool is PLAN-ONLY - the purge
 /// never runs from here.
@@ -184,6 +185,25 @@ public sealed class AdsMcpTools(AdsWorkspace workspace, ILogger<AdsMcpTools> log
         }
 
         return new DesignGetView(design.Id, design.Name, design.Data, text, caveat, design.Pending, design.SavedAt);
+    }
+
+    [McpServerTool(Name = "ads_design_lint", ReadOnly = true)]
+    [Description("Checks one saved design offline: deploy-blocking validation issues and Well-Architected advice (rule id, pillar, severity, resource name, message, Microsoft Learn link). Deterministic; reads only the local workspace; never contacts Azure.")]
+    public async Task<DesignLintView> AdsDesignLint([Description("The stored design id (exact).")] string designId)
+    {
+        var design = await workspace.GetDesignAsync(designId);
+        if (design is null)
+            throw new McpException($"design not found: {designId}");
+
+        try
+        {
+            var report = DesignCheck.Run(design.Data);
+            return new DesignLintView(design.Id, design.Name, report.Issues, report.Findings, DesignLinter.Rules.Count);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new McpException(ex.Message);
+        }
     }
 
     [McpServerTool(Name = "ads_exposure", ReadOnly = true)]
@@ -439,6 +459,10 @@ public sealed record DesignView(
 public sealed record DesignGetView(
     string Id, string Name, string ContentJson, string? AdsDesignText,
     string? TextCaveat, bool Pending, DateTimeOffset SavedAt);
+
+/// <summary>Validation issues and Well-Architected findings of one saved design (ads_design_lint).</summary>
+public sealed record DesignLintView(
+    string Id, string Name, IReadOnlyList<ValidationIssue> Issues, IReadOnlyList<LintFinding> Findings, int RuleCount);
 
 /// <summary>The unmanaged audit plus the policy source and caveats (ads_unmanaged).</summary>
 public sealed record UnmanagedView(UnmanagedReport Report, string PolicySource, IReadOnlyList<string> Caveats);

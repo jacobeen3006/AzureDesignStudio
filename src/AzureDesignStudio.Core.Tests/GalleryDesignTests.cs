@@ -173,7 +173,7 @@ namespace AzureDesignStudio.Core.Tests
             return canvas.Diagram;
         }
 
-        private static readonly Dictionary<string, Func<BlazorDiagram>> Builders = new()
+        internal static readonly Dictionary<string, Func<BlazorDiagram>> Builders = new()
         {
             ["hub-spoke"] = HubSpoke,
             ["aks-baseline"] = AksBaseline,

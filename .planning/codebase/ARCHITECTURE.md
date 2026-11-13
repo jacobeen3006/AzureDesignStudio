@@ -55,7 +55,7 @@ Azure Design Studio is a layered .NET 10 solution: one shared Blazor UI head (`A
 | Contracts | Protobuf service + message definitions | `src/AzureDesignStudio.SharedModels/design_view_model.proto`, `deploy_model.proto`, `cost_model.proto` |
 | Discovery engines | Read-only analysis over inventory snapshots (drift, exposure, cost, decommission, IaC) | `src/AzureDesignStudio.Discovery/` |
 | Workspace persistence | SQLite EF Core store for designs/scans/snapshots/plans | `src/AzureDesignStudio.Workspace/WorkspaceDbContext.cs` |
-| MCP server | 13 read-only tools over the workspace, stdio transport | `src/AzureDesignStudio.Mcp/Program.cs`, `src/AzureDesignStudio.Mcp/AdsMcpTools.cs` |
+| MCP server | 14 read-only tools over the workspace, stdio transport | `src/AzureDesignStudio.Mcp/Program.cs`, `src/AzureDesignStudio.Mcp/AdsMcpTools.cs` |
 
 ## Pattern Overview
 

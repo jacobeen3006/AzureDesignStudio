@@ -72,7 +72,7 @@ This is what competitors now lead with, and ADS can do it more honestly because 
 
 | # | Item | Size | Notes |
 |---|---|---|---|
-| B1 | Offline architecture linter, grouped by Well-Architected pillar (POST-03 pulled forward). First rule sets: A1/A2, zone redundancy from the resiliency support matrix, public exposure, missing private endpoints, missing diagnostics | L | Deterministic rules only, each with a Learn link. Same results in the validation drawer and one MCP tool |
+| B1 | Offline architecture linter, grouped by Well-Architected pillar (POST-03 pulled forward). First rule sets: A1/A2, zone redundancy from the resiliency support matrix, public exposure, missing private endpoints, missing diagnostics | L | **Shipped.** Deterministic rules only, each with a Learn link. Same results in the validation drawer and one MCP tool (`ads_design_lint`). See "B1 as shipped" below |
 | B2 | Policy preflight per node via `checkPolicyRestrictions` (N33) | M | State the management-group limitation in the UI; what-if stays the authority |
 | B3 | Advisor, policy-compliance and attack-path overlays on the scanned topology from the three ARG tables | M | New scan query groups; a missing Defender plan must show as "no data", not "no findings" |
 | B4 | Capacity and quota preflight (N34) | M | Unchanged from v3 |
@@ -95,6 +95,19 @@ This is what competitors now lead with, and ADS can do it more honestly because 
 | D3 | draw.io export (N45). Visio only if someone asks | M | |
 | D4 | Design history with a visual diff between two versions (N27) | M | Compare drawer already diffs design against scan |
 | D5 | Headless CLI and a GitHub Action for lint, drift and BOM (N43/N44) | M + M | The CLI also gives B1 a pipeline use |
+
+### B1 as shipped
+
+Ten rules in `Core/Validation/DesignLinter.cs`: REL-VM-SINGLE, REL-AVSET-ONE, REL-APPPLAN-TIER, REL-APPGW-INSTANCES, REL-SQL-BASIC, REL-STORAGE-LRS, SEC-APPGW-NO-WAF, SEC-NO-PRIVATE-ENDPOINT, SEC-NO-BASTION, OPS-NO-MONITORING.
+
+Scope decisions:
+- Rules use only data the design models hold. There are no zone, TLS, diagnostics or NSG rules until the models carry that data.
+- No rule duplicates a `DesignValidator` rule: the validator blocks deployment, the linter only advises.
+- No Performance or Cost rules yet.
+- Tenant-scan linting is not included; the linter runs on designs only.
+- The linter never returns Error severity (Warning and Info only).
+- The bundled gallery designs currently produce Warnings: hub-spoke (two single VMs outside an availability set), aks-baseline and apim-landingzone (Standard_v2 application gateway without WAF). `GalleryDesigns_LintFindingsArePinned` pins them.
+- The MCP tool is read-only: it loads a saved design from the workspace and never contacts Azure.
 
 ## 3. Not proposed
 

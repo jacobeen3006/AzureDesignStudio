@@ -62,7 +62,7 @@ last_mapped_at: 2026-10-21
 **MCP (Model Context Protocol) stdio server:**
 - Entry point `src/AzureDesignStudio.Mcp/Program.cs` — `AddMcpServer().WithStdioServerTransport().WithTools<AdsMcpTools>()`; stdout is the protocol channel, all logging rebound to stderr
 - Database resolution order: `--db <path>` → `ADS_WORKSPACE_DB` env var → `%LOCALAPPDATA%\Azure Design Studio\AzureDesignStudio.Desktop\Data\workspace.db`
-- 13 read-only tools in `src/AzureDesignStudio.Mcp/AdsMcpTools.cs`: `ads_scans_list`, `ads_scan_get`, `ads_scan_inventory`, `ads_scan_diff`, `ads_changes_since`, `ads_cost_summary`, `ads_designs_list`, `ads_design_get`, `ads_exposure`, `ads_reach`, `ads_unmanaged`, `ads_decom_plan`, `ads_decom_windows`
+- 14 read-only tools in `src/AzureDesignStudio.Mcp/AdsMcpTools.cs`: `ads_scans_list`, `ads_scan_get`, `ads_scan_inventory`, `ads_scan_diff`, `ads_changes_since`, `ads_cost_summary`, `ads_designs_list`, `ads_design_get`, `ads_design_lint`, `ads_exposure`, `ads_reach`, `ads_unmanaged`, `ads_decom_plan`, `ads_decom_windows`
 - Read-only by construction: `SqliteOpenMode.ReadOnly` + shared cache (`src/AzureDesignStudio.Mcp/AdsWorkspace.cs`); no tool calls ARM
 - Tool logic is delegated to the pure engine in `src/AzureDesignStudio.Discovery/Mcp/AdsToolEngine.cs`
 
