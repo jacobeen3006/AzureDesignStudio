@@ -370,3 +370,4 @@ graphify-out/
 # src/Directory.Build.targets would shadow the repository-root one.
 /src/nbgv-version.json
 /src/Directory.Build.targets
+.DS_Store
