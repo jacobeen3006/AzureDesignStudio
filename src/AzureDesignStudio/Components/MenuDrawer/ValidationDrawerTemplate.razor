@@ -39,7 +39,10 @@ else
                         <Tag Color="@SeverityColor(item.Severity)">@item.Severity</Tag>
                         <span>
                             <b>@item.NodeName</b> — @item.Message
-                            <a href="@item.LearnUrl" target="_blank" rel="noopener noreferrer">Learn more ↗</a>
+                            @if (LintFinding.HasSafeLearnUrl(item.LearnUrl))
+                            {
+                                <a href="@item.LearnUrl" target="_blank" rel="noopener noreferrer">Learn more ↗</a>
+                            }
                         </span>
                     </div>
                 </ListItem>

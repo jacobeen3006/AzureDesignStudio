@@ -47,6 +47,16 @@ namespace AzureDesignStudio.Core.Tests
             }
         }
 
+        [Theory]
+        [InlineData("https://learn.microsoft.com/en-us/azure/x", true)]
+        [InlineData("http://learn.microsoft.com/en-us/azure/x", false)]
+        [InlineData("javascript:alert(1)", false)]
+        [InlineData("/en-us/azure/x", false)]
+        [InlineData("", false)]
+        [InlineData(null, false)]
+        public void HasSafeLearnUrl_AcceptsOnlyAbsoluteHttps(string? url, bool expected) =>
+            Assert.Equal(expected, LintFinding.HasSafeLearnUrl(url));
+
         [Fact]
         public void Lint_EmptyDesign_ReturnsNothing() => Assert.Empty(Lint());
 

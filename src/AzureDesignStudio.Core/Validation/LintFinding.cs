@@ -16,5 +16,10 @@ namespace AzureDesignStudio.Core.Validation
 
     /// <summary>Well-Architected advice about a design. Never blocks a deployment.</summary>
     public sealed record LintFinding(string RuleId, LintPillar Pillar, ValidationSeverity Severity,
-        string NodeName, string Message, string LearnUrl);
+        string NodeName, string Message, string LearnUrl)
+    {
+        /// <summary>True for an absolute https URL: the only kind the UI renders as a link.</summary>
+        public static bool HasSafeLearnUrl(string? url) =>
+            Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
+    }
 }
