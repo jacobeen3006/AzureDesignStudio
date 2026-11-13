@@ -223,10 +223,15 @@ namespace AzureDesignStudio.Services
         /// throws for a missing group (it never returns null), for a rejected or expired
         /// credential and for a network failure; called bare, each of those ended the RPC with
         /// an unhandled exception instead of the "cannot find the resource group" reply.
+        /// The lookup rides the shared "arm" HttpClient, like the ARM calls that follow it, so
+        /// the host's handler (and a test's) sees it.
         /// </summary>
         private async Task<(Azure.ResourceManager.Resources.ResourceGroupResource? Group, int StatusCode, string Error)>
-            FindResourceGroupAsync(ArmClient armClient, string resourceGroupName, CancellationToken cancellationToken)
+            FindResourceGroupAsync(Azure.Core.TokenCredential credential, Guid subscriptionId, string resourceGroupName,
+                CancellationToken cancellationToken)
         {
+            var armClient = new ArmClient(credential, subscriptionId.ToString(),
+                new ArmClientOptions { Transport = new Azure.Core.Pipeline.HttpClientTransport(_httpClientFactory.CreateClient("arm")) });
             try
             {
                 var subscription = await armClient.GetDefaultSubscriptionAsync(cancellationToken);
@@ -404,11 +409,11 @@ namespace AzureDesignStudio.Services
 
             try
             {
-                var armClient = new ArmClient(credential, subscriptionId.ToString());
                 string location;
                 if (target.Kind == DeployScopeKind.ResourceGroup)
                 {
-                    var (rg, rgStatus, rgError) = await FindResourceGroupAsync(armClient, request.ResourceGroupName, context.CancellationToken);
+                    var (rg, rgStatus, rgError) = await FindResourceGroupAsync(credential, subscriptionId,
+                        request.ResourceGroupName, context.CancellationToken);
                     if (rg == null)
                     {
                         response.StatusCode = rgStatus;
@@ -847,8 +852,8 @@ namespace AzureDesignStudio.Services
                 return;
             }
 
-            var armClient = await GetArmClient(userId, subscriptionId);
-            if (armClient == null)
+            var credential = await GetCredentialAsync(userId, subscriptionId);
+            if (credential == null)
             {
                 _logger.LogWarning("No subscription is found.");
                 response.StatusCode = StatusCodes.Status404NotFound;
@@ -856,11 +861,15 @@ namespace AzureDesignStudio.Services
                 await responseStream.WriteAsync(response);
                 return;
             }
+            // The deployments keep the SDK's own transport; only the group lookup below rides the
+            // "arm" HttpClient.
+            var armClient = new ArmClient(credential, subscriptionId.ToString());
 
             string location;
             if (target.Kind == DeployScopeKind.ResourceGroup)
             {
-                var (rg, rgStatus, rgError) = await FindResourceGroupAsync(armClient, request.ResourceGroupName, context.CancellationToken);
+                var (rg, rgStatus, rgError) = await FindResourceGroupAsync(credential, subscriptionId,
+                    request.ResourceGroupName, context.CancellationToken);
                 if (rg == null)
                 {
                     response.StatusCode = rgStatus;
@@ -1097,11 +1106,9 @@ namespace AzureDesignStudio.Services
                 return (null, StatusCodes.Status400BadRequest, policyError ?? "The guardrail policy could not be read.");
 
             // The stack lives in the resource group's region - the same honest lookup the WhatIf
-            // path uses; a stack location is never guessed or defaulted. It rides the shared
-            // "arm" HttpClient so the host's handler (and a test's) sees it.
-            var armClient = new ArmClient(credential, subscriptionId.ToString(),
-                new ArmClientOptions { Transport = new Azure.Core.Pipeline.HttpClientTransport(_httpClientFactory.CreateClient("arm")) });
-            var (rg, rgStatus, rgError) = await FindResourceGroupAsync(armClient, request.ResourceGroupName, context.CancellationToken);
+            // path uses; a stack location is never guessed or defaulted.
+            var (rg, rgStatus, rgError) = await FindResourceGroupAsync(credential, subscriptionId,
+                request.ResourceGroupName, context.CancellationToken);
             if (rg == null)
                 return (null, rgStatus, rgError);
 
