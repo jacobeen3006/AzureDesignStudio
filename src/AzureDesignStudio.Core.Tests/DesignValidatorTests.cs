@@ -4,6 +4,9 @@ using AzureDesignStudio.Core.Fabric;
 using AzureDesignStudio.Core.Models;
 using AzureDesignStudio.Core.Network;
 using AzureDesignStudio.Core.Validation;
+using AzureDesignStudio.Core.Compute;
+using Blazor.Diagrams;
+using Blazor.Diagrams.Core.Anchors;
 using Blazor.Diagrams.Core.Models;
 using System.Collections.Generic;
 using System.Linq;
@@ -184,6 +187,103 @@ namespace AzureDesignStudio.Core.Tests
             Assert.Equal(ValidationSeverity.Error, config[0].Severity);
 
             Assert.Empty(Rules(Validate(Create(AdsConstants.ContainerRegistry, "adsacr01")), "node-config"));
+        }
+
+        private static void LinkPorts(BlazorDiagram diagram, NodeModel a, NodeModel b) =>
+            diagram.Links.Add(new LinkModel(new SinglePortAnchor(a.Ports[1]), new SinglePortAnchor(b.Ports[0])));
+
+        private static (VirtualNetworkModel Vnet, SubnetModel Subnet, VirtualMachineModel Vm) MachineSubnet(string vnetName = "vnet1")
+        {
+            var vnet = new VirtualNetworkModel { Name = vnetName };
+            var subnet = vnet.AddSubnet(new SubnetModel { Name = "snet1" });
+            var vm = new VirtualMachineModel { Name = "vm-" + vnetName };
+            subnet.AddChild(vm);
+            return (vnet, subnet, vm);
+        }
+
+        private static ValidationIssue[] Outbound(params NodeModel[] nodes) =>
+            Rules(Validate(nodes), "outbound-access");
+
+        [Fact]
+        public void MachineSubnet_WithNatGateway_ProducesNoOutboundIssue()
+        {
+            var (vnet, subnet, vm) = MachineSubnet();
+            LinkPorts(new BlazorDiagram(), new NatGatewayModel { Name = "nat1" }, vm);
+            Assert.Empty(Outbound(vnet, subnet, vm));
+        }
+
+        [Fact]
+        public void MachineSubnet_NotPrivate_WithoutPath_WarnsAboutDefaultOutbound()
+        {
+            var (vnet, subnet, vm) = MachineSubnet();
+            var issue = Assert.Single(Outbound(vnet, subnet, vm));
+            Assert.Equal(ValidationSeverity.Warning, issue.Severity);
+            Assert.Contains("'snet1' relies on default outbound access", issue.Message);
+        }
+
+        [Fact]
+        public void MachineSubnet_Private_WithoutPath_WarnsNoOutboundPath()
+        {
+            var (vnet, subnet, vm) = MachineSubnet();
+            subnet.PrivateSubnet = true;
+            var issue = Assert.Single(Outbound(vnet, subnet, vm));
+            Assert.Equal(ValidationSeverity.Warning, issue.Severity);
+            Assert.Contains("'snet1' is private and has no outbound path", issue.Message);
+        }
+
+        [Fact]
+        public void MachineSubnet_InAvailabilitySet_IsChecked()
+        {
+            var vnet = new VirtualNetworkModel { Name = "vnet1" };
+            var subnet = vnet.AddSubnet(new SubnetModel { Name = "snet1" });
+            var set = new AvailabilitySetModel { Name = "as1" };
+            subnet.AddChild(set);
+            var vm = new VirtualMachineModel { Name = "vm1" };
+            set.AddChild(vm);
+            var issue = Assert.Single(Outbound(vnet, subnet, set, vm));
+            Assert.Equal(ValidationSeverity.Warning, issue.Severity);
+            Assert.Contains("snet1", issue.Message);
+        }
+
+        [Fact]
+        public void MachineSubnet_WithFirewallInSameNetwork_IsInfo()
+        {
+            var (vnet, subnet, vm) = MachineSubnet();
+            var fwSubnet = vnet.AddSubnet(new SubnetModel { Name = "AzureFirewallSubnet" });
+            var fw = new AzureFirewallModel { Name = "fw1" };
+            fwSubnet.AddChild(fw);
+            var issue = Assert.Single(Outbound(vnet, subnet, vm, fwSubnet, fw));
+            Assert.Equal(ValidationSeverity.Info, issue.Severity);
+            Assert.Contains("Subnet 'snet1' has no NAT gateway", issue.Message);
+        }
+
+        [Fact]
+        public void MachineSubnet_WithFirewallInPeeredNetwork_IsInfo()
+        {
+            var (vnet, subnet, vm) = MachineSubnet();
+            var hub = new VirtualNetworkModel { Name = "hub" };
+            var fwSubnet = hub.AddSubnet(new SubnetModel { Name = "AzureFirewallSubnet" });
+            var fw = new AzureFirewallModel { Name = "fw1" };
+            fwSubnet.AddChild(fw);
+            LinkPorts(new BlazorDiagram(), vnet, hub);
+            var issue = Assert.Single(Outbound(vnet, subnet, vm, hub, fwSubnet, fw));
+            Assert.Equal(ValidationSeverity.Info, issue.Severity);
+        }
+
+        [Fact]
+        public void Subnet_WithoutMachines_ProducesNoOutboundIssue()
+        {
+            var vnet = new VirtualNetworkModel { Name = "vnet1" };
+            var subnet = vnet.AddSubnet(new SubnetModel { Name = "snet1" });
+            Assert.Empty(Outbound(vnet, subnet));
+        }
+
+        [Fact]
+        public void DelegatedSubnet_ProducesNoOutboundIssue()
+        {
+            var (vnet, subnet, vm) = MachineSubnet();
+            subnet.Delegation = "Microsoft.App/environments";
+            Assert.Empty(Outbound(vnet, subnet, vm));
         }
     }
 }
