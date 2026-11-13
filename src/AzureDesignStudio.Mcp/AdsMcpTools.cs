@@ -5,6 +5,7 @@ using AzureDesignStudio.Core.DTO;
 using AzureDesignStudio.Core.Validation;
 using AzureDesignStudio.Discovery.Inventory;
 using AzureDesignStudio.Discovery.Mcp;
+using AzureDesignStudio.Discovery.Scan;
 using AzureDesignStudio.Discovery.Unmanaged;
 using AzureDesignStudio.Workspace;
 using Microsoft.Extensions.Logging;
@@ -14,9 +15,9 @@ using ModelContextProtocol.Server;
 namespace AzureDesignStudio.Mcp;
 
 /// <summary>
-/// The 14 read-only tools of the local MCP server (v2 [93]): workspace truth (scans,
-/// inventory, diffs, changes, cost cache, designs, design lint, exposure, reachability, unmanaged,
-/// decommission planning, windows) over the desktop workspace database. No tool here
+/// The 15 read-only tools of the local MCP server (v2 [93]): workspace truth (scans,
+/// inventory, diffs, changes, cost cache, designs, design lint, exposure, reachability, governance,
+/// unmanaged, decommission planning, windows) over the desktop workspace database. No tool here
 /// mutates the workspace or calls ARM; the decommission tool is PLAN-ONLY - the purge
 /// never runs from here.
 /// </summary>
@@ -227,6 +228,37 @@ public sealed class AdsMcpTools(AdsWorkspace workspace, ILogger<AdsMcpTools> log
         return malformed == 0
             ? answer
             : answer with { Caveats = [.. answer.Caveats, .. MalformedCaveats(malformed)] };
+    }
+
+    [McpServerTool(Name = "ads_governance", ReadOnly = true)]
+    [Description("Governance findings stored with one scan: Advisor recommendations, non-compliant Azure Policy states and unhealthy Defender for Cloud assessments, per resource, with the collection state of each source. Reads only the local workspace; never contacts Azure.")]
+    public async Task<GovernanceReport> AdsGovernance(
+        [Description("The stored scan id (exact).")] string scanId,
+        [Description("Only this source: advisor | policy | defender (case-insensitive); omit for all three.")] string? source = null,
+        [Description("Only findings about this resource (whole ARM id, case-insensitive).")] string? resourceId = null,
+        [Description("How many findings to return, most severe first; 200 default, 1000 max.")] int limit = 200)
+    {
+        var scan = await RequireScanAsync(scanId);
+        var stored = await workspace.ListGovernanceAsync(scan.Id);
+
+        GovernanceReport report;
+        try
+        {
+            report = AdsToolEngine.Governance(ScanManifest.Read(scan.ManifestJson), stored.Findings, stored.Malformed,
+                source, resourceId, limit);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new McpException(ex.Message);
+        }
+
+        return stored.TableMissing
+            ? report with
+            {
+                Caveats = [.. report.Caveats,
+                    "The workspace has no governance findings table yet (the desktop app adds it on its first run after an update), so no findings could be read."],
+            }
+            : report;
     }
 
     [McpServerTool(Name = "ads_unmanaged", ReadOnly = true)]

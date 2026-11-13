@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using AzureDesignStudio.Discovery.Decommission;
+using AzureDesignStudio.Discovery.Governance;
 using AzureDesignStudio.Discovery.Mcp;
 using AzureDesignStudio.Discovery.Inventory;
+using AzureDesignStudio.Discovery.Scan;
 using AzureDesignStudio.Discovery.Unmanaged;
 using Xunit;
 
@@ -405,5 +407,294 @@ public class AdsToolEngineTests
         string Serialize(ReachReport r) => string.Join("|", r.Paths.Select(p =>
             p.Origin + ";" + p.Via + ";" + string.Join(",", p.Hops) + ";" + string.Join(",", p.Evidence)));
         Assert.Equal(Serialize(first), Serialize(second));
+    }
+
+    // --- governance (Wave B3): stored findings, each source's state, honest caveats ---
+
+    private static GovernanceFinding Finding(GovernanceSource source, string resourceId, GovernanceSeverity severity,
+        string title = "finding") =>
+        new(source, $"{resourceId}/{source}/{title}".ToLowerInvariant(), resourceId, "sub1", severity,
+            source == GovernanceSource.Advisor ? "Security" : "", title, null, null, null);
+
+    private static ScanManifest Manifest(params (string Source, SourceState State)[] states) => new()
+    {
+        GroupsCompleted = 1,
+        Rows = 4,
+        Sources = states.ToDictionary(s => s.Source, s => s.State, StringComparer.OrdinalIgnoreCase),
+    };
+
+    private static ScanManifest AllCollected() => Manifest(
+        (GovernanceSources.Advisor, new SourceState(SourceState.Collected, 2, null)),
+        (GovernanceSources.Policy, new SourceState(SourceState.Collected, 1, null)),
+        (GovernanceSources.Defender, new SourceState(SourceState.Collected, 1, null)));
+
+    private static IReadOnlyList<GovernanceFinding> Findings() =>
+    [
+        Finding(GovernanceSource.Advisor, Vm, GovernanceSeverity.Medium, "Enable backup"),
+        Finding(GovernanceSource.Advisor, Storage, GovernanceSeverity.Low, "Use lifecycle management"),
+        Finding(GovernanceSource.Policy, Vm, GovernanceSeverity.Medium, "allowed-locations"),
+        Finding(GovernanceSource.Defender, Storage, GovernanceSeverity.High, "Disable public blob access"),
+    ];
+
+    private static string SourceCaveat(string source, string state) =>
+        $"{source} is {state} for this scan, so a missing {source} finding is not proof of none.";
+
+    [Fact]
+    public void Governance_SourceFilter_IsCaseInsensitive_AndTotalIsThePostFilterCount()
+    {
+        var report = AdsToolEngine.Governance(AllCollected(), Findings(), 0, "ADVISOR", null, 200);
+
+        Assert.Equal(2, report.Total);
+        Assert.Equal(2, report.Rows.Count);
+        Assert.All(report.Rows, r => Assert.Equal("advisor", r.Source));
+        Assert.False(report.Truncated);
+    }
+
+    [Fact]
+    public void Governance_ResourceFilter_MatchesTheWholeIdCaseInsensitively()
+    {
+        var report = AdsToolEngine.Governance(AllCollected(), Findings(), 0, null, Vm.ToUpperInvariant(), 200);
+
+        Assert.Equal(2, report.Total);
+        Assert.All(report.Rows, r => Assert.Equal(Vm, r.ResourceId));
+
+        // a resource group's id is not a prefix filter over its resources
+        var group = AdsToolEngine.Governance(AllCollected(), Findings(), 0, null, Rg, 200);
+        Assert.Equal(0, group.Total);
+        Assert.Empty(group.Rows);
+    }
+
+    [Fact]
+    public void Governance_SourceAndResourceFilters_BothApply()
+    {
+        var report = AdsToolEngine.Governance(AllCollected(), Findings(), 0, "policy", Vm, 200);
+
+        var row = Assert.Single(report.Rows);
+        Assert.Equal("policy", row.Source);
+        Assert.Equal(Vm, row.ResourceId);
+        Assert.Equal("allowed-locations", row.Title);
+        Assert.Equal(1, report.Total);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Governance_BlankFilters_AreOff(string? blank)
+    {
+        var report = AdsToolEngine.Governance(AllCollected(), Findings(), 0, blank, blank, 200);
+
+        Assert.Equal(4, report.Total);
+        Assert.Equal(4, report.Rows.Count);
+    }
+
+    [Fact]
+    public void Governance_UnknownSource_IsRefused_NeverAnsweredWithZeroRows()
+    {
+        var ex = Assert.Throws<ArgumentException>(() =>
+            AdsToolEngine.Governance(AllCollected(), Findings(), 0, "attackpaths", null, 200));
+
+        Assert.Contains("attackpaths", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(-5, 1)]
+    [InlineData(1, 1)]
+    [InlineData(1000, 1000)]
+    [InlineData(5000, 1000)]
+    public void Governance_Limit_IsClampedTo1Through1000(int limit, int expectedRows)
+    {
+        var many = Enumerable.Range(0, 1001)
+            .Select(i => Finding(GovernanceSource.Policy,
+                $"{Rg}/providers/Microsoft.Storage/storageAccounts/s{i:D4}", GovernanceSeverity.Medium))
+            .ToList();
+
+        var report = AdsToolEngine.Governance(AllCollected(), many, 0, null, null, limit);
+
+        Assert.Equal(expectedRows, report.Rows.Count);
+        Assert.Equal(1001, report.Total);
+        Assert.True(report.Truncated);
+    }
+
+    [Fact]
+    public void Governance_Truncated_OnlyWhenMoreFindingsMatchThanTheLimit()
+    {
+        var page = AdsToolEngine.Governance(AllCollected(), Findings(), 0, null, null, 3);
+        Assert.Equal(3, page.Rows.Count);
+        Assert.Equal(4, page.Total);
+        Assert.True(page.Truncated);
+
+        var whole = AdsToolEngine.Governance(AllCollected(), Findings(), 0, null, null, 4);
+        Assert.Equal(4, whole.Rows.Count);
+        Assert.Equal(4, whole.Total);
+        Assert.False(whole.Truncated);
+    }
+
+    [Fact]
+    public void Governance_Counts_CoverEveryMatchingFinding_NotOnlyThePage()
+    {
+        var page = AdsToolEngine.Governance(AllCollected(), Findings(), 0, null, null, 1);
+
+        Assert.Single(page.Rows);
+        Assert.Equal(new GovernanceSourceCounts(Advisor: 2, Policy: 1, Defender: 1), page.CountsBySource);
+        Assert.Equal(new GovernanceSeverityCounts(High: 1, Medium: 2, Low: 1), page.CountsBySeverity);
+
+        var storage = AdsToolEngine.Governance(AllCollected(), Findings(), 0, null, Storage, 200);
+        Assert.Equal(new GovernanceSourceCounts(Advisor: 1, Policy: 0, Defender: 1), storage.CountsBySource);
+        Assert.Equal(new GovernanceSeverityCounts(High: 1, Medium: 0, Low: 1), storage.CountsBySeverity);
+    }
+
+    [Fact]
+    public void Governance_Rows_MostSevereFirst_ThenByResourceAndSource_ForAnyInputOrder()
+    {
+        var first = AdsToolEngine.Governance(AllCollected(), Findings(), 0, null, null, 200);
+        var second = AdsToolEngine.Governance(AllCollected(), Findings().Reverse().ToList(), 0, null, null, 200);
+
+        Assert.Equal(["High", "Medium", "Medium", "Low"], first.Rows.Select(r => r.Severity).ToList());
+        // the two Medium findings are both about vm1: Advisor before Policy
+        Assert.Equal(["defender", "advisor", "policy", "advisor"], first.Rows.Select(r => r.Source).ToList());
+        Assert.Equal(first.Rows, second.Rows);
+    }
+
+    [Fact]
+    public void Governance_Row_CarriesTheFinding_WithTheSourceKeyAndSeverityName()
+    {
+        var finding = new GovernanceFinding(GovernanceSource.Policy, "/subscriptions/sub1/providers/microsoft.policyinsights/policystates/1",
+            Vm, "sub1", GovernanceSeverity.High, "", "allowed-locations", "only westeurope", "/assignments/a", "/definitions/d");
+
+        var row = Assert.Single(AdsToolEngine.Governance(AllCollected(), [finding], 0, null, null, 200).Rows);
+
+        Assert.Equal(new GovernanceRowView("policy", "High", Vm, "sub1", "", "allowed-locations", "only westeurope",
+            "/assignments/a", "/definitions/d", "/subscriptions/sub1/providers/microsoft.policyinsights/policystates/1"), row);
+    }
+
+    [Fact]
+    public void Governance_EachSourceState_IsReadFromTheManifest_WithItsDetailAndStoredCount()
+    {
+        var manifest = Manifest(
+            (GovernanceSources.Advisor, new SourceState(SourceState.Incomplete, 2, "1 of 2 subscription groups were read.")),
+            (GovernanceSources.Policy, new SourceState(SourceState.Unavailable, 0, "AuthorizationFailed: no access")),
+            (GovernanceSources.Defender, new SourceState(SourceState.NotRequested, 0, null)));
+        IReadOnlyList<GovernanceFinding> advisorOnly = [.. Findings().Where(f => f.Source == GovernanceSource.Advisor)];
+
+        var report = AdsToolEngine.Governance(manifest, advisorOnly, 0, null, null, 200);
+
+        Assert.Equal(
+            [
+                new GovernanceSourceView("advisor", SourceState.Incomplete, "1 of 2 subscription groups were read.", 2),
+                new GovernanceSourceView("policy", SourceState.Unavailable, "AuthorizationFailed: no access", 0),
+                new GovernanceSourceView("defender", SourceState.NotRequested, null, 0),
+            ],
+            report.Sources);
+        Assert.Contains(SourceCaveat("advisor", "incomplete"), report.Caveats);
+        Assert.Contains(SourceCaveat("policy", "unavailable"), report.Caveats);
+        Assert.Contains(SourceCaveat("defender", "not-requested"), report.Caveats);
+    }
+
+    [Fact]
+    public void Governance_CollectedWithNoFindings_IsCollected_AndCarriesNoSourceCaveat()
+    {
+        var manifest = Manifest(
+            (GovernanceSources.Advisor, new SourceState(SourceState.Collected, 0, null)),
+            (GovernanceSources.Policy, new SourceState(SourceState.Collected, 0, null)),
+            (GovernanceSources.Defender, new SourceState(SourceState.Collected, 0, null)));
+
+        var report = AdsToolEngine.Governance(manifest, [], 0, null, null, 200);
+
+        Assert.Equal(GovernanceSources.All, report.Sources.Select(s => s.Source).ToList());
+        Assert.All(report.Sources, s =>
+        {
+            Assert.Equal(SourceState.Collected, s.State);
+            Assert.Null(s.Detail);
+            Assert.Equal(0, s.StoredFindings);
+        });
+        Assert.Equal(0, report.Total);
+        Assert.Empty(report.Rows);
+        Assert.Equal(GovernanceCaveats.All, report.Caveats);
+    }
+
+    [Fact]
+    public void Governance_LegacyManifest_EverySourceIsNotCollected_NeverZeroFindings()
+    {
+        var legacy = ScanManifest.Read("""{"groupsCompleted":2,"groupsFailed":0,"rows":40,"truncated":false}""");
+        Assert.NotNull(legacy);
+        Assert.Null(legacy!.Sources);
+
+        var report = AdsToolEngine.Governance(legacy, [], 0, null, null, 200);
+
+        Assert.Equal(GovernanceSources.All, report.Sources.Select(s => s.Source).ToList());
+        Assert.All(report.Sources, s =>
+        {
+            Assert.Equal(AdsToolEngine.NotCollected, s.State);
+            Assert.Equal("The scan predates governance collection.", s.Detail);
+        });
+        Assert.Equal("not collected", AdsToolEngine.NotCollected);
+        foreach (var source in GovernanceSources.All)
+            Assert.Contains(SourceCaveat(source, "not collected"), report.Caveats);
+    }
+
+    [Fact]
+    public void Governance_NoManifest_EverySourceIsUnknown_AndStoredFindingsAreStillListed()
+    {
+        var report = AdsToolEngine.Governance(null, [Findings()[0]], 0, null, null, 200);
+
+        Assert.All(report.Sources, s =>
+        {
+            Assert.Equal(AdsToolEngine.Unknown, s.State);
+            Assert.False(string.IsNullOrEmpty(s.Detail));
+        });
+        Assert.Equal(1, report.Sources[0].StoredFindings);
+        Assert.Single(report.Rows);
+        Assert.Contains(SourceCaveat("advisor", "unknown"), report.Caveats);
+    }
+
+    [Fact]
+    public void Governance_ManifestWithoutASource_ReportsThatSourceUnknown()
+    {
+        var manifest = Manifest((GovernanceSources.Advisor, new SourceState(SourceState.Collected, 0, null)));
+
+        var report = AdsToolEngine.Governance(manifest, [], 0, null, null, 200);
+
+        Assert.Equal(SourceState.Collected, report.Sources[0].State);
+        Assert.Equal(AdsToolEngine.Unknown, report.Sources[1].State);
+        Assert.Equal("The scan manifest does not mention this source.", report.Sources[1].Detail);
+        Assert.Equal(AdsToolEngine.Unknown, report.Sources[2].State);
+    }
+
+    [Fact]
+    public void Governance_SourceFilter_CaveatsOnlyThatSource_ButListsEveryState()
+    {
+        var manifest = Manifest(
+            (GovernanceSources.Advisor, new SourceState(SourceState.NotRequested, 0, null)),
+            (GovernanceSources.Policy, new SourceState(SourceState.Unavailable, 0, "Throttled: too many requests")),
+            (GovernanceSources.Defender, new SourceState(SourceState.Collected, 0, null)));
+
+        var defender = AdsToolEngine.Governance(manifest, [], 0, "defender", null, 200);
+        Assert.Equal(3, defender.Sources.Count);
+        Assert.Equal(GovernanceCaveats.All, defender.Caveats);
+
+        var policy = AdsToolEngine.Governance(manifest, [], 0, "Policy", null, 200);
+        Assert.Contains(SourceCaveat("policy", "unavailable"), policy.Caveats);
+        Assert.DoesNotContain(SourceCaveat("advisor", "not-requested"), policy.Caveats);
+    }
+
+    [Fact]
+    public void Governance_MalformedRows_AreReportedInTheCaveats()
+    {
+        var report = AdsToolEngine.Governance(AllCollected(), Findings(), 3, null, null, 200);
+        Assert.Contains("3 malformed governance row(s) skipped (unknown source or severity).", report.Caveats);
+        Assert.Equal(4, report.Total);
+
+        var clean = AdsToolEngine.Governance(AllCollected(), Findings(), 0, null, null, 200);
+        Assert.DoesNotContain(clean.Caveats, c => c.Contains("malformed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Governance_Caveats_AlwaysStartWithTheGovernanceCaveats()
+    {
+        var report = AdsToolEngine.Governance(null, [], 2, "policy", Vm, 10);
+
+        Assert.Equal(GovernanceCaveats.All, report.Caveats.Take(GovernanceCaveats.All.Count).ToList());
     }
 }

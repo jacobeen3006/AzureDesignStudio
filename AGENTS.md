@@ -42,7 +42,7 @@ AzureDesignStudio/
 │   ├── AzureDesignStudio.Server.Tests/ # xUnit tests of the gRPC services called directly (InMemory EF, fake ServerCallContext; no Azure, no network)
 │   ├── AzureDesignStudio.Workspace/    # SQLite workspace (EF Core): designs/scans/snapshots/cost cache/plans/audit
 │   ├── AzureDesignStudio.Discovery/    # Tenant analysis engines: scans/drift, exposure, guardrails, decommission planner/runbook, MCP tool engine
-│   ├── AzureDesignStudio.Mcp/          # Stdio MCP server: 14 read-only tools over the workspace (plan-only decom; never mutates)
+│   ├── AzureDesignStudio.Mcp/          # Stdio MCP server: 15 read-only tools over the workspace (plan-only decom; never mutates)
 │   ├── AzureDesignStudio.Desktop/      # MAUI BlazorWebView host (reuses App.razor); runs Services in-process, no server
 │   │   └── Platforms/Windows|MacCatalyst/ # OS-only code: Credential Manager vs Keychain secret store, Mac paths/token cache
 │   └── BuildMacDmg.sh                  # macOS: universal Release build + ad-hoc/Developer ID signing + .dmg (artifacts/)
