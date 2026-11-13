@@ -52,9 +52,17 @@ Azure moved under the exporter. These are small and protect the claim that an ex
 
 | # | Item | Size | Where |
 |---|---|---|---|
-| A1 (done) | Write `defaultOutboundAccess` explicitly on exported subnets; validation rule for a VM/VMSS subnet with no outbound path (NAT gateway, LB outbound rule, public IP, UDR to an appliance) | S-M | `Core/Network/`, `ValidationDrawerTemplate`, golden templates |
-| A2 (done) | Extend `DeprecationCatalog` from resource types to SKUs: App Gateway v1, Basic public IP, Basic LB, Front Door classic, CDN classic. Apply to designs as well as scans | S | `Discovery/Analysis/DeprecationCatalog.cs` |
-| A3 (done) | Move stacks to `2025-07-01` (`validationLevel`, `resourcesWithoutDeleteSupport`), and use stacks what-if in the deploy gate for stack deployments | M | `Discovery/Iac/DeploymentStack.cs`, `Services/DeployService`. The plan hash binds the body, so old approvals must be invalidated |
+| A1 (done) | Write `defaultOutboundAccess` explicitly on exported subnets; validation rule for a VM/VMSS subnet with no outbound path. A NAT gateway (linked to a machine in the subnet, with a linked public IP) is the only modelled outbound path; a firewall in the same or a peered network downgrades the warning to Info. LB outbound rules, NIC public IPs and route tables are not modelled | S-M | `Core/Network/`, `ValidationDrawerTemplate`, golden templates |
+| A2 (done) | Extend `DeprecationCatalog` from resource types to SKUs. Basic public IP, Basic load balancer and Application Gateway v1 are refused in designs and flagged in scans; Front Door classic and CDN Standard from Microsoft (classic) are flagged in scans as "review due" with no date | S | `Discovery/Analysis/DeprecationCatalog.cs` |
+| A3 (done) | Stacks use api-version `2025-07-01` with an unchanged body (no `validationLevel`, no `resourcesWithoutDeleteSupport`), so existing plan hashes and approvals stay valid; stack applies require a token from the stacks what-if | M | `Discovery/Iac/DeploymentStack.cs`, `Services/DeployService` |
+
+Decisions made during implementation:
+
+- (a) A NAT gateway serves a subnet through a link to a node inside it, because subnets have no ports.
+- (b) An indeterminate stack preview issues no token.
+- (c) While a guardrail policy has tag rules, a stack preview or apply with any modify/detach/delete row is blocked, because stack what-if rows carry no tags.
+- (d) Scans now capture the top-level SKU, and drift ignores a SKU only the newer scan has.
+- (e) A design holding a NAT gateway with no public IP now fails validation (ARM refused that export before).
 
 Check before building: open each retirement page for the exact date (the research has several from search snippets only); confirm the stacks what-if api-version against the REST reference.
 
