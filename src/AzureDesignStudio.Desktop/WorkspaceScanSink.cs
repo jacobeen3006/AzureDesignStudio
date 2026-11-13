@@ -35,18 +35,12 @@ public sealed class WorkspaceScanSink(WorkspaceDb db) : IScanSink
 
     public async Task ScanFinishedAsync(string status, ScanCheckpoint checkpoint, CancellationToken ct)
     {
-        var manifest = JsonSerializer.Serialize(new ScanManifestView(
-            checkpoint.CompletedQueries.Count,
-            checkpoint.FailedQueries.Count,
-            checkpoint.Rows,
-            checkpoint.AnyTruncated), JsonOptions);
+        var manifest = ScanManifest.Build(status, checkpoint, checkpoint.TotalGroups).ToJson();
         var error = checkpoint.FailedQueries.Count == 0
             ? null
             : string.Join("; ", checkpoint.FailedQueries.Select(f => $"{f.Key}: {f.Value}"));
         await _scans.FinishAsync(ScanId!, status, checkpoint.ToJson(), manifest, error);
     }
-
-    private sealed record ScanManifestView(int GroupsCompleted, int GroupsFailed, int Rows, bool Truncated);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
