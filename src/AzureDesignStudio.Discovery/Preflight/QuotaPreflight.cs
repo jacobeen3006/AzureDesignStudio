@@ -37,8 +37,9 @@ public sealed record QuotaPreflightResult(IReadOnlyList<QuotaFinding> Findings, 
 /// Wave B4: turns the after payloads of a successful what-if into vCPU and public IP demand
 /// (<see cref="DemandFrom"/>; a Modify counts only the increase) and checks it against Resource
 /// SKUs and the compute and network usages of every location with demand. Advisory only: ARM
-/// still enforces quota at deployment. Never a false Ok: spot, unknown sizes, SKUs without a
-/// vCPU count and every read that fails make the affected checks Unknown or a note. Never throws
+/// still enforces quota at deployment. Never a false Ok: a located resource whose size or
+/// instance count is unknown, a SKU without a vCPU count and every read that fails make the
+/// affected checks Unknown; spot (a separate pool) is a note. Never throws
 /// except an <see cref="OperationCanceledException"/> from the caller's token: no permission,
 /// throttling, a malformed answer and the time limit all become notes, with what was read so far.
 /// </summary>
@@ -105,7 +106,12 @@ public sealed class QuotaPreflight(ArmTransport transport)
     /// skipped with one note; a resource without a location or size is skipped with a note naming
     /// it. Sums of zero are dropped; ordered by location, then size or SKU (ordinal).
     /// </summary>
-    public static QuotaDemandSet DemandFrom(IReadOnlyList<WhatIfChange> changes)
+    public static QuotaDemandSet DemandFrom(IReadOnlyList<WhatIfChange> changes) => DemandFrom(changes, out _);
+
+    /// <summary><see cref="DemandFrom(IReadOnlyList{WhatIfChange})"/>, plus every compute resource
+    /// that has a location but was not counted (its size or instance count is unknown): it still
+    /// draws on that location's quotas, so <see cref="CheckAsync"/> cannot judge them Ok.</summary>
+    private static QuotaDemandSet DemandFrom(IReadOnlyList<WhatIfChange> changes, out IReadOnlyList<UncountedCompute> uncounted)
     {
         var all = (changes ?? []).Where(c => c is not null).ToList();
         var demand = new DemandBuilder(all);
@@ -113,16 +119,24 @@ public sealed class QuotaPreflight(ArmTransport transport)
             .Where(c => c.Kind is WhatIfChangeKind.Create or WhatIfChangeKind.Modify)
             .OrderBy(c => c.ResourceId ?? "", StringComparer.Ordinal))
             demand.Add(change);
+        uncounted = demand.Uncounted;
         return demand.Build();
     }
+
+    /// <summary>A located compute resource left out of the demand; <see cref="VmSize"/> is null
+    /// when the size itself is unknown.</summary>
+    private sealed record UncountedCompute(string Location, string? VmSize, string ResourceId);
 
     private sealed class DemandBuilder(IReadOnlyList<WhatIfChange> all)
     {
         private readonly List<ComputeDemand> _compute = [];
         private readonly List<IpDemand> _ips = [];
         private readonly List<string> _notes = [];
+        private readonly List<UncountedCompute> _uncounted = [];
         private bool _spot;
         private bool _notCheckedType;
+
+        public IReadOnlyList<UncountedCompute> Uncounted => _uncounted;
 
         public void Add(WhatIfChange change)
         {
@@ -180,7 +194,7 @@ public sealed class QuotaPreflight(ArmTransport transport)
                 return;
             if (Text(after, "properties", "hardwareProfile", "vmSize") is not { } size)
             {
-                NotCounted(id, "its VM size is unknown");
+                NotCounted(id, "its VM size is unknown", location, null);
                 return;
             }
             var oldSize = before is null || IsSpot(before) ? null : Text(before, "properties", "hardwareProfile", "vmSize");
@@ -207,12 +221,12 @@ public sealed class QuotaPreflight(ArmTransport transport)
                 return;
             if (size is null)
             {
-                NotCounted(id, "its VM size is unknown");
+                NotCounted(id, "its VM size is unknown", location, null);
                 return;
             }
             if (Count(after, "sku", "capacity") is not { } capacity)
             {
-                NotCounted(id, "its instance count is unknown");
+                NotCounted(id, "its instance count is unknown", location, size);
                 return;
             }
             AddCompute(location, size, capacity);
@@ -268,12 +282,12 @@ public sealed class QuotaPreflight(ArmTransport transport)
             }
             if (Text(profile, "vmSize") is not { } size)
             {
-                NotCounted(id, $"{pool} has no VM size");
+                NotCounted(id, $"{pool} has no VM size", location, null);
                 return;
             }
             if (NodeCount(profile) is not { } count)
             {
-                NotCounted(id, $"{pool} has no node count");
+                NotCounted(id, $"{pool} has no node count", location, size);
                 return;
             }
             AddCompute(location, size, count);
@@ -319,6 +333,13 @@ public sealed class QuotaPreflight(ArmTransport transport)
         private void AddCompute(string location, string size, int instances) => _compute.Add(new ComputeDemand(location, size, instances));
 
         private void NotCounted(string id, string reason) => _notes.Add($"{id} is not counted for quota: {reason}.");
+
+        /// <summary>The note, plus a marker: the resource still draws on <paramref name="location"/>'s quotas.</summary>
+        private void NotCounted(string id, string reason, string location, string? size)
+        {
+            NotCounted(id, reason);
+            _uncounted.Add(new UncountedCompute(location, size, id));
+        }
 
         public QuotaDemandSet Build()
         {
@@ -368,7 +389,8 @@ public sealed class QuotaPreflight(ArmTransport transport)
     /// Reads, per location with demand, the Resource SKUs and compute usages (VM sizes) and the
     /// network usages (public IPs), all at once, within <paramref name="budget"/>; changes in
     /// another subscription than <paramref name="subscriptionId"/> are not counted (note). A
-    /// location with only releases needs no reads; no demand at all makes no calls.
+    /// location with only releases, and no compute resource there left uncounted, needs no reads;
+    /// no demand at all makes no calls.
     /// </summary>
     public async Task<QuotaPreflightResult> CheckAsync(string subscriptionId, IReadOnlyList<WhatIfChange> changes, TimeSpan budget,
         CancellationToken ct)
@@ -388,12 +410,14 @@ public sealed class QuotaPreflight(ArmTransport transport)
                 ours.Add(change);
         }
 
-        var demand = DemandFrom(ours);
+        var demand = DemandFrom(ours, out var uncounted);
         var trailing = new List<string>(demand.Notes);
         if (elsewhere)
             trailing.Add($"Quota is checked only in subscription {subscription}; resources this deployment changes in other subscriptions are not counted.");
 
+        // A location whose only compute is uncounted is still read: its checks must say Unknown.
         var computeLocations = demand.Compute.Where(d => d.Instances > 0).Select(d => d.Location)
+            .Concat(uncounted.Select(u => u.Location))
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
         var ipLocations = demand.PublicIps.Where(d => d.Count > 0).Select(d => d.Location)
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
@@ -431,7 +455,7 @@ public sealed class QuotaPreflight(ArmTransport transport)
         var findings = new List<QuotaFinding>();
         var zoneRestricted = new List<string>();
         foreach (var location in computeLocations)
-            JudgeCompute(location, demand.Compute.Where(d => d.Location == location).ToList(),
+            JudgeCompute(location, demand.Compute.Where(d => d.Location == location).ToList(), uncounted.Where(u => u.Location == location).ToList(),
                 outcomes[(location, Source.Skus)], outcomes[(location, Source.ComputeUsages)], findings, zoneRestricted);
         foreach (var location in ipLocations)
             JudgePublicIps(location, demand.PublicIps.Where(d => d.Location == location).ToList(),
@@ -560,11 +584,13 @@ public sealed class QuotaPreflight(ArmTransport transport)
     /// One location's VM sizes: SkuUnavailable for a size not offered or restricted there; one
     /// check per VM family (sizes mapped by the SKU's <c>family</c>) and the regional
     /// <c>cores</c> check, each requesting max(0, the sum of instances x vCPUs). A size without a
-    /// vCPU count, or not offered, makes its checks Unknown; a family with only releases is not
-    /// checked. Without the SKU list each size is Unknown under its own name.
+    /// vCPU count, or not offered, makes its checks Unknown; so does a resource that was not
+    /// counted (<paramref name="uncounted"/>): <c>cores</c>, and its size's family when the size is
+    /// known. A family with only releases is not checked. Without the SKU list each size is
+    /// Unknown under its own name.
     /// </summary>
-    private static void JudgeCompute(string location, IReadOnlyList<ComputeDemand> entries, ReadOutcome skuRead, ReadOutcome usageRead,
-        List<QuotaFinding> findings, List<string> zoneRestricted)
+    private static void JudgeCompute(string location, IReadOnlyList<ComputeDemand> entries, IReadOnlyList<UncountedCompute> uncounted,
+        ReadOutcome skuRead, ReadOutcome usageRead, List<QuotaFinding> findings, List<string> zoneRestricted)
     {
         var usages = usageRead.Kind == ReadKind.Read ? UsageRows(usageRead.Items) : null;
         var failure = JoinDetails(FailureOf(usageRead, Source.ComputeUsages), FailureOf(skuRead, Source.Skus));
@@ -598,14 +624,29 @@ public sealed class QuotaPreflight(ArmTransport transport)
                 coreReasons.Add(NoVcpuCount);
         }
 
-        foreach (var family in resolved.Where(r => r.Sku?.Family is not null).GroupBy(r => r.Sku!.Family!, StringComparer.OrdinalIgnoreCase))
+        // An uncounted resource draws on the regional total, and on its size's family when the
+        // size is known and offered: what was counted there is not all of the request.
+        var missing = uncounted
+            .Select(u => new Missing($"{u.ResourceId} is not counted", u.VmSize, u.VmSize is null ? null : skus.GetValueOrDefault(u.VmSize)?.Family))
+            .ToList();
+        coreReasons.AddRange(missing.Select(m => m.Reason));
+
+        var families = resolved.Select(r => r.Sku?.Family).Concat(missing.Select(m => m.Family)).OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var family in families)
         {
-            var members = family.ToList();
-            var sizes = members.Where(m => m.Demand.Instances > 0).Select(m => m.Demand.VmSize).ToList();
+            var members = resolved.Where(r => r.Sku?.Family is { } f && SameName(f, family)).ToList();
+            var left = missing.Where(m => m.Family is { } f && SameName(f, family)).ToList();
+            var sizes = members.Where(m => m.Demand.Instances > 0).Select(m => m.Demand.VmSize)
+                .Concat(left.Select(m => m.VmSize!))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (sizes.Count == 0)
                 continue;
-            string[] reasons = members.Any(m => m.Demand.Instances > 0 && m.Sku!.VCpus is null) ? [NoVcpuCount] : [];
-            findings.Add(Judge(location, family.Key, Requested(members), string.Join(", ", sizes), usages, failure, reasons));
+            var reasons = new List<string>();
+            if (members.Any(m => m.Demand.Instances > 0 && m.Sku!.VCpus is null))
+                reasons.Add(NoVcpuCount);
+            reasons.AddRange(left.Select(m => m.Reason).Distinct());
+            findings.Add(Judge(location, family, Requested(members), string.Join(", ", sizes), usages, failure, reasons));
         }
         foreach (var entry in resolved.Where(r => r.Sku is { Family: null } && r.Demand.Instances > 0))
             findings.Add(new QuotaFinding(location, entry.Demand.VmSize, entry.Demand.VmSize, 0, 0, Requested([entry]), QuotaStatus.Unknown,
@@ -628,6 +669,10 @@ public sealed class QuotaPreflight(ArmTransport transport)
     }
 
     private sealed record Resolved(ComputeDemand Demand, SkuInfo? Sku);
+
+    /// <summary>An uncounted resource as a check sees it: why the check is Unknown, its size and
+    /// the size's family (null when either is unknown).</summary>
+    private sealed record Missing(string Reason, string? VmSize, string? Family);
 
     /// <summary>Instances x vCPUs over the sizes whose vCPU count is known, never below zero and
     /// saturating at <see cref="long.MaxValue"/>. A release whose vCPUs are unknown is not

@@ -642,6 +642,73 @@ public class QuotaPreflightTests
     }
 
     [Fact]
+    public async Task Check_UncountedResource_MakesItsChecksUnknown()
+    {
+        // The scale set's instances draw on DSv5 and the regional total like the VM next to it:
+        // 8 + 2 of 50 counted without them must not read as Ok.
+        var vmss = UncountedCapacity(VmssJson("vmss1", "Standard_D2s_v5", 3));
+        var vmssId = IdOf(vmss);
+
+        var result = await Check(Arm(), Create(vmss), Create(VmJson("vm1", "Standard_D2s_v5")));
+
+        Assert.Equal(
+            [
+                new QuotaFinding("westeurope", "cores", "Total Regional vCPUs", 10, 100, 2, QuotaStatus.Unknown, null, $"{vmssId} is not counted"),
+                new QuotaFinding("westeurope", DSv5, "Standard DSv5 Family vCPUs", 8, 50, 2, QuotaStatus.Unknown, "Standard_D2s_v5",
+                    $"{vmssId} is not counted"),
+            ],
+            result.Findings);
+        Assert.Equal([$"{vmssId} is not counted for quota: its instance count is unknown."], result.Notes);
+    }
+
+    [Theory]
+    [InlineData("vm-size", false)]
+    [InlineData("vmss-size", false)]
+    [InlineData("vmss-capacity", true)]
+    [InlineData("aks-size", false)]
+    [InlineData("aks-count", true)]
+    public async Task Check_UncountedResourceAlone_StillReadsItsLocation(string uncounted, bool sizeKnown)
+    {
+        var after = uncounted switch
+        {
+            "vm-size" => VmJson("vm1", null),
+            "vmss-size" => VmssJson("vmss1", null, 3),
+            "vmss-capacity" => UncountedCapacity(VmssJson("vmss1", "Standard_D2s_v5", 3)),
+            "aks-size" => AksJson("aks1", Pool("system", null, 3)),
+            // count omitted (the newer pool shapes): no node count.
+            _ => AksJson("aks1", WithoutCount(Pool("system", "Standard_D2s_v5", 3))),
+        };
+        var id = IdOf(after);
+        var arm = Arm();
+
+        var result = await Check(arm, Create(after));
+
+        // Nothing else has demand in westeurope, and its SKU list and compute usages are still read.
+        Assert.Equal([ComputeUsagesPath("westeurope"), SkusPath], arm.Sent.Select(s => s.Path).Order(StringComparer.Ordinal));
+        var cores = new QuotaFinding("westeurope", "cores", "Total Regional vCPUs", 10, 100, 0, QuotaStatus.Unknown, null, $"{id} is not counted");
+        // Without a size the family is unknown; the regional total still cannot be Ok.
+        QuotaFinding[] expected = sizeKnown
+            ? [cores, new QuotaFinding("westeurope", DSv5, "Standard DSv5 Family vCPUs", 8, 50, 0, QuotaStatus.Unknown, "Standard_D2s_v5", $"{id} is not counted")]
+            : [cores];
+        Assert.Equal(expected, result.Findings);
+        Assert.Contains(id, Assert.Single(result.Notes));
+    }
+
+    /// <summary>The scale set with an instance count what-if left unresolved.</summary>
+    private static string UncountedCapacity(string vmssJson)
+    {
+        var vmss = JsonNode.Parse(vmssJson)!.AsObject();
+        vmss["sku"]!["capacity"] = "[parameters('instanceCount')]";
+        return vmss.ToJsonString();
+    }
+
+    private static JsonObject WithoutCount(JsonObject pool)
+    {
+        pool.Remove("count");
+        return pool;
+    }
+
+    [Fact]
     public async Task Check_NoUsageRow_IsUnknown()
     {
         var arm = Arm().Route(ComputeUsagesPath("westeurope"), List(Usage("cores", "Total Regional vCPUs", 10, 100)));
