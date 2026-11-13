@@ -7,9 +7,9 @@ namespace AzureDesignStudio.Desktop;
 
 /// <summary>
 /// Native MSAL public client (plan 4.2): work + personal accounts through the
-/// Windows broker (WAM / Web Account Manager), with device-code fallback when
-/// embedded interactive UI is unavailable. Tokens for the gRPC calls come from
-/// the serialized account cache via silent acquisition.
+/// Windows broker (WAM / Web Account Manager) on Windows and the system browser on
+/// macOS, with device-code fallback when interactive UI is unavailable. Tokens for
+/// the gRPC calls come from the serialized account cache via silent acquisition.
 /// </summary>
 public sealed class MsalAccountService
 {
@@ -43,6 +43,7 @@ public sealed class MsalAccountService
             return;
         }
 
+#if WINDOWS
         // Extension (not instance method) - shadows the deprecated WithBroker(bool).
         // The Windows broker (WAM) answers on ms-appx-web://microsoft.aad.brokerplugin/{clientId},
         // packaged or not; MSAL picks that itself. The registration lists it next to
@@ -52,6 +53,16 @@ public sealed class MsalAccountService
             new BrokerOptions(BrokerOptions.OperatingSystems.Windows) { Title = "Azure Design Studio sign-in" });
 
         _pca = builder.Build();
+#else
+        // macOS: no broker. Sign-in runs in the system browser and answers on the
+        // http://localhost loopback the registration already lists; the account cache is
+        // kept in the login Keychain so the next launch starts signed in.
+        _pca = PublicClientApplicationBuilder.Create(clientId)
+            .WithAuthority(authority)
+            .WithRedirectUri("http://localhost")
+            .Build();
+        KeychainTokenCache.Bind(_pca.UserTokenCache, logger);
+#endif
     }
 
     public bool IsConfigured => _pca != null;
@@ -134,7 +145,7 @@ public sealed class MsalAccountService
             var accounts = await _pca.GetAccountsAsync();
             result = await _pca.AcquireTokenInteractive(new[] { ArmScope })
                 .WithAccount(accounts.FirstOrDefault())
-                .WithParentActivityOrWindow(GetWindowHandle())
+                .WithPlatformUi()
                 .ExecuteAsync();
         }
         catch (MsalClientException e) when (e.ErrorCode == "authentication_canceled")
@@ -180,7 +191,7 @@ public sealed class MsalAccountService
             var interactive = _pca.AcquireTokenInteractive(_scopes)
                 .WithAccount(accounts.FirstOrDefault())
                 .WithPrompt(Prompt.SelectAccount)
-                .WithParentActivityOrWindow(GetWindowHandle());
+                .WithPlatformUi();
             result = await interactive.ExecuteAsync();
         }
         catch (MsalClientException e) when (e.ErrorCode == "authentication_canceled")
@@ -306,13 +317,15 @@ public sealed class MsalAccountService
             MainThread.BeginInvokeOnMainThread(() => Set(title));
     }
 
-    private static IntPtr GetWindowHandle()
+#if WINDOWS
+    internal static IntPtr GetWindowHandle()
     {
         var platformView = Application.Current?.Windows?.FirstOrDefault()?.Handler?.PlatformView;
         if (platformView is Microsoft.UI.Xaml.Window uiWindow)
             return WinRT.Interop.WindowNative.GetWindowHandle(uiWindow);
         return System.Diagnostics.Process.GetCurrentProcess().MainWindowHandle;
     }
+#endif
 
     private static string Truncate(string s) => s.Length <= 120 ? s : s[..120] + "...";
 
@@ -321,4 +334,21 @@ public sealed class MsalAccountService
     // only way to keep it from escaping as an unhandled task failure.
     private static bool IsBrokerInteropFailure(Exception e) => e.GetType().Name == "MSALErrorException";
     private static bool IsBrokerOrMsalFailure(Exception e) => e is MsalException || IsBrokerInteropFailure(e);
+}
+
+internal static class InteractiveSignInExtensions
+{
+    /// <summary>Windows: the broker's account picker, parented to the app window. macOS: the
+    /// system browser, opened through MAUI's launcher (MSAL's own browser start-up does not know
+    /// Mac Catalyst).</summary>
+    public static AcquireTokenInteractiveParameterBuilder WithPlatformUi(this AcquireTokenInteractiveParameterBuilder builder) =>
+#if WINDOWS
+        builder.WithParentActivityOrWindow(MsalAccountService.GetWindowHandle());
+#else
+        builder.WithUseEmbeddedWebView(false)
+            .WithSystemWebViewOptions(new SystemWebViewOptions
+            {
+                OpenBrowserAsync = uri => MainThread.InvokeOnMainThreadAsync(() => Launcher.Default.OpenAsync(uri)),
+            });
+#endif
 }

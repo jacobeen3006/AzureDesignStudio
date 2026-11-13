@@ -29,6 +29,9 @@ public static class MauiProgram
         TaskScheduler.UnobservedTaskException += (s, e) =>
             System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ads_desktop_crash.log"),
                 $"[{DateTime.Now:O}] UNOBSERVED\n{e.Exception}\n\n");
+#if MACCATALYST
+        MacHost.ExtendToolPath();
+#endif
         builder
             .UseMauiApp<App>()
             .ConfigureFonts(fonts =>
@@ -36,20 +39,33 @@ public static class MauiProgram
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
             });
 
+#if MACCATALYST
+        // Bundled into Contents/Resources, not next to the executable (Contents/MonoBundle).
+        builder.Configuration.AddJsonFile(AppContent.SettingsFile, optional: true, reloadOnChange: false);
+#else
         builder.Configuration.AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
+#endif
         var resourceRoot = builder.Configuration["ResourceRoot"] ?? "/";
 
         var webViewOrigin = new Uri("https://0.0.0.1/");
         builder.Services.AddHttpClient("AzureDesignStudio.Root", (sp, client) => client.BaseAddress = webViewOrigin)
             .ConfigurePrimaryHttpMessageHandler(() => new PackageAssetHandler(webViewOrigin));
+        // Only an http(s) ResourceRoot is a remote root. On macOS "/" also parses as an absolute
+        // URI (file:///), which sent every icon request to the file scheme instead of the package.
         builder.Services.AddHttpClient("AzureDesignStudio.ResourceAccess", (sp, client) =>
-            client.BaseAddress = Uri.TryCreate(resourceRoot, UriKind.Absolute, out var abs) ? abs : webViewOrigin)
+            client.BaseAddress = Uri.TryCreate(resourceRoot, UriKind.Absolute, out var abs) && (abs.Scheme == Uri.UriSchemeHttps || abs.Scheme == Uri.UriSchemeHttp)
+                ? abs : webViewOrigin)
             .ConfigurePrimaryHttpMessageHandler(() => new PackageAssetHandler(webViewOrigin));
 
         // SQLite workspace (plan 6.3): designs, scans, snapshots, cost cache, plans and audit
         // records in one file - everything readable with the network down. The v1 per-file
         // design cache is imported once on startup.
-        var appData = FileSystem.Current.AppDataDirectory;
+        var appData =
+#if MACCATALYST
+            MacHost.AppDataDirectory;
+#else
+            FileSystem.Current.AppDataDirectory;
+#endif
         var workspaceDb = new WorkspaceDb(System.IO.Path.Combine(appData, "workspace.db"));
         LegacyDesignImporter.ImportIfNeeded(workspaceDb, System.IO.Path.Combine(appData, "designs"));
         builder.Services.AddSingleton(workspaceDb);
@@ -88,7 +104,8 @@ public static class MauiProgram
         builder.Services.AddScoped<CostService>();
 
         // Native MSAL (plan 4.2): work + personal accounts via the Windows broker
-        // (WAM) with device-code fallback; state mirrors the serialized cache.
+        // (WAM) or, on macOS, the system browser, with device-code fallback; state
+        // mirrors the serialized cache.
         builder.Services.AddSingleton<MsalAccountService>();
         builder.Services.AddSingleton<DesktopIdentity>();
 
@@ -228,12 +245,14 @@ internal sealed class FileLoggerProvider(string path) : ILoggerProvider
     }
 }
 
-// The WebView2 virtual host (https://0.0.0.1/) is only resolvable inside the WebView's
+// The WebView virtual host (0.0.0.1) is only resolvable inside the WebView's
 // JS network stack; .NET HttpClient would hit an unreachable IP. Serve same-origin
 // requests straight from the packaged wwwroot, everything else goes to the real network.
 internal sealed class PackageAssetHandler(Uri webViewOrigin) : HttpMessageHandler
 {
-    private readonly HttpClient _network = new(new HttpClientHandler());
+    // An invoker, not an HttpClient: the request already went through the calling HttpClient,
+    // and a second HttpClient refuses a request message that was sent once.
+    private readonly HttpMessageInvoker _network = new(new HttpClientHandler());
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -241,7 +260,7 @@ internal sealed class PackageAssetHandler(Uri webViewOrigin) : HttpMessageHandle
         if (uri.Host == webViewOrigin.Host && (uri.Scheme == "https" || uri.Scheme == "http"))
         {
             var path = uri.AbsolutePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
-            var file = Path.Combine(AppContext.BaseDirectory, "wwwroot", path);
+            var file = Path.Combine(AppContent.Root, "wwwroot", path);
             if (File.Exists(file))
             {
                 var response = new HttpResponseMessage(HttpStatusCode.OK)

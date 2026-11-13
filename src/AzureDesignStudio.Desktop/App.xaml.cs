@@ -19,7 +19,7 @@ public partial class App : Application
         var adsContext = MauiProgram.Services.GetRequiredService<AdsContext>();
         adsContext.StencilLoader = () => Task.FromResult<IReadOnlyList<StencilModel>>(
             System.Text.Json.JsonSerializer.Deserialize<IReadOnlyList<StencilModel>>(
-                System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "ads-stencils.json")),
+                System.IO.File.ReadAllText(AppContent.StencilsFile),
                 // ads-stencils.json is camelCase; match GetFromJsonAsync's web defaults used by WASM.
                 System.Text.Json.JsonSerializerOptions.Web)!);
         try

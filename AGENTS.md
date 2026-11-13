@@ -6,7 +6,7 @@
 
 ## OVERVIEW
 
-Azure Design Studio — Blazor app for visual Azure architecture design. The primary target is the standalone MAUI Blazor Hybrid desktop app (Windows now, macOS via Mac Catalyst later): it runs every service in-process and needs no server. The WASM client + gRPC server keep building and tested but get no new work. Diagramming, validation, ARM/Bicep IaC generation, What-If, deploy, export. .NET 10, 13 projects in src/. Microsoft Global Hackathon 2022 winner.
+Azure Design Studio — Blazor app for visual Azure architecture design. The primary target is the standalone MAUI Blazor Hybrid desktop app (Windows, and macOS via Mac Catalyst shipped as a .dmg): it runs every service in-process and needs no server. The WASM client + gRPC server keep building and tested but get no new work. Diagramming, validation, ARM/Bicep IaC generation, What-If, deploy, export. .NET 10, 13 projects in src/. Microsoft Global Hackathon 2022 winner.
 
 ## STRUCTURE
 
@@ -43,7 +43,9 @@ AzureDesignStudio/
 │   ├── AzureDesignStudio.Workspace/    # SQLite workspace (EF Core): designs/scans/snapshots/cost cache/plans/audit
 │   ├── AzureDesignStudio.Discovery/    # Tenant analysis engines: scans/drift, exposure, guardrails, decommission planner/runbook, MCP tool engine
 │   ├── AzureDesignStudio.Mcp/          # Stdio MCP server: 13 read-only tools over the workspace (plan-only decom; never mutates)
-│   └── AzureDesignStudio.Desktop/      # MAUI BlazorWebView host (reuses App.razor); runs Services in-process, no server
+│   ├── AzureDesignStudio.Desktop/      # MAUI BlazorWebView host (reuses App.razor); runs Services in-process, no server
+│   │   └── Platforms/Windows|MacCatalyst/ # OS-only code: Credential Manager vs Keychain secret store, Mac paths/token cache
+│   └── BuildMacDmg.sh                  # macOS: universal Release build + ad-hoc/Developer ID signing + .dmg (artifacts/)
 ├── .github/workflows/                  # build.yml (build+test+CodeQL), publish.yml (tag v*: WASM zip, Docker, MSIX), codeql-analysis.yml
 └── assets/ docs/                       # Screenshots, documentation
 ```
@@ -68,12 +70,12 @@ AzureDesignStudio/
 - **SDK projects**: `Microsoft.NET.Sdk.BlazorWebAssembly` (WASM), `Microsoft.NET.Sdk.Web` (Server), `Microsoft.NET.Sdk.Razor` (Core), `Microsoft.NET.Sdk` (others)
 - **Nullable**: enabled in all projects except AzureResources
 - **ImplicitUsings**: enabled in all SDK-style projects
-- **TFM**: `net10.0` (Desktop: `net10.0-windows10.0.19041.0`); SourceGeneration targets `netstandard2.0`
+- **TFM**: `net10.0` (Desktop: `net10.0-windows10.0.19041.0` on Windows, `net10.0-maccatalyst` on macOS - chosen by host OS, one each); SourceGeneration targets `netstandard2.0`
 - **Build authority**: `Directory.Build.props` owns repo-wide properties (MauiVersion pin, lock files, warnings, audit level); `Directory.Packages.props` owns every package version; each csproj declares only `Include=` on references; locked restore is a CI flag, not a repo property
 - **gRPC**: protobuf in SharedModels, clients via `Grpc.Net.ClientFactory`, server via `Grpc.AspNetCore`
-- **Auth**: Entra ID work+personal - MSAL redirect in WASM, native MSAL (WAM broker + device-code fallback) in Desktop, JWT + Microsoft.Identity.Web in Server; shared drawers use the `AdsHostAuth` host-override seam. Desktop identity (`DesktopIdentity`) = the MSAL account, else the Azure CLI token's claims (sign-out turns that fallback off)
+- **Auth**: Entra ID work+personal - MSAL redirect in WASM, native MSAL in Desktop (Windows: WAM broker; macOS: system browser on the `http://localhost` loopback, cache in the Keychain; device-code fallback on both), JWT + Microsoft.Identity.Web in Server; shared drawers use the `AdsHostAuth` host-override seam. Desktop identity (`DesktopIdentity`) = the MSAL account, else the Azure CLI token's claims (sign-out turns that fallback off)
 - **Caller identity**: services read the caller from `context.UserState[ServiceTools.UserStateKey]`; Server's `CallerInterceptor` and Desktop's `InProcessCallInvoker` put it there
-- **Azure credentials (deploy/what-if)**: a linked service principal for that subscription wins (secret in Key Vault on Server, Windows Credential Manager on Desktop); otherwise the host's `IAmbientAzureCredential` (Desktop: the signed-in user). A broken link answers 404 - it never silently falls back to the user
+- **Azure credentials (deploy/what-if)**: a linked service principal for that subscription wins (secret in Key Vault on Server, `SecretStore` on Desktop = Windows Credential Manager / macOS login Keychain); otherwise the host's `IAmbientAzureCredential` (Desktop: the signed-in user). A broken link answers 404 - it never silently falls back to the user
 - **Diagrams**: `Z.Blazor.Diagrams` 3.0.4.1 NuGet; fork-only APIs reimplemented in `AdsDiagram`/`AzurePort`/`VirtualNetworkPort`
 - **Source gen**: Roslyn incremental generator with Scriban templates
 - **ARM models**: `ResourceBase` → `ARMResourceBase` hierarchy, JSON serialization, `[GeneratedCode("ArmTypeGenerator")]`
@@ -99,6 +101,8 @@ dotnet test src/AzureDesignStudio.Server.Tests  # Server RPC tests (in Release a
 node --test src/AzureDesignStudio/JsTests/*.test.cjs  # Stencil drag state machine (ads.js) tests; kept out of wwwroot so they are not published
 docker build -f src/AzureDesignStudio.Server/Dockerfile .  # Docker image - context is the REPO ROOT (central props/global.json live there); src/DockerBuild.ps1 [-Tag] adds the nbgv version
 dotnet publish src/AzureDesignStudio.Desktop -c Release -f net10.0-windows10.0.19041.0 -p:WindowsPackageType=MSIX -p:RuntimeIdentifier=win-x64 -p:WindowsAppSDKSelfContained=true  # MSIX package
+dotnet build src/AzureDesignStudio.Desktop -f net10.0-maccatalyst  # macOS dev build -> bin/Debug/net10.0-maccatalyst/maccatalyst-arm64/Azure Design Studio.app
+src/BuildMacDmg.sh [--version x.y.z] [--arch universal|arm64|x64] [--sign "Developer ID Application: ..."] [--notarize profile]  # macOS .dmg into artifacts/
 ```
 
 ## NOTES
@@ -124,4 +128,8 @@ dotnet publish src/AzureDesignStudio.Desktop -c Release -f net10.0-windows10.0.1
 - Desktop storage (all under `FileSystem.AppDataDirectory`): `workspace.db` (designs, scans, snapshots...) and `deploy.db` (approvals, guardrails, linked subscriptions, audit; `EnsureCreated`). Designs are local (`AdsHostFeatures.DesignsAreLocal`): no quota, no sign-in needed to save
 - PITFALL: ARM rejects `location` on a resource-group-scoped deployment or what-if ("The 'location' property is not allowed"); send it only at subscription/management-group/tenant scope
 - Every generated `dependsOn` is `[resourceId('type', 'name', ...)]`; `ArmTemplateValidator` (the pre-deploy gate) resolves those by type+name. Resource identity is type+name - two types may share a name
+- macOS Desktop (Mac Catalyst) is not sandboxed (Entitlements.plist): it runs `az`, listens on a loopback port for the browser sign-in, and uses the file-based login Keychain (`KeychainSecretStore`, P/Invoke - the SecItem data-protection keychain needs a team-signed entitlement). Because it is unsandboxed, MAUI's `AppDataDirectory` is the user's real ~/Library: Mac app data goes to `MacHost.AppDataDirectory` (~/Library/Application Support/<bundle id>) instead
+- PITFALL (macOS Desktop): a Finder-launched app gets launchd's PATH; `MacHost.ExtendToolPath` adds /opt/homebrew/bin and /usr/local/bin for `az`. Read-only content (wwwroot, appsettings.json, ads-stencils.json) is in Contents/Resources (`AppContent.Root`), not next to the executable. On Unix `Uri.TryCreate("/", Absolute)` succeeds (file:///) - never treat that as a remote root
+- PITFALL (macOS Desktop build): Release Mac Catalyst needs `UseInterpreter=true` (else dynamic code is off and EF Core refuses to build its model at startup) and the WASM ProjectReference drops `AppendRuntimeIdentifierToOutputPath` (the universal build's per-RID inner builds otherwise look for the client's static web assets under obj/.../browser-wasm/). Grpc.Tools 2.66 ships an x64-only macOS protoc: Apple silicon needs Rosetta, or override `Protobuf_ProtocFullPath`/`gRPC_PluginFullPath`. The Mac SDK pins one exact Xcode; `ValidateXcodeVersion=false` accepts point releases
+- Desktop lock files: `packages.lock.json` is the Windows restore (CI checks it in locked mode); `packages.maccatalyst.lock.json` is the macOS restore (`NuGetLockFilePath`). A Mac with a newer SDK patch than global.json rewrites the other projects' locks (implicit 10.0.x package versions) - do not commit that drift
 - Server behind ingress: `ForwardedHeaders` configured for XForwardedFor/XForwardedProto
