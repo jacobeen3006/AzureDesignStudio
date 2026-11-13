@@ -18,6 +18,8 @@
 @using AzureDesignStudio.Discovery.Report
 @using AzureDesignStudio.Discovery.Security
 @using AzureDesignStudio.Discovery.Iac
+@using AzureDesignStudio.Discovery.Governance
+@using AzureDesignStudio.Discovery.Scan
 @using SubscriptionInfo = AzureDesignStudio.Discovery.Arm.SubscriptionInfo
 @using AzureDesignStudio.Workspace
 @implements IDisposable
@@ -44,7 +46,7 @@
 
 <div style="padding:0 4px;">
     <div style="display:flex;gap:8px;margin-bottom:12px;">
-        @foreach (var (key, label) in new[] { ("scan", "Scan"), ("browse", "Inventory"), ("topology", "Topology"), ("exposure", "Exposure"), ("reach", "Reach"), ("changes", "Changes"), ("cost", "Cost"), ("stacks", "Stacks"), ("decom", "Decommission"), ("report", "Report") })
+        @foreach (var (key, label) in new[] { ("scan", "Scan"), ("browse", "Inventory"), ("topology", "Topology"), ("exposure", "Exposure"), ("governance", "Governance"), ("reach", "Reach"), ("changes", "Changes"), ("cost", "Cost"), ("stacks", "Stacks"), ("decom", "Decommission"), ("report", "Report") })
         {
             <Button Type="@(activeTab == key ? ButtonType.Primary : ButtonType.Default)"
                     Size="ButtonSize.Small" OnClick="@(() => SwitchTabAsync(key))">@label</Button>
@@ -90,6 +92,9 @@
                     <Button Type="ButtonType.Primary" Size="ButtonSize.Small"
                             Disabled="@(selected.Count == 0)"
                             OnClick="StartAsync">Start scan (@selected.Count)</Button>
+                    <label style="font-size:13px;">
+                        <input type="checkbox" @bind="collectGovernance" /> Collect Advisor, Policy and Defender findings
+                    </label>
                     <Button Size="ButtonSize.Small" Disabled="@(selected.Count == 0)"
                             OnClick="PreflightAsync">Preflight</Button>
                     @if (resumable is not null)
@@ -396,7 +401,7 @@
         }
         else
         {
-            <TopologyView Items="topoItems" Positions="Session.Positions" ChangedIds="topoChanged" />
+            <TopologyView Items="topoItems" Positions="Session.Positions" ChangedIds="topoChanged" Findings="topoFindings" />
         }
     }
     else if (activeTab == "exposure")
@@ -442,6 +447,32 @@
             @foreach (var cav in AdsToolEngine.ExposureCaveats)
             {
                 <div style="font-size:12px;color:#999;">@cav</div>
+            }
+        }
+    }
+    else if (activeTab == "governance")
+    {
+        @if (completed.Count == 0)
+        {
+            <span>No completed scans yet.</span>
+        }
+        else
+        {
+            <div style="margin-bottom:8px;">
+                <select @bind="govScanId" @bind:after="LoadGovernanceAsync">
+                    @foreach (var scan in completed)
+                    {
+                        <option value="@scan.Id">@(scan.StartedAt.LocalDateTime.ToString("dd.MM HH:mm")) · @scan.Scope · @scan.ResourceCount rows</option>
+                    }
+                </select>
+            </div>
+            @if (govError is { } gerr)
+            {
+                <div style="color:#cf1322;">Could not read the governance findings: @gerr</div>
+            }
+            else if (govScanId is not null)
+            {
+                <GovernanceFindingsView Findings="govFindings" Sources="govSources" DefenderPlans="govPlans" Caveats="govCaveats" />
             }
         }
     }
@@ -947,7 +978,7 @@
         <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <Button Size="ButtonSize.Small" OnClick="SaveReportAsync">Save report (Markdown)</Button>
             <Button Size="ButtonSize.Small" OnClick="SaveReportBundleAsync">Save report bundle</Button>
-            <span style="font-size:12px;color:#999;">findings + retirement watch + exposure + unmanaged + changes since the scan, with sources; the bundle lands report.html + report.json + controls-audit.csv in a Downloads folder</span>
+            <span style="font-size:12px;color:#999;">findings + retirement watch + exposure + unmanaged + changes since the scan + governance findings, with sources; the bundle lands report.html + report.json + controls-audit.csv in a Downloads folder</span>
         </div>
 
         @foreach (var finding in reportFindings)
@@ -987,6 +1018,8 @@
     private IReadOnlyList<ScanRecord> history = [];
     private List<ScanRecord> completed = [];
     private ScanRecord? resumable;
+    // Wave B3: Advisor, Policy and Defender findings ride along with the scan unless unticked.
+    private bool collectGovernance = true;
 
     private string? browseScanId;
     private string browseSearch = "";
@@ -1009,6 +1042,16 @@
     private string? topoScanId;
     private List<InventoryItem> topoItems = [];
     private IReadOnlySet<string>? topoChanged;
+    private IReadOnlyDictionary<string, IReadOnlyList<GovernanceFinding>>? topoFindings;
+
+    // Wave B3 Governance tab: the findings stored with one scan plus its manifest's source states
+    // (null = the scan predates governance collection). Workspace reads only, no ARM call.
+    private string? govScanId;
+    private IReadOnlyList<GovernanceFinding> govFindings = [];
+    private IReadOnlyDictionary<string, SourceState>? govSources;
+    private IReadOnlyList<DefenderPlan>? govPlans;
+    private IReadOnlyList<string> govCaveats = [];
+    private string? govError;
 
     // Phase 9 UI integration (v2 9.1/9.3/9.4/9.5): per-tab workspace-snapshot reads; the only
     // ARM calls on these tabs are Collect feed and Query spend, both gated on ArmUnavailable.
@@ -1266,6 +1309,11 @@
             exposureScanId = completed.FirstOrDefault()?.Id;
             await LoadExposureAsync();
         }
+        if (key == "governance" && govScanId is null)
+        {
+            govScanId = completed.FirstOrDefault()?.Id;
+            await LoadGovernanceAsync();
+        }
         if (key == "reach" && reachScanId is null)
         {
             reachScanId = completed.FirstOrDefault()?.Id;
@@ -1303,8 +1351,9 @@
         if (e.Value is true or "true") selected.Add(id); else selected.Remove(id);
     }
 
-    private Task StartAsync() => Session.StartScanAsync(selected.ToList());
-    private Task ResumeScanAsync() => Session.StartScanAsync(selected.ToList(), resume: true);
+    private Task StartAsync() => Session.StartScanAsync(selected.ToList(), collectGovernance: collectGovernance);
+    // A resumed scan keeps the sources it started with; the option is only validated.
+    private Task ResumeScanAsync() => Session.StartScanAsync(selected.ToList(), resume: true, collectGovernance: collectGovernance);
 
     private async Task PreflightAsync()
     {
@@ -1402,6 +1451,37 @@
         if (exposureScanId is null) return;
         var rows = await Session.GetSnapshotsAsync(exposureScanId);
         exposureFindings = ExposureAnalyzer.Analyze(rows.Select(ToItem).ToList());
+    }
+
+    private async Task LoadGovernanceAsync()
+    {
+        govFindings = [];
+        govSources = null;
+        govPlans = null;
+        govCaveats = [];
+        govError = null;
+        if (govScanId is null) return;
+        try
+        {
+            var (findings, malformed, manifest) = await GovernanceOfAsync(govScanId,
+                completed.FirstOrDefault(s => s.Id == govScanId)?.ManifestJson);
+            govFindings = findings;
+            govSources = manifest?.Sources;
+            govPlans = manifest?.DefenderPlans;
+            govCaveats = malformed == 0
+                ? GovernanceCaveats.All
+                : [.. GovernanceCaveats.All, $"{malformed} stored governance row(s) could not be read (unknown source or severity) and are not shown."];
+        }
+        catch (Exception e) { govError = e.Message; }
+    }
+
+    // One read of a scan's governance: the stored findings and the manifest that says how far each
+    // source got. A manifest without sources (or none at all) is a scan that predates governance.
+    private async Task<(IReadOnlyList<GovernanceFinding> Findings, int Malformed, ScanManifest? Manifest)>
+        GovernanceOfAsync(string scanId, string? manifestJson)
+    {
+        var (findings, malformed) = await Session.GetGovernanceAsync(scanId);
+        return (findings, malformed, ScanManifest.Read(manifestJson));
     }
 
     private async Task LoadChangesAsync()
@@ -1817,6 +1897,7 @@
     private async Task LoadTopologyAsync()
     {
         topoChanged = null;
+        topoFindings = null;
         if (topoScanId is null)
         {
             topoItems = [];
@@ -1825,6 +1906,13 @@
 
         var rows = await Session.GetSnapshotsAsync(topoScanId);
         topoItems = rows.Select(ToItem).ToList();
+
+        // Wave B3 badges: the scan's governance findings by ARM id (case-insensitive).
+        var (governance, _) = await Session.GetGovernanceAsync(topoScanId);
+        if (governance.Count > 0)
+            topoFindings = governance
+                .GroupBy(f => f.ResourceId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<GovernanceFinding>)g.ToList(), StringComparer.OrdinalIgnoreCase);
 
         // rescan diff (8.4): changed or new ids versus the previous completed scan
         var prev = completed.FirstOrDefault(s => s.Id != topoScanId && s.Status == "Completed"); // a partial scan would make what it missed look deleted
@@ -2201,7 +2289,23 @@
     {
         if (reportScan is not { } scan)
             return;
-        var (_, exposure, audit, driftList, policyNote, driftError) = await CollectReportSectionsAsync(scan);
+        IReadOnlyList<ExposureFinding> exposure;
+        ManagementAudit audit;
+        IReadOnlyList<LiveDriftItem>? driftList;
+        string policyNote;
+        string? driftError;
+        IReadOnlyList<GovernanceFinding>? governance;
+        IReadOnlyDictionary<string, SourceState>? governanceSources;
+        try
+        {
+            (_, exposure, audit, driftList, policyNote, driftError, governance, governanceSources) = await CollectReportSectionsAsync(scan);
+        }
+        catch (Exception e)
+        {
+            // The governance findings are a workspace read; a failure must not become "not collected".
+            Message.Error($"Could not assemble the report: {e.Message}");
+            return;
+        }
         var drift = driftList ?? [];
         var scanSince = scan.FinishedAt ?? scan.StartedAt;
 
@@ -2237,6 +2341,8 @@
             sb.AppendLine($"- [{d.Status}] {d.ResourceId}: {d.ChangedAt.UtcDateTime:yyyy-MM-dd HH:mm} UTC by {(string.IsNullOrEmpty(d.ChangedBy) ? "unknown actor" : d.ChangedBy)}");
         if (drift.Count == 0) sb.AppendLine(driftError is null ? "- none recorded" : $"- not evaluated: {driftError}");
         sb.AppendLine();
+        AppendGovernanceMarkdown(sb, governance, governanceSources);
+        sb.AppendLine();
         sb.AppendLine("Spend figures are not part of this snapshot report - the drawer's Cost tab queries Cost Management on demand and prints source, window, currency and as-of with its numbers.");
 
         try
@@ -2258,10 +2364,32 @@
         catch (Exception e) { Message.Error($"Could not write the report: {e.Message}"); }
     }
 
+    // Wave B3: the same per-source states as report.html (GovernanceStatus), so a source that was
+    // not requested, failed, stopped early or predates governance never reads as "none found".
+    private static void AppendGovernanceMarkdown(System.Text.StringBuilder sb,
+        IReadOnlyList<GovernanceFinding>? governance, IReadOnlyDictionary<string, SourceState>? sources)
+    {
+        var findings = GovernanceStatus.Ordered(governance ?? []);
+        sb.AppendLine($"## Governance findings ({(governance is null ? "not collected" : findings.Count.ToString(System.Globalization.CultureInfo.InvariantCulture))})");
+        foreach (var source in GovernanceSources.All)
+            sb.AppendLine($"- {GovernanceStatus.Label(source)}: {GovernanceStatus.Line(sources, source, findings.Count(f => GovernanceStatus.KeyOf(f.Source) == source))}");
+        foreach (var f in findings)
+            sb.AppendLine($"- [{f.Severity}] {GovernanceStatus.Label(GovernanceStatus.KeyOf(f.Source))} {f.ResourceId} ({f.Category}): {f.Title}{(string.IsNullOrWhiteSpace(f.Detail) ? "" : " - " + f.Detail)}");
+        if (sources is null)
+            return;
+        var states = GovernanceSources.All.Select(s => sources.TryGetValue(s, out var state) ? state.State : null).ToList();
+        if (states.All(s => s == SourceState.NotRequested))
+            return;
+        if (findings.Count == 0 && states.Contains(SourceState.Collected))
+            sb.AppendLine("- no governance findings in the collected sources");
+        foreach (var cav in GovernanceCaveats.All) sb.AppendLine($"  caveat: {cav}");
+    }
+
     // v2 9.6: the Markdown report and the bundle share one collector - same sources, same
     // fail-soft notes - so the two artifacts can never disagree about what was measured.
     private async Task<(IReadOnlyList<InventoryItem> Items, IReadOnlyList<ExposureFinding> Exposure,
-        ManagementAudit Audit, IReadOnlyList<LiveDriftItem>? Drift, string PolicyNote, string? DriftError)>
+        ManagementAudit Audit, IReadOnlyList<LiveDriftItem>? Drift, string PolicyNote, string? DriftError,
+        IReadOnlyList<GovernanceFinding>? Governance, IReadOnlyDictionary<string, SourceState>? GovernanceSources)>
         CollectReportSectionsAsync(ScanRecord scan)
     {
         var items = reportItems;
@@ -2287,7 +2415,12 @@
         string? driftError = null;
         try { drift = await Feed.DriftSinceScanAsync(scan.Id, scanSince); }
         catch (Exception e) { driftError = e.Message; }
-        return (items, exposure, audit, drift, policyNote, driftError);
+        // Both null = not collected (the scan predates governance); otherwise the stored findings
+        // with the manifest's state per source, read together.
+        var (findings, _, manifest) = await GovernanceOfAsync(scan.Id, scan.ManifestJson);
+        var governanceSources = manifest?.Sources;
+        return (items, exposure, audit, drift, policyNote, driftError,
+            governanceSources is null ? null : findings, governanceSources);
     }
 
     // v2 9.6 closer: the same governance payload as report.html + report.json +
@@ -2300,7 +2433,7 @@
             return;
         try
         {
-            var (items, exposure, audit, driftList, _, _) = await CollectReportSectionsAsync(scan);
+            var (items, exposure, audit, driftList, _, _, governance, governanceSources) = await CollectReportSectionsAsync(scan);
             IReadOnlyList<SpendBucket>? spendBuckets = null;
             SpendProvenance? spendProvenance = null;
             var spendOk = costResults.Where(c => c.Result is not null).ToList();
@@ -2320,7 +2453,11 @@
                 Drift: driftList,
                 SpendByServiceFamily: spendBuckets,
                 SpendProvenance: spendProvenance,
-                TopologySvg: TopologySvgWriter.Render(items));
+                TopologySvg: TopologySvgWriter.Render(items))
+            {
+                Governance = governance,
+                GovernanceSources = governanceSources,
+            };
             var files = ReportBundle.Build(model);
             var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads",
                 $"ads-report-{SafeScanId(scan.Id)}");

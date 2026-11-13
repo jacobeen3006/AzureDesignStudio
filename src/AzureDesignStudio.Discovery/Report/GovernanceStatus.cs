@@ -1,0 +1,89 @@
+using System.Globalization;
+using AzureDesignStudio.Discovery.Governance;
+using AzureDesignStudio.Discovery.Scan;
+
+namespace AzureDesignStudio.Discovery.Report;
+
+/// <summary>
+/// The words for how far one governance source got in a scan (Wave B3), shared by the scan
+/// drawer, the Markdown report and report.html so the three never disagree. <c>sources</c> is
+/// the scan manifest's <see cref="ScanManifest.Sources"/>: null means the scan predates
+/// governance collection ("not collected"), which never reads as zero findings; a source the
+/// manifest does not mention is "unknown". <c>findings</c> is how many findings of that source
+/// the caller shows.
+/// </summary>
+public static class GovernanceStatus
+{
+    /// <summary>The display name of a <see cref="GovernanceSources"/> key.</summary>
+    public static string Label(string source) => source.ToLowerInvariant() switch
+    {
+        GovernanceSources.Advisor => "Advisor",
+        GovernanceSources.Policy => "Policy",
+        GovernanceSources.Defender => "Defender",
+        _ => source,
+    };
+
+    /// <summary>One status line, e.g. "Collected: 42 findings" or "Unavailable: {reason}".</summary>
+    public static string Line(IReadOnlyDictionary<string, SourceState>? sources, string source, int findings)
+    {
+        if (sources is null)
+            return "Not collected: this scan predates governance collection";
+        if (!sources.TryGetValue(source, out var state))
+            return "Unknown: the scan manifest does not mention this source";
+
+        return state.State switch
+        {
+            SourceState.Collected => $"Collected: {Findings(findings)}",
+            SourceState.Incomplete => "Incomplete: the scan stopped before this source finished"
+                + (string.IsNullOrWhiteSpace(state.Detail) ? "" : "; " + state.Detail),
+            SourceState.Unavailable => "Unavailable: " + (string.IsNullOrWhiteSpace(state.Detail) ? "no reason was recorded" : state.Detail),
+            SourceState.NotRequested => "Not requested for this scan",
+            _ => $"Unknown: the scan recorded the state '{state.State}'",
+        };
+    }
+
+    /// <summary>The short form for a summary table: the count when collected, else the state
+    /// ("incomplete (3 stored)", "unavailable", "not requested", "not collected", "unknown").</summary>
+    public static string Brief(IReadOnlyDictionary<string, SourceState>? sources, string source, int findings)
+    {
+        if (sources is null)
+            return "not collected";
+        if (!sources.TryGetValue(source, out var state))
+            return "unknown";
+
+        var stored = findings > 0 ? $" ({findings.ToString(CultureInfo.InvariantCulture)} stored)" : "";
+        return state.State switch
+        {
+            SourceState.Collected => findings.ToString(CultureInfo.InvariantCulture),
+            SourceState.Incomplete => "incomplete" + stored,
+            SourceState.Unavailable => "unavailable" + stored,
+            SourceState.NotRequested => "not requested",
+            _ => "unknown",
+        };
+    }
+
+    /// <summary>The stored source key (<see cref="GovernanceSources"/>) of a finding's source.</summary>
+    public static string KeyOf(GovernanceSource source) => source switch
+    {
+        GovernanceSource.Advisor => GovernanceSources.Advisor,
+        GovernanceSource.Policy => GovernanceSources.Policy,
+        GovernanceSource.Defender => GovernanceSources.Defender,
+        _ => source.ToString().ToLowerInvariant(),
+    };
+
+    /// <summary>Most severe first, then resource id (case-insensitive), source, title and record
+    /// id - the order every surface lists findings in, whatever order they were stored in.</summary>
+    public static IReadOnlyList<GovernanceFinding> Ordered(IEnumerable<GovernanceFinding> findings) =>
+        findings
+            .Where(f => f is not null)
+            .OrderByDescending(f => f.Severity)
+            .ThenBy(f => f.ResourceId, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(f => f.Source)
+            .ThenBy(f => f.Title, StringComparer.Ordinal)
+            .ThenBy(f => f.ResourceId, StringComparer.Ordinal)
+            .ThenBy(f => f.RecordId, StringComparer.Ordinal)
+            .ToList();
+
+    private static string Findings(int n) =>
+        n.ToString(CultureInfo.InvariantCulture) + (n == 1 ? " finding" : " findings");
+}

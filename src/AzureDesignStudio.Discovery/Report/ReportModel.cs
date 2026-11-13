@@ -1,6 +1,8 @@
 using AzureDesignStudio.Discovery.Cost;
 using AzureDesignStudio.Discovery.Drift;
 using AzureDesignStudio.Discovery.Exposure;
+using AzureDesignStudio.Discovery.Governance;
+using AzureDesignStudio.Discovery.Scan;
 using AzureDesignStudio.Discovery.Unmanaged;
 
 namespace AzureDesignStudio.Discovery.Report;
@@ -21,6 +23,16 @@ public sealed record ReportModel(
     SpendProvenance? SpendProvenance,
     string? TopologySvg)
 {
+    /// <summary>The governance findings stored with the scan (Wave B3), read together with
+    /// <see cref="GovernanceSources"/>. Both null = not collected: the scan predates governance
+    /// collection, which the report says instead of showing zero findings.</summary>
+    public IReadOnlyList<GovernanceFinding>? Governance { get; init; }
+
+    /// <summary>The state of each governance source from the scan manifest, keyed by
+    /// <see cref="AzureDesignStudio.Discovery.Governance.GovernanceSources"/> name (case-insensitive);
+    /// null = not collected.</summary>
+    public IReadOnlyDictionary<string, SourceState>? GovernanceSources { get; init; }
+
     public int ExposureCount => Exposure?.Count ?? 0;
 
     public int UnmanagedCount => Unmanaged?.Unmanaged.Count ?? 0;

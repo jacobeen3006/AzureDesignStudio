@@ -1,0 +1,206 @@
+@using AntDesign
+@using AzureDesignStudio.Discovery.Governance
+@using AzureDesignStudio.Discovery.Report
+@using AzureDesignStudio.Discovery.Scan
+
+@* Governance findings of one scan (Wave B3): the state of each source first, so "collected,
+   none found" never looks like a source that was not requested, failed, stopped early or
+   predates governance collection; then the findings by resource, the Defender plan tiers and
+   the caveats. Read-only: the drawer owns scan selection and loading. *@
+
+<div style="font-size:13px;">
+    @foreach (var source in GovernanceSources.All)
+    {
+        <div style="padding:2px 0;">
+            <Tag Color="@StateColor(source)">@GovernanceStatus.Label(source)</Tag>
+            <span>@GovernanceStatus.Line(Sources, source, CountOf(source))</span>
+        </div>
+    }
+</div>
+
+@if (Findings.Count > 0)
+{
+    <div style="display:flex;gap:6px;align-items:center;margin:8px 0;flex-wrap:wrap;">
+        <select @bind="sourceFilter" @bind:after="ResetPaging">
+            <option value="">all sources</option>
+            @foreach (var source in GovernanceSources.All)
+            {
+                <option value="@source">@GovernanceStatus.Label(source) (@CountOf(source))</option>
+            }
+        </select>
+        <select @bind="severityFilter" @bind:after="ResetPaging">
+            <option value="">all severities</option>
+            @foreach (var severity in Severities)
+            {
+                <option value="@severity">@severity</option>
+            }
+        </select>
+        @foreach (var severity in Severities)
+        {
+            <Tag Color="@SeverityColor(severity)">@BySource().Count(f => f.Severity == severity) @severity</Tag>
+        }
+    </div>
+}
+
+@{
+    var groups = Groups();
+}
+@if (groups.Count == 0)
+{
+    <div style="margin:8px 0;color:var(--ads-text-muted);">@EmptyText()</div>
+}
+@foreach (var group in groups.Take(shownGroups))
+{
+    <div style="border-bottom:1px solid #fafafa;padding:4px 0;font-size:13px;">
+        <div title="@group.ResourceId">
+            <b>@NameOf(group.ResourceId)</b>
+            <span style="color:var(--ads-text-muted);">@(group.Findings.Count == 1 ? "1 finding" : $"{group.Findings.Count} findings")</span>
+        </div>
+        @foreach (var f in group.Findings)
+        {
+            <div style="margin-left:12px;padding:2px 0;">
+                <Tag Color="@SeverityColor(f.Severity)">@f.Severity</Tag>
+                <span style="color:var(--ads-text-muted);">@GovernanceStatus.Label(GovernanceStatus.KeyOf(f.Source))@(f.Category.Length > 0 ? " · " + f.Category : "")</span>
+                <span>@f.Title</span>
+                @if (f.Detail is { Length: > 0 } detail)
+                {
+                    <div style="color:var(--ads-text-muted);">@detail</div>
+                }
+                @if (f.PolicyAssignmentId is { Length: > 0 } assignment)
+                {
+                    <div style="font-size:12px;color:var(--ads-text-muted);word-break:break-all;">assignment @assignment</div>
+                }
+            </div>
+        }
+    </div>
+}
+@if (groups.Count > shownGroups)
+{
+    <div style="margin:6px 0;">
+        <Button Size="ButtonSize.Small" OnClick="@(() => shownGroups += PageSize)">
+            Show more (@(groups.Count - shownGroups) more resources)
+        </Button>
+    </div>
+}
+
+<h4 style="margin-top:12px;">Defender plans</h4>
+@if (DefenderPlans is null)
+{
+    <div style="font-size:13px;color:var(--ads-text-muted);">Defender plans were not read for this scan.</div>
+}
+else if (DefenderPlans.Count == 0)
+{
+    <div style="font-size:13px;color:var(--ads-text-muted);">Resource Graph listed no Defender plans for the scanned subscriptions.</div>
+}
+else
+{
+    <table style="width:100%;font-size:13px;">
+        @foreach (var plan in DefenderPlans)
+        {
+            <tr>
+                <td style="color:var(--ads-text-muted);">@plan.SubscriptionId</td>
+                <td>@plan.Plan</td>
+                <td><Tag Color="@(plan.Tier == "Standard" ? "green" : "default")">@plan.Tier</Tag></td>
+            </tr>
+        }
+    </table>
+}
+
+@if (Caveats.Count > 0)
+{
+    <ul style="margin:8px 0 0 18px;font-size:12px;color:var(--ads-text-muted);">
+        @foreach (var caveat in Caveats)
+        {
+            <li>@caveat</li>
+        }
+    </ul>
+}
+
+@code {
+    /// <summary>The scan's governance findings, any order.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<GovernanceFinding> Findings { get; set; } = [];
+
+    /// <summary>The manifest's state per source; null = the scan predates governance collection.</summary>
+    [Parameter] public IReadOnlyDictionary<string, SourceState>? Sources { get; set; }
+
+    /// <summary>The Defender plan tiers; null when the scan did not read them.</summary>
+    [Parameter] public IReadOnlyList<DefenderPlan>? DefenderPlans { get; set; }
+
+    [Parameter] public IReadOnlyList<string> Caveats { get; set; } = [];
+
+    private const int PageSize = 100;
+    private static readonly GovernanceSeverity[] Severities = [GovernanceSeverity.High, GovernanceSeverity.Medium, GovernanceSeverity.Low];
+
+    private sealed record ResourceGroup(string ResourceId, IReadOnlyList<GovernanceFinding> Findings);
+
+    private string sourceFilter = "";
+    private string severityFilter = "";
+    private int shownGroups = PageSize;
+    private IReadOnlyList<GovernanceFinding>? lastFindings;
+
+    protected override void OnParametersSet()
+    {
+        // A different scan starts at the first page again.
+        if (!ReferenceEquals(lastFindings, Findings))
+        {
+            lastFindings = Findings;
+            shownGroups = PageSize;
+        }
+    }
+
+    private void ResetPaging() => shownGroups = PageSize;
+
+    private int CountOf(string source) => Findings.Count(f => GovernanceStatus.KeyOf(f.Source) == source);
+
+    private IEnumerable<GovernanceFinding> BySource() =>
+        Findings.Where(f => sourceFilter.Length == 0 || GovernanceStatus.KeyOf(f.Source) == sourceFilter);
+
+    // One group per resource (ARM ids compare case-insensitively): the most severe resource first,
+    // its findings in the shared order (most severe first).
+    private List<ResourceGroup> Groups() =>
+        GovernanceStatus.Ordered(BySource()
+                .Where(f => severityFilter.Length == 0 || f.Severity.ToString() == severityFilter))
+            .GroupBy(f => f.ResourceId, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new ResourceGroup(g.First().ResourceId, g.ToList()))
+            .ToList();
+
+    private string EmptyText()
+    {
+        if (Findings.Count > 0)
+            return "No findings match these filters.";
+        if (Sources is null)
+            return "Governance findings were not collected for this scan.";
+
+        IReadOnlyList<string> inScope = sourceFilter.Length == 0 ? GovernanceSources.All : [sourceFilter];
+        var states = inScope.Select(s => Sources.TryGetValue(s, out var state) ? state.State : null).ToList();
+        if (states.All(s => s == SourceState.NotRequested))
+            return "Governance findings were not requested for this scan.";
+        return states.All(s => s is SourceState.Collected or SourceState.NotRequested)
+            ? "No governance findings in the collected sources."
+            : "No findings stored. A source that was not collected in full is not proof of none.";
+    }
+
+    private string StateColor(string source) =>
+        Sources is null || !Sources.TryGetValue(source, out var state)
+            ? "default"
+            : state.State switch
+            {
+                SourceState.Collected => "green",
+                SourceState.Incomplete => "orange",
+                SourceState.Unavailable => "red",
+                _ => "default",
+            };
+
+    private static string SeverityColor(GovernanceSeverity severity) => severity switch
+    {
+        GovernanceSeverity.High => "red",
+        GovernanceSeverity.Medium => "orange",
+        _ => "blue",
+    };
+
+    private static string NameOf(string id)
+    {
+        var trimmed = id.TrimEnd('/');
+        return trimmed.Contains('/') ? trimmed[(trimmed.LastIndexOf('/') + 1)..] : trimmed;
+    }
+}

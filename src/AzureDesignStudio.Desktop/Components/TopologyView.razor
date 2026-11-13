@@ -1,13 +1,16 @@
 @using System.Net
 @using System.Text.Json
 @using AzureDesignStudio.Discovery.Analysis
+@using AzureDesignStudio.Discovery.Governance
 @using AzureDesignStudio.Discovery.Inventory
+@using AzureDesignStudio.Discovery.Report
 @using AzureDesignStudio.Workspace
 @using AntDesign
 
 @* Read-only topology (plan 8.3): derives the graph from scan snapshots, draws canonical
    nested frames, persists drag positions by ARM id, inspects the selected resource.
-   Drag works in svg units: css size = layout size x scale, so 1 unit = scale px. *@
+   Drag works in svg units: css size = layout size x scale, so 1 unit = scale px.
+   Governance findings (Wave B3) badge a node in its left gutter, coloured by the most severe. *@
 
 @if (layout is null)
 {
@@ -81,6 +84,10 @@ else
                                   fill="@(n.Node.External ? "#f5f5f5" : "#ffffff")"
                                   stroke="@stroke" stroke-width="1.4"
                                   stroke-dasharray="@(n.Node.External ? "5 3" : null)" />
+                            @if (badges.TryGetValue(n.Node.Id, out var badge))
+                            {
+                                @((MarkupString)Badge(x, y, badge))
+                            }
                             @((MarkupString)$"<text x=\"{N(x + 38)}\" y=\"{N(y + 21)}\" font-size=\"12.5\" font-weight=\"600\" fill=\"#222\">{Enc(Short(n.Node.Name, 21))}</text>")
                             @((MarkupString)$"<text x=\"{N(x + 38)}\" y=\"{N(y + 38)}\" font-size=\"10.5\" fill=\"#888\">{Enc(Short(n.Node.Type, 28))}</text>")
                         </g>
@@ -148,6 +155,23 @@ else
                 {
                     <div style="color:#999;font-size:12px;">No derived connections.</div>
                 }
+
+                @if (findingsById.TryGetValue(node.Id, out var nodeFindings))
+                {
+                    <h5 style="margin:8px 0 2px;">Governance findings (@nodeFindings.Count)</h5>
+                    @foreach (var f in nodeFindings)
+                    {
+                        <div style="font-size:12px;border-bottom:1px solid #fafafa;padding:2px 0;">
+                            <Tag Color="@SeverityTag(f.Severity)">@f.Severity</Tag>
+                            <span style="color:#999;">@GovernanceStatus.Label(GovernanceStatus.KeyOf(f.Source))@(f.Category.Length > 0 ? " · " + f.Category : "")</span>
+                            <div>@f.Title</div>
+                            @if (f.Detail is { Length: > 0 } detail)
+                            {
+                                <div style="color:#999;">@detail</div>
+                            }
+                        </div>
+                    }
+                }
             </div>
         }
     </div>
@@ -158,6 +182,8 @@ else
     [Parameter, EditorRequired] public TopologyPositions Positions { get; set; } = null!;
     /// <summary>Ids that changed or appeared since the previous scan (8.4 rescan diff).</summary>
     [Parameter] public IReadOnlySet<string>? ChangedIds { get; set; }
+    /// <summary>Governance findings of the scan by ARM id (case-insensitive keys); null = none to show.</summary>
+    [Parameter] public IReadOnlyDictionary<string, IReadOnlyList<GovernanceFinding>>? Findings { get; set; }
 
     private const double NodeW = TopologyLayout.NodeW, NodeH = TopologyLayout.NodeH;
 
@@ -177,7 +203,34 @@ else
     private IReadOnlyList<string> providers = [];
     private int visibleEdgeCount;
 
-    protected override Task OnParametersSetAsync() => RebuildAsync();
+    // Per node: its findings (most severe first) and the badge's count and top severity.
+    private Dictionary<string, IReadOnlyList<GovernanceFinding>> findingsById = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, (int Count, GovernanceSeverity Top)> badges = new(StringComparer.OrdinalIgnoreCase);
+
+    protected override Task OnParametersSetAsync()
+    {
+        IndexFindings();
+        return RebuildAsync();
+    }
+
+    // Keys are folded case-insensitively here as well: a caller's dictionary with keys that differ
+    // only in case would otherwise badge one copy of the node and miss the rest.
+    private void IndexFindings()
+    {
+        var merged = new Dictionary<string, List<GovernanceFinding>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (id, list) in Findings ?? new Dictionary<string, IReadOnlyList<GovernanceFinding>>())
+        {
+            if (list is not { Count: > 0 })
+                continue;
+            if (!merged.TryGetValue(id, out var into))
+                merged[id] = into = [];
+            into.AddRange(list);
+        }
+
+        findingsById = merged.ToDictionary(kv => kv.Key, kv => GovernanceStatus.Ordered(kv.Value), StringComparer.OrdinalIgnoreCase);
+        badges = findingsById.Where(kv => kv.Value.Count > 0)
+            .ToDictionary(kv => kv.Key, kv => (kv.Value.Count, kv.Value.Max(f => f.Severity)), StringComparer.OrdinalIgnoreCase);
+    }
 
     private async Task RebuildAsync()
     {
@@ -298,6 +351,30 @@ else
         p = PosOr(n);
         return true;
     }
+
+    // The badge sits in the node's empty left gutter (text starts at x + 38).
+    private static string Badge(double x, double y, (int Count, GovernanceSeverity Top) badge)
+    {
+        var count = badge.Count > 99 ? "99+" : badge.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var tip = $"{badge.Count} governance finding{(badge.Count == 1 ? "" : "s")}, most severe {badge.Top}";
+        return $"<g><title>{Enc(tip)}</title>"
+            + $"<circle cx=\"{N(x + 19)}\" cy=\"{N(y + NodeH / 2)}\" r=\"11\" fill=\"{SeverityFill(badge.Top)}\" />"
+            + $"<text x=\"{N(x + 19)}\" y=\"{N(y + NodeH / 2 + 3.5)}\" font-size=\"{(count.Length > 2 ? "8.5" : "10.5")}\" font-weight=\"700\" fill=\"#fff\" text-anchor=\"middle\">{Enc(count)}</text></g>";
+    }
+
+    private static string SeverityFill(GovernanceSeverity severity) => severity switch
+    {
+        GovernanceSeverity.High => "#cf1322",
+        GovernanceSeverity.Medium => "#d46b08",
+        _ => "#1677ff",
+    };
+
+    private static string SeverityTag(GovernanceSeverity severity) => severity switch
+    {
+        GovernanceSeverity.High => "red",
+        GovernanceSeverity.Medium => "orange",
+        _ => "blue",
+    };
 
     private string Outline(string id) =>
         ChangedIds?.Contains(id) == true ? "#fa8c16" : "#d9d9d9";
