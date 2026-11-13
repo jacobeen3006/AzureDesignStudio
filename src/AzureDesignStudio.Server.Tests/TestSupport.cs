@@ -1,7 +1,8 @@
 using System.Net;
 using System.Security.Claims;
-using AzureDesignStudio.Server.Models;
+using AzureDesignStudio.Services.Models;
 using AzureDesignStudio.Server.Services;
+using AzureDesignStudio.Services;
 using Grpc.Core;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -10,8 +11,8 @@ namespace AzureDesignStudio.Server.Tests;
 
 /// <summary>
 /// A <see cref="ServerCallContext"/> for calling a gRPC service class directly. The services
-/// read the caller from <c>context.GetHttpContext().User</c>; outside a real request that
-/// extension looks the HttpContext up in <c>UserState["__HttpContext"]</c>.
+/// read the caller from <c>UserState[ServiceTools.UserStateKey]</c>, where the server's
+/// interceptor (or the desktop's in-process invoker) puts it.
 /// </summary>
 internal sealed class TestServerCallContext : ServerCallContext
 {
@@ -22,7 +23,7 @@ internal sealed class TestServerCallContext : ServerCallContext
     private readonly Metadata _responseTrailers = [];
 
     private TestServerCallContext(ClaimsPrincipal user) =>
-        _userState["__HttpContext"] = new DefaultHttpContext { User = user };
+        _userState[AzureDesignStudio.Services.ServiceTools.UserStateKey] = user;
 
     /// <summary>A signed-in caller with the object id claim as Microsoft.Identity.Web maps it.</summary>
     public static ServerCallContext ForUser(Guid userId, string? displayName = null)
@@ -60,8 +61,8 @@ internal sealed class TestServerCallContext : ServerCallContext
 internal static class TestData
 {
     /// <summary>A private in-memory database - the provider the server itself runs on in Debug.</summary>
-    public static DesignDbContext NewDb() =>
-        new(new DbContextOptionsBuilder<DesignDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+    public static DesignDbContext NewDb(string? name = null) =>
+        new(new DbContextOptionsBuilder<DesignDbContext>().UseInMemoryDatabase(name ?? Guid.NewGuid().ToString()).Options);
 }
 
 /// <summary>Stands in for Key Vault: reversible, and able to fail the two ways the real one does.</summary>

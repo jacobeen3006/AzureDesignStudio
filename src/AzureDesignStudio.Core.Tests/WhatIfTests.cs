@@ -335,7 +335,7 @@ public class WhatIfTests
         var client = new WhatIfClient(new ArmTransport(new HttpClient(handler), new FakeCredential(),
             ArmEndpointSet.AzureCloud, (_, _) => Task.CompletedTask));
 
-        var summary = await client.WhatIfAsync("sub-1", "rg1", "westeurope", """{"resources":[]}""", """{"p":{"value":1}}""");
+        var summary = await client.WhatIfAsync("sub-1", "rg1", """{"resources":[]}""", """{"p":{"value":1}}""");
 
         Assert.Equal(1, summary.Creates);
         Assert.Contains("/subscriptions/sub-1/resourcegroups/rg1/providers/Microsoft.Resources/deployments/ads-deployment/whatIf", handler.Uris[0]);
@@ -343,7 +343,8 @@ public class WhatIfTests
         Assert.Equal("https://management.azure.com/whatifop/123?api-version=2025-04-01", handler.Uris[1]);
 
         using var body = JsonDocument.Parse(handler.Bodies[0]!);
-        Assert.Equal("westeurope", body.RootElement.GetProperty("location").GetString());
+        // ARM rejects a location at resource-group scope ("The 'location' property is not allowed").
+        Assert.False(body.RootElement.TryGetProperty("location", out _));
         Assert.Equal("Incremental", body.RootElement.GetProperty("properties").GetProperty("mode").GetString());
         Assert.Equal("resources", body.RootElement.GetProperty("properties").GetProperty("template").EnumerateObject().First().Name);
         Assert.Equal(1, body.RootElement.GetProperty("properties").GetProperty("parameters").GetProperty("p").GetProperty("value").GetInt32());
@@ -375,7 +376,7 @@ public class WhatIfTests
             ArmEndpointSet.AzureCloud, (_, _) => Task.CompletedTask));
 
         var ex = await Assert.ThrowsAsync<ResourceGraphException>(
-            () => client.WhatIfAsync("sub", "rg", "westeurope", """{"resources":[]}""", "{}"));
+            () => client.WhatIfAsync("sub", "rg", """{"resources":[]}""", "{}"));
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Contains("InvalidTemplateDeployment", ex.Code);
@@ -395,6 +396,21 @@ public class WhatIfTests
         Assert.Contains("api-version=2025-04-01", handler.Uris[0]);
         using var body = JsonDocument.Parse(handler.Bodies[0]!);
         Assert.Equal("westeurope", body.RootElement.GetProperty("location").GetString());
+    }
+
+    [Fact]
+    public async Task Client_ResourceGroupTarget_SendsNoLocation()
+    {
+        const string finalJson = """{"status":"Succeeded","properties":{"changes":[]}}""";
+        var handler = new FakeHandler((_, _) => Json(finalJson));
+        var client = new WhatIfClient(new ArmTransport(new HttpClient(handler), new FakeCredential(),
+            ArmEndpointSet.AzureCloud, (_, _) => Task.CompletedTask));
+
+        await client.WhatIfAsync(DeployTargetScope.ResourceGroupScope("sub-1", "rg1"), "westeurope", """{"resources":[]}""", "{}");
+
+        Assert.Contains("/subscriptions/sub-1/resourceGroups/rg1/providers/Microsoft.Resources/deployments/ads-deployment/whatIf", handler.Uris[0], StringComparison.OrdinalIgnoreCase);
+        using var body = JsonDocument.Parse(handler.Bodies[0]!);
+        Assert.False(body.RootElement.TryGetProperty("location", out _));
     }
 
     [Fact]

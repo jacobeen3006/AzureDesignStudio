@@ -6,7 +6,7 @@
     "skuNormalize": "vm",
     "meterHint": "",
     "unitPolicy": "hourly",
-    "defaultSku": "Standard_D2s_v3",
+    "defaultSku": "Standard_D2s_v6",
     "excludeProductContains": ["Windows", "Spot", "Low Priority"]
   },
   {

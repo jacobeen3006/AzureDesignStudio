@@ -6,7 +6,7 @@
 
 ## OVERVIEW
 
-Azure Design Studio — Blazor app for visual Azure architecture design, hosted as WASM (Entra ID work+personal accounts) and MAUI Blazor Hybrid desktop (Windows). Diagramming, validation, ARM/Bicep IaC generation, export. .NET 10, 12 projects in src/. Microsoft Global Hackathon 2022 winner.
+Azure Design Studio — Blazor app for visual Azure architecture design. The primary target is the standalone MAUI Blazor Hybrid desktop app (Windows now, macOS via Mac Catalyst later): it runs every service in-process and needs no server. The WASM client + gRPC server keep building and tested but get no new work. Diagramming, validation, ARM/Bicep IaC generation, What-If, deploy, export. .NET 10, 13 projects in src/. Microsoft Global Hackathon 2022 winner.
 
 ## STRUCTURE
 
@@ -19,9 +19,12 @@ AzureDesignStudio/
 │   │   ├── Services/AdsContext.cs      # Diagram state + stencil loading
 │   │   ├── Models/                     # Client-side models (StencilModel, etc.)
 │   │   └── Shared/                     # MainLayout, RedirectToLogin
-│   ├── AzureDesignStudio.Server/       # ASP.NET Core gRPC host
-│   │   ├── Services/                   # DesignService, DeployService, CryptoService
+│   ├── AzureDesignStudio.Services/     # Host-neutral service implementations (no ASP.NET Core - Mac Catalyst has none)
+│   │   ├── DesignService, DeployService, RetailPriceService, LocalDesignService
 │   │   ├── Models/                     # EF Core: DesignDbContext, DesignModel
+│   │   └── InProcess/                  # InProcessCallInvoker: generated gRPC clients call services in-process
+│   ├── AzureDesignStudio.Server/       # ASP.NET Core gRPC host: thin [Authorize] Hosted* subclasses + CallerInterceptor
+│   │   ├── Services/                   # HostedServices.cs, CryptoService (Key Vault)
 │   │   ├── Utils/                      # AdsTelemetryInitializer
 │   │   └── Dockerfile                  # .NET 10.0 multi-stage build
 │   ├── AzureDesignStudio.Core/         # Shared components + domain models
@@ -40,7 +43,7 @@ AzureDesignStudio/
 │   ├── AzureDesignStudio.Workspace/    # SQLite workspace (EF Core): designs/scans/snapshots/cost cache/plans/audit
 │   ├── AzureDesignStudio.Discovery/    # Tenant analysis engines: scans/drift, exposure, guardrails, decommission planner/runbook, MCP tool engine
 │   ├── AzureDesignStudio.Mcp/          # Stdio MCP server: 13 read-only tools over the workspace (plan-only decom; never mutates)
-│   └── AzureDesignStudio.Desktop/      # MAUI BlazorWebView host (reuses App.razor)
+│   └── AzureDesignStudio.Desktop/      # MAUI BlazorWebView host (reuses App.razor); runs Services in-process, no server
 ├── .github/workflows/                  # build.yml (build+test+CodeQL), publish.yml (tag v*: WASM zip, Docker, MSIX), codeql-analysis.yml
 └── assets/ docs/                       # Screenshots, documentation
 ```
@@ -51,7 +54,7 @@ AzureDesignStudio/
 |------|----------|-------|
 | Add new resource type | Core/`<service>`/ + AzureResources/`<service>`/ | Add ARM model in AzureResources, node + form in Core |
 | Add page/route | AzureDesignStudio/Pages/Index.razor | Single-page app; new content = new component drawer |
-| Add gRPC service | Server/Services/ + SharedModels/*.proto | Define proto, implement service, register in Server/Program.cs |
+| Add gRPC service | SharedModels/*.proto + Services/ + Server/Services/HostedServices.cs + Desktop/MauiProgram.cs | Implement in Services (caller via `ServiceTools.GetUser(context)`, never `GetHttpContext()`); add an `[Authorize]` Hosted* subclass + `MapGrpcService` in Server; `InProcessCallInvoker.Add<T>` in Desktop |
 | Add UI drawer/modal | AzureDesignStudio/Components/MenuDrawer/ | Follow existing drawer template pattern |
 | Modify diagram behavior | Core/Components/AzureNodeComponent.razor | Core renders diagram; WASM client hosts it |
 | Local persistence (offline) | AzureDesignStudio.Workspace/ | EF Core SQLite `workspace.db`; `SqliteDesignOfflineStore` = pending-design contract |
@@ -68,12 +71,14 @@ AzureDesignStudio/
 - **TFM**: `net10.0` (Desktop: `net10.0-windows10.0.19041.0`); SourceGeneration targets `netstandard2.0`
 - **Build authority**: `Directory.Build.props` owns repo-wide properties (MauiVersion pin, lock files, warnings, audit level); `Directory.Packages.props` owns every package version; each csproj declares only `Include=` on references; locked restore is a CI flag, not a repo property
 - **gRPC**: protobuf in SharedModels, clients via `Grpc.Net.ClientFactory`, server via `Grpc.AspNetCore`
-- **Auth**: Entra ID work+personal - MSAL redirect in WASM, native MSAL (WAM broker + device-code fallback) in Desktop, JWT + Microsoft.Identity.Web in Server; shared drawers use the `AdsHostAuth` host-override seam
+- **Auth**: Entra ID work+personal - MSAL redirect in WASM, native MSAL (WAM broker + device-code fallback) in Desktop, JWT + Microsoft.Identity.Web in Server; shared drawers use the `AdsHostAuth` host-override seam. Desktop identity (`DesktopIdentity`) = the MSAL account, else the Azure CLI token's claims (sign-out turns that fallback off)
+- **Caller identity**: services read the caller from `context.UserState[ServiceTools.UserStateKey]`; Server's `CallerInterceptor` and Desktop's `InProcessCallInvoker` put it there
+- **Azure credentials (deploy/what-if)**: a linked service principal for that subscription wins (secret in Key Vault on Server, Windows Credential Manager on Desktop); otherwise the host's `IAmbientAzureCredential` (Desktop: the signed-in user). A broken link answers 404 - it never silently falls back to the user
 - **Diagrams**: `Z.Blazor.Diagrams` 3.0.4.1 NuGet; fork-only APIs reimplemented in `AdsDiagram`/`AzurePort`/`VirtualNetworkPort`
 - **Source gen**: Roslyn incremental generator with Scriban templates
 - **ARM models**: `ResourceBase` → `ARMResourceBase` hierarchy, JSON serialization, `[GeneratedCode("ArmTypeGenerator")]`
 - **DI registration pattern**: `AdsBicepDecompiler` uses custom extension method pattern (`AddAdsBicepDecompiler()`)
-- **Testing**: xUnit — each test project independent. `Core.Tests` covers Core/Discovery/Workspace; `Server.Tests` calls the gRPC service classes directly with a fake `ServerCallContext` (the caller is `UserState["__HttpContext"].User`) and never reaches Azure; it also holds the tests of the client's gRPC wrappers (`DesignGrpcService`, `DeployGrpcService`), reached through the Server's reference to the client
+- **Testing**: xUnit — each test project independent. `Core.Tests` covers Core/Discovery/Workspace; `Server.Tests` calls the gRPC service classes directly with a fake `ServerCallContext` (the caller is `UserState[ServiceTools.UserStateKey]`) and never reaches Azure, and covers the in-process host (`InProcessTests`); it also holds the tests of the client's gRPC wrappers (`DesignGrpcService`, `DeployGrpcService`), reached through the Server's reference to the client
 
 ## ANTI-PATTERNS
 
@@ -88,7 +93,7 @@ AzureDesignStudio/
 ```bash
 dotnet build src/AzureDesignStudio.sln       # Full solution build (Windows)
 dotnet build src/AzureDesignStudio.Server -c Release -p:RunAOTCompilation=false && dotnet build src/AzureDesignStudio -c Release -p:RunAOTCompilation=false && dotnet build src/AzureDesignStudio.Mcp -c Release && dotnet build src/AzureDesignStudio.Core.Tests -c Release  # CI project set (Linux-safe; skips MAUI Desktop - ubuntu slnf parsing is broken in SDK 10.0.4xx and net10.0-windows cannot build there). Release enables WASM AOT, which needs the wasm-tools workload (NETSDK1147 without it) - hence the flag; the Docker build does the AOT build
-dotnet run --project src/AzureDesignStudio.Server  # dev server: URL endpoints (https://localhost:7203, http://localhost:5203; HTTP/1.1 + gRPC-Web for browsers) plus the Desktop loopback h2c listener http://localhost:5204 (Desktop `ServerUrl`). The h2c listener is Development-only unless `DesktopGrpc:Port` is set (0 = off)
+dotnet run --project src/AzureDesignStudio.Server  # dev server: URL endpoints (https://localhost:7203, http://localhost:5203; HTTP/1.1 + gRPC-Web for browsers) plus a loopback h2c listener http://localhost:5204, left over from when Desktop called the server (it no longer does). The h2c listener is Development-only unless `DesktopGrpc:Port` is set (0 = off)
 dotnet test src/AzureDesignStudio.Core.Tests --filter "Category!=LiveAzure"  # Offline tests
 dotnet test src/AzureDesignStudio.Server.Tests  # Server RPC tests (in Release add -p:RunAOTCompilation=false - it builds the Server, which hosts the WASM client)
 node --test src/AzureDesignStudio/JsTests/*.test.cjs  # Stencil drag state machine (ads.js) tests; kept out of wwwroot so they are not published
@@ -116,4 +121,7 @@ dotnet publish src/AzureDesignStudio.Desktop -c Release -f net10.0-windows10.0.1
 - PITFALL: the `wasm-tools` workload's `library-packs` copy of `Microsoft.NET.Sdk.WebAssembly.Pack` hashes differently on Windows, on Linux and on nuget.org, so a lock file written on one fails NU1403 on the others (Docker, Linux CI). The client sets `DisableImplicitLibraryPacksFolder=true` to always take nuget.org's. A machine whose NuGet cache already holds the workload copy must drop that one cache entry (`~/.nuget/packages/microsoft.net.sdk.webassembly.pack/<version>`) once
 - No client-side telemetry: the web client and the Desktop app (which loads the same `wwwroot/index.html`) send nothing. Server telemetry is `AddApplicationInsightsTelemetry()`, active only when `ApplicationInsights:ConnectionString` is configured. Do not put a key or a tracking snippet in `index.html`
 - gRPC reflection service only registered in DEBUG
+- Desktop storage (all under `FileSystem.AppDataDirectory`): `workspace.db` (designs, scans, snapshots...) and `deploy.db` (approvals, guardrails, linked subscriptions, audit; `EnsureCreated`). Designs are local (`AdsHostFeatures.DesignsAreLocal`): no quota, no sign-in needed to save
+- PITFALL: ARM rejects `location` on a resource-group-scoped deployment or what-if ("The 'location' property is not allowed"); send it only at subscription/management-group/tenant scope
+- Every generated `dependsOn` is `[resourceId('type', 'name', ...)]`; `ArmTemplateValidator` (the pre-deploy gate) resolves those by type+name. Resource identity is type+name - two types may share a name
 - Server behind ingress: `ForwardedHeaders` configured for XForwardedFor/XForwardedProto

@@ -215,9 +215,14 @@ namespace AzureDesignStudio.Core.Tests
             var errors = DesignValidator.Validate(all).Where(i => i.Severity == ValidationSeverity.Error).ToList();
             Assert.True(errors.Count == 0, "Validation errors: " + string.Join(" | ", errors.Select(e => e.Message)));
 
-            using var exported = JsonDocument.Parse(ExportTemplate(diagram));
+            var template = ExportTemplate(diagram);
+            using var exported = JsonDocument.Parse(template);
             Assert.True(exported.RootElement.GetProperty("resources").GetArrayLength() >= all.Count,
                 "Every item on the canvas should export at least one resource.");
+
+            // The same gate the deploy path runs before any Azure call (DeployService).
+            Assert.False(AzureDesignStudio.Discovery.Iac.ArmTemplateValidator.TryFindBlockingErrors(template, null, out var blocking),
+                "The pre-deploy check refuses the export: " + blocking);
         }
 
         [Theory]

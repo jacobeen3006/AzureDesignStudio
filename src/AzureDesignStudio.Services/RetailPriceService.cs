@@ -4,7 +4,7 @@ using Microsoft.Extensions.Caching.Memory;
 using System.Text;
 using System.Text.Json;
 
-namespace AzureDesignStudio.Server.Services
+namespace AzureDesignStudio.Services
 {
     /// <summary>
     /// Proxy for the Azure Retail Prices API (prices.azure.com, public OData, no auth).

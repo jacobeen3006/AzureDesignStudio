@@ -38,11 +38,65 @@ public class ArmTemplateValidatorTests
     {
         var text = Template(
             """{"name":"dup","type":"Microsoft.Storage/storageAccounts","apiVersion":"2023-01-01"},"""
-            + """{"name":"dup","type":"Microsoft.Network/virtualNetworks","apiVersion":"2023-01-01","dependsOn":["ghost"]}""");
+            + """{"name":"dup","type":"Microsoft.Storage/storageAccounts","apiVersion":"2023-01-01","dependsOn":["ghost"]}""");
 
         var diagnostics = ArmTemplateValidator.Validate(text);
         Assert.True(Has(diagnostics, "resource.duplicate"));
         Assert.True(Has(diagnostics, "dependency.unknown"));
+    }
+
+    [Fact]
+    public void SameNameWithDifferentTypes_IsNotADuplicate()
+    {
+        var text = Template(
+            """{"name":"app","type":"Microsoft.Storage/storageAccounts","apiVersion":"2023-01-01"},"""
+            + """{"name":"app","type":"Microsoft.Network/virtualNetworks","apiVersion":"2023-01-01"}""");
+
+        Assert.False(Has(ArmTemplateValidator.Validate(text), "resource.duplicate"));
+    }
+
+    // The generator writes every dependsOn as [resourceId(...)] (AzureNodeBase.ResourceId);
+    // these must resolve, or every exported template with a dependency is refused before deploy.
+    [Fact]
+    public void ResourceIdDependencies_ResolveByTypeAndName()
+    {
+        var text = Template(
+            """{"name":"vnet1","type":"Microsoft.Network/virtualNetworks","apiVersion":"2023-01-01"},"""
+            + """{"name":"vnet1/snet1","type":"Microsoft.Network/virtualNetworks/subnets","apiVersion":"2023-01-01","dependsOn":["[resourceId('Microsoft.Network/virtualNetworks', 'vnet1')]"]},"""
+            + """{"name":"pip1","type":"Microsoft.Network/publicIPAddresses","apiVersion":"2023-01-01"},"""
+            + """{"name":"agw1","type":"Microsoft.Network/applicationGateways","apiVersion":"2023-01-01","dependsOn":["[resourceId('Microsoft.Network/virtualNetworks/subnets', 'vnet1', 'snet1')]","[resourceId(subscription().subscriptionId, 'rg', 'Microsoft.Network/publicIPAddresses', 'pip1')]","pip1"]}""");
+
+        Assert.Empty(ArmTemplateValidator.Validate(text));
+    }
+
+    [Fact]
+    public void ResourceIdDependency_OnAMissingOrWronglyTypedResource_IsUnknown()
+    {
+        var text = Template(
+            """{"name":"vnet1","type":"Microsoft.Network/virtualNetworks","apiVersion":"2023-01-01"},"""
+            + """{"name":"vm1","type":"Microsoft.Compute/virtualMachines","apiVersion":"2023-01-01","dependsOn":["[resourceId('Microsoft.Network/networkInterfaces', 'vnet1')]"]}""");
+
+        Assert.True(Has(ArmTemplateValidator.Validate(text), "dependency.unknown"));
+    }
+
+    [Fact]
+    public void ComputedDependencies_AreLeftToArm()
+    {
+        var text = Template(
+            """{"name":"vm1","type":"Microsoft.Compute/virtualMachines","apiVersion":"2023-01-01","dependsOn":["[resourceId('Microsoft.Network/networkInterfaces', parameters('nic'))]"]}""",
+            parameters: """{ "nic": { "type": "string" } }""");
+
+        Assert.False(Has(ArmTemplateValidator.Validate(text), "dependency.unknown"));
+    }
+
+    [Fact]
+    public void CycleThroughResourceIdDependencies_IsFound()
+    {
+        var text = Template(
+            """{"name":"a","type":"Microsoft.Storage/storageAccounts","apiVersion":"2023-01-01","dependsOn":["[resourceId('Microsoft.Network/virtualNetworks', 'b')]"]},"""
+            + """{"name":"b","type":"Microsoft.Network/virtualNetworks","apiVersion":"2023-01-01","dependsOn":["[resourceId('Microsoft.Storage/storageAccounts', 'a')]"]}""");
+
+        Assert.Contains("a -> b -> a", ArmTemplateValidator.Validate(text).Single(d => d.Code == "dependency.cycle").Message);
     }
 
     [Fact]

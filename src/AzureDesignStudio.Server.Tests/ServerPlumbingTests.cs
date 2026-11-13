@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using AzureDesignStudio.Server.Services;
+using AzureDesignStudio.Services;
 using AzureDesignStudio.Server.Utils;
 using AzureDesignStudio.SharedModels.Protos;
 using Microsoft.Extensions.Caching.Memory;

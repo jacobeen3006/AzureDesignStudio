@@ -1,21 +1,33 @@
-using Grpc.Core;
+using System.Security.Claims;
 using System.Text.RegularExpressions;
+using Grpc.Core;
 
-namespace AzureDesignStudio.Server.Services
+namespace AzureDesignStudio.Services
 {
     public static class ServiceTools
     {
         private const string ObjectIdClaim = "http://schemas.microsoft.com/identity/claims/objectidentifier";
 
-        /// <summary>The caller's Entra object id, or null when the token carries none that
+        /// <summary>Where a host puts the caller of a call: the server's interceptor copies the
+        /// authenticated HttpContext user here, the desktop's in-process invoker the signed-in
+        /// user. The services read the caller from here only, so they need no web host.</summary>
+        public const string UserStateKey = "ads.user";
+
+        /// <summary>The caller of this call, or an anonymous principal when the host set none.</summary>
+        public static ClaimsPrincipal GetUser(ServerCallContext context) =>
+            context.UserState.TryGetValue(UserStateKey, out var user) && user is ClaimsPrincipal principal
+                ? principal
+                : new ClaimsPrincipal(new ClaimsIdentity());
+
+        /// <summary>The caller's Entra object id, or null when the call carries none that
         /// parses as a GUID. Every caller builds a <see cref="Guid"/> from the result, so a
         /// malformed claim has to read as "no identity" (401) here rather than surface as an
         /// unhandled <see cref="FormatException"/> in the RPC. The claim text is returned
         /// unchanged: stored approvals compare against it ordinally.</summary>
-        internal static string? GetUserId(ServerCallContext context) =>
-            GetUserId(context.GetHttpContext().User);
+        public static string? GetUserId(ServerCallContext context) =>
+            GetUserId(GetUser(context));
 
-        internal static string? GetUserId(System.Security.Claims.ClaimsPrincipal user)
+        public static string? GetUserId(ClaimsPrincipal user)
         {
             // "oid" is what arrives when inbound claim mapping is switched off.
             var value = user.FindFirst(ObjectIdClaim)?.Value ?? user.FindFirst("oid")?.Value;
@@ -24,10 +36,10 @@ namespace AzureDesignStudio.Server.Services
 
         /// <summary>A setting that holds a real value: not empty and not one of the
         /// "&lt;kv name&gt;" style placeholders the checked-in appsettings.json carries.</summary>
-        internal static bool IsConfigured(string? value) =>
+        public static bool IsConfigured(string? value) =>
             !string.IsNullOrWhiteSpace(value) && !value.Contains('<') && !value.Contains('>');
 
-        internal static bool IsValidName(string name)
+        public static bool IsValidName(string name)
         {
             Regex regex = new(@"^[a-zA-Z0-9\s]+$"); // Alphanumeric characters and whitespace
             if (string.IsNullOrWhiteSpace(name) || name.Length > 200 || !regex.IsMatch(name))
@@ -36,7 +48,7 @@ namespace AzureDesignStudio.Server.Services
             return true;
         }
 
-        internal static bool IsValidSubscriptionName(string subscriptionName)
+        public static bool IsValidSubscriptionName(string subscriptionName)
         {
             Regex regex = new(@"^[^<>;|]+$"); // Azure subscription name cannot have these characters: < > ; |
             if (string.IsNullOrWhiteSpace(subscriptionName) || subscriptionName.Length > 64

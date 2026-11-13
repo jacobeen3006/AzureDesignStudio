@@ -36,7 +36,40 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private DeploymentParameters _deployParams = null!;
         private Form<DeploymentParameters> _paramsForm = null!;
         private SubscriptionRes? _linkedSubscription = null;
+        private IList<SubscriptionRes> _subscriptions = [];
         private IList<string> _resourceGroupNames = [];
+
+        /// <summary>The subscription the deployment goes to. The form used to take the first
+        /// one in the list, with no way to choose; now every linked subscription and every one
+        /// the signed-in user can see (desktop) is offered. Changing it reloads the resource groups.</summary>
+        private string SelectedSubscriptionId
+        {
+            get => _linkedSubscription?.SubscriptionId ?? string.Empty;
+            set
+            {
+                var chosen = _subscriptions.FirstOrDefault(s => s.SubscriptionId == value);
+                if (chosen is null || ReferenceEquals(chosen, _linkedSubscription))
+                    return;
+                _linkedSubscription = chosen;
+                if (_deployParams is not null)
+                    _deployParams.ResourceGroup = null!;
+                _ = LoadResourceGroupsAsync();
+            }
+        }
+
+        private async Task LoadResourceGroupsAsync()
+        {
+            if (_linkedSubscription is null)
+                return;
+            _paramFormLoading = true;
+            StateHasChanged();
+            var names = await _deployService.GetResourceGroups(_linkedSubscription.SubscriptionId);
+            _resourceGroupNames = names ?? [];
+            _paramFormLoading = false;
+            if (names is null)
+                _messageService.Error("The resource groups could not be listed: the server is not reachable, or Azure refused the subscription's credential.");
+            StateHasChanged();
+        }
         private bool _paramFormLoading = true;
         private bool _showDeployStatus = false;
         private DeployStepStatus _stepsStatus = new();
@@ -84,6 +117,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
                     if (subscriptions?.Count > 0)
                     {
                         _showDeployButton = true;
+                        _subscriptions = subscriptions;
                         _linkedSubscription = subscriptions[0];
                     }
                 }
@@ -140,15 +174,9 @@ namespace AzureDesignStudio.Components.MenuDrawer
 
             if (_stepsStatus.Status == "starting")
             {
-                _paramFormLoading = true;
                 _deployParams = new DeploymentParameters();
                 _showDeployParams = true;
-
-                var names = await _deployService.GetResourceGroups(_linkedSubscription.SubscriptionId);
-                _resourceGroupNames = names ?? [];
-                _paramFormLoading = false;
-                if (names is null)
-                    _messageService.Error("The resource groups could not be listed: the server is not reachable, or Azure refused the linked subscription's credential.");
+                await LoadResourceGroupsAsync();
             }
             else
             {

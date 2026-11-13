@@ -29,7 +29,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
         // The limit is on how many designs a user holds, so it stops new names only. Saving
         // changes to a design that already exists is always allowed (the server agrees); the
         // button used to lock for both, leaving a user at the limit unable to save their work.
-        private bool SaveBlockedByQuota => _savedDesignCount >= MaxDesigns
+        private bool SaveBlockedByQuota => !_features.DesignsAreLocal && _savedDesignCount >= MaxDesigns
             && !_allDesignRecords.Any(r => string.Equals(r.DesignName, _designName.Name?.Trim(), StringComparison.OrdinalIgnoreCase));
 
         protected override async Task OnInitializedAsync()
@@ -43,7 +43,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
             {
                 var authState = await authenticationStateTask;
                 var user = authState.User;
-                if (user.Identity?.IsAuthenticated ?? false)
+                if (_features.DesignsAreLocal || (user.Identity?.IsAuthenticated ?? false))
                     await RefreshSavedDesigns();
             }
             finally

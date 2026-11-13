@@ -1,6 +1,7 @@
 using System.Security.Claims;
-using AzureDesignStudio.Server.Models;
+using AzureDesignStudio.Services.Models;
 using AzureDesignStudio.Server.Services;
+using AzureDesignStudio.Services;
 using AzureDesignStudio.SharedModels.Protos;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging.Abstractions;

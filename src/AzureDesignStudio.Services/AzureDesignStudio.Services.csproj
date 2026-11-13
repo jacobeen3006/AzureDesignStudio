@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The application services (designs, deployment, retail prices) with no web host in them:
+       the ASP.NET Core server exposes them over gRPC, and the desktop app runs the same
+       classes in-process through InProcessCallInvoker. Nothing here may depend on ASP.NET
+       Core - it does not exist on Mac Catalyst, where the desktop app is going next. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.Identity" />
+    <PackageReference Include="Azure.ResourceManager.Resources" />
+    <PackageReference Include="Azure.ResourceManager.Resources.Deployments" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AzureDesignStudio.SharedModels\AzureDesignStudio.SharedModels.csproj" />
+    <ProjectReference Include="..\AzureDesignStudio.Core\AzureDesignStudio.Core.csproj" />
+    <ProjectReference Include="..\AzureDesignStudio.Discovery\AzureDesignStudio.Discovery.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AzureDesignStudio.Server.Tests" />
+  </ItemGroup>
+
+  <!-- The usings the web SDK used to supply implicitly when these files lived in the server. -->
+  <ItemGroup>
+    <Using Include="Microsoft.Extensions.Logging" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+
+</Project>

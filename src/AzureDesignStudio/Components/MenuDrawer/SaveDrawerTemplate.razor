@@ -5,9 +5,30 @@
 @inject DesignGrpcService _designService
 @inject MessageService _messageService
 @inject AdsHostAuth _hostAuth
+@inject AdsHostFeatures _features
 
+@if (_features.DesignsAreLocal)
+{
+    @SaveAndLoad
+}
+else
+{
 <AuthorizeView>
     <Authorized>
+        @SaveAndLoad
+    </Authorized>
+    <NotAuthorized>
+        <div style="padding: 24px;">
+            <div>Please sign in with your user account first.</div>
+            <br />
+            <Button Type="@ButtonType.Primary" OnClick="BeginLogin">Sign in</Button>
+        </div>
+    </NotAuthorized>
+</AuthorizeView>
+}
+
+@code {
+    private RenderFragment SaveAndLoad => @<text>
         <Collapse DefaultActiveKey="@(new[]{"1"})" Accordion>
             <Panel Header="Save the design" Key="1">
                 <Form @ref="@_form" Model="@_designName" Context="formContext"
@@ -21,6 +42,8 @@
                 <Button Type="@ButtonType.Primary" OnClick="SaveButtonClick" Disabled="@SaveBlockedByQuota">Save</Button>
                 <br />
                 <br />
+                @if (!_features.DesignsAreLocal)
+                {
                 <Alert Type="@AlertType.Info" ShowIcon="true">
                     <MessageTemplate>
                         You can save up to 10 designs. Currently you have: @(_savedDesignCount < 0 ? "Unavailable" : $"{_savedDesignCount}/10").
@@ -30,6 +53,7 @@
                         }
                     </MessageTemplate>
                 </Alert>
+                }
             </Panel>
             <Panel Header="Load the design" Key="2">
                 <Table DataSource="@_allDesignRecords" @bind-SelectedRows="@_selectedRows" RowKey="c => c.Key"
@@ -46,17 +70,7 @@
                 </div>
             </Panel>
         </Collapse>
-    </Authorized>
-    <NotAuthorized>
-        <div style="padding: 24px;">
-            <div>Please sign in with your user account first.</div>
-            <br />
-            <Button Type="@ButtonType.Primary" OnClick="BeginLogin">Sign in</Button>
-        </div>
-    </NotAuthorized>
-</AuthorizeView>
-
-@code {
+    </text>;
     [CascadingParameter]
     private Task<AuthenticationState> authenticationStateTask { get; set; } = null!;
     private IEnumerable<DesignRecord> _selectedRows = [];

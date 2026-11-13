@@ -1,4 +1,4 @@
-﻿@using System.Text
+@using System.Text
 @using AzureDesignStudio.Models
 @using AzureDesignStudio.Services
 @using AzureDesignStudio.SharedModels.Protos
@@ -27,6 +27,16 @@
 <Modal Title="Deployment Parameters" Visible="@_showDeployParams" MaskClosable="@false" OnOk="@ParamsFormOk" OnCancel="@ParamsFormCancel">
     <Form Model="_deployParams" @ref="@_paramsForm" LabelCol="@(new ColLayoutParam { Span = 8 })" WrapperCol="@(new ColLayoutParam { Span = 16 })"
           Loading="@_paramFormLoading" OnFinish="ParamsFormFinish">
+        <FormItem Label="Subscription">
+            <SimpleSelect @bind-Value="@SelectedSubscriptionId">
+                <SelectOptions>
+                    @foreach (var subscription in _subscriptions)
+                    {
+                        <SimpleSelectOption Value="@subscription.SubscriptionId" Label="@($"{subscription.SubscriptionName} ({subscription.SubscriptionId})")" />
+                    }
+                </SelectOptions>
+            </SimpleSelect>
+        </FormItem>
         <FormItem Label="Deploy target">
             <Select TItem="string" TItemValue="DeployTarget" @bind-Value="@context.Target">
                 <SelectOptions>
@@ -62,7 +72,8 @@
 </Modal>
 
 <Modal Title="Review what will change (What-If)" Visible="@_showWhatIfReview" MaskClosable="@false"
-       OkText="@(GuardrailBlocked ? "Blocked by guardrails" : _deployAsStack ? "Approve & deploy as stack" : "Approve & deploy")" OnOk="@ApproveAndDeployAsync" OnCancel="@CancelWhatIf">
+       OkText="@(GuardrailBlocked ? "Blocked by guardrails" : _deployAsStack ? "Approve & deploy as stack" : "Approve & deploy")" OnOk="@ApproveAndDeployAsync" OnCancel="@CancelWhatIf"
+       OkButtonProps="@(new ButtonProps { Disabled = _whatIfLoading || !WhatIfDeployAllowed })">
     @if (_retryTemplate is not null)
     {
         <Alert Type="@AlertType.Info" Message="Targeted retry: only the failed resources will be previewed and deployed - not the full template." ShowIcon="true" Style="margin-bottom:8px" />

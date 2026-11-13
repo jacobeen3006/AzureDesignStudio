@@ -2,15 +2,10 @@ using Azure.Identity;
 using Azure.Security.KeyVault.Keys;
 using Azure.Security.KeyVault.Keys.Cryptography;
 using System.Text;
+using AzureDesignStudio.Services;
 
 namespace AzureDesignStudio.Server.Services
 {
-    public interface ICryptoService
-    {
-        Task<string> Encrypt(string plainText);
-        Task<string> Decrypt(string encryptedText);
-    }
-
     /// <summary>
     /// Encrypts subscription secrets with one RSA key in Key Vault (RSA-OAEP).
     /// The vault is contacted on first use, not in the constructor: this is a singleton

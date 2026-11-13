@@ -1,15 +1,11 @@
-using AzureDesignStudio.Server.Models;
+using AzureDesignStudio.Services.Models;
 using AzureDesignStudio.SharedModels.Protos;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Identity.Web.Resource;
 
-namespace AzureDesignStudio.Server.Services
+namespace AzureDesignStudio.Services
 {
-    [Authorize]
-    [RequiredScope(RequiredScopesConfigurationKey = "AzureAd:Scopes")]
     public class DesignService : Design.DesignBase
     {
         private const int MaxDesignsPerUser = 10;

@@ -1,334 +1,159 @@
 # Azure Design Studio
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![.NET Build](https://github.com/jacobeen3006/AzureDesignStudio/actions/workflows/build.yml/badge.svg)](https://github.com/jacobeen3006/AzureDesignStudio/actions/workflows/build.yml)
 
-**Azure Design Studio** is a web application designed to simplify and streamline the process of creating solution architectures for Azure. With a focus on ease of use, efficiency, and consistency, it offers several key features:
+**Azure Design Studio** is a desktop app for drawing Azure architectures visually and turning them into deployable infrastructure. Draw a design, check it against Azure's rules, estimate its cost, export it as ARM or Bicep, and run a What-If against a resource group before anything is deployed.
 
-- **🎨 Visual Design**: Create solution architecture for Azure using a visually appealing and consistent styling.
-- **✅ Validation**: Ensure your design adheres to the rules and constraints of Azure resources to reduce errors.
-- **📤 Export**: Export your design as images for easy integration into your documents and presentations.
-- **☁️ Cloud Storage**: Save your design in the cloud for convenient access from any location.
-- **💻 Infrastructure as Code (IaC) generation**: Automatically generate ARM/Bicep templates for your design.
+The app runs entirely on your machine. There is no server to host: it calls Azure directly with your own sign-in.
 
-## ✨ Microsoft Global Hackathon 2022 Winner
+> **Status:** the Windows desktop app is the primary target and is under active development. A macOS build (Mac Catalyst) is planned. The browser (WebAssembly) version and its gRPC server still build and pass their tests, but they receive no new features.
 
-Azure Design Studio won the **3rd Place Winner award** of Microsoft Global Hackathon 2022.
-
-![screenshot](assets/AzureDesignStudio.gif)
+![Hub-and-spoke design in Azure Design Studio](docs/screenshots/canvas-hub-spoke.png)
 
 ---
 
-## 🚀 Features
+## Features
 
-### Visual Architecture Design
-- Drag-and-drop Azure resource palette
-- Support for 14+ Azure resource types across Network, Compute, Data, Integration, and Storage categories
-- Real-time validation against Azure resource constraints
+### Design
+- **Drag-and-drop canvas** with resources grouped the way Azure nests them: virtual networks contain subnets, subnets contain resources, and so on.
+- **Resource palette** grouped into Gallery, Networking, Compute, Containers, Databases, Storage, Integration, Security & Ops, and AI & Analytics.
+- **Gallery designs** to start from: hub-and-spoke, an API Management landing zone, and an AKS baseline architecture.
+- **Inspector panel** for each resource's properties, plus a command palette (`Ctrl+K`) for every action.
+- **Light and dark themes.**
 
-### Export Options
-- **Image Export**: Export diagrams as high-quality PNG images
-- **ARM Template Export**: Generate Azure Resource Manager (ARM) JSON templates
-- **Bicep Code Export**: Generate Bicep IaC code from your visual design
-- **Code Import**: Import existing Bicep files to reuse in your designs
+### Check
+- **Validate the design** against Azure resource rules (names, address ranges, required subnets, and similar), before you export or deploy.
+- **Suggest globally unique resource names** for storage accounts, Key Vaults, and other names that must be unique.
+- **Estimate monthly cost** from Azure's public retail price list.
 
-### Cloud Storage & Collaboration
-- Save designs to Azure Cloud Storage
-- Retrieve previously saved designs for future use
-- Single sign-on authentication via Microsoft Entra ID (work and personal accounts)
+### Export
+- **ARM template** (JSON), with a preview and a download button.
+- **Bicep** source.
+- **Image** of the diagram.
+- **Text design** (`.ads.json`) for saving and sharing a design. You can import these back in.
 
-### Infrastructure as Code Generation
-- Automatically generates ARM templates from your visual designs
-- Converts visual layouts to production-ready ARM JSON
-- Import existing Bicep files and generate corresponding ARM templates
-- Deploy ARM templates directly through the platform
+### Deploy
+- **What-If review** shows exactly which resources will be created, changed, or deleted in the target resource group before anything runs.
+- **Approve & deploy** runs the reviewed plan, and only that plan. Changes are blocked when the What-If shows deletions or when a guardrail protects a resource.
+- **Deployment stacks** as an option, so the resources of one design are tracked and managed as a single unit.
+- **Linked service principals** per subscription, with the secret kept in the Windows Credential Manager. Without one, the app uses your own signed-in identity.
 
----
-
-## 🏗️ Solution Structure (12 projects)
-
-```
-AzureDesignStudio.sln
-├── AzureDesignStudio                  — Blazor WASM client (UI)
-├── AzureDesignStudio.Server           — ASP.NET Core gRPC backend
-├── AzureDesignStudio.Core             — Shared domain logic, diagram models, ARM generation
-├── AzureDesignStudio.SharedModels     — Protobuf contracts (gRPC service definitions)
-├── AzureDesignStudio.AzureResources   — CLS-compliant Azure resource type definitions
-├── AzureDesignStudio.SourceGeneration — Roslyn source generator for DTO/mapping profiles
-├── AzureDesignStudio.Core.Tests       — xUnit unit tests
-├── AzureDesignStudio.Server.Tests     — xUnit tests of the gRPC services and the client's service wrappers
-├── AzureDesignStudio.Workspace        — SQLite workspace store for designs, scans, plans and audit
-├── AzureDesignStudio.Discovery        — Tenant analysis engines (scan, drift, guardrails, decommission)
-├── AzureDesignStudio.Mcp              — Stdio MCP server with its read-only workspace tools
-└── AzureDesignStudio.Desktop          — .NET MAUI Windows app (native gRPC, MSAL broker auth, offline design cache)
-```
-
-**Target**: .NET 10 — Blazor WebAssembly, ASP.NET Core, .NET MAUI (Windows)
+### Analyze existing environments
+- **Tenant scan** reads what is already deployed in your subscriptions and shows it alongside your designs.
+- **Compare saved designs** to see what changed between two versions.
+- **Guardrails** mark resources that the app must not touch.
 
 ---
 
-## 🛠️ Tech Stack
+## Install
 
-| Layer | Technology |
+### Requirements
+
+| | |
 |---|---|
-| **UI framework** | Blazor WebAssembly + .NET 10 |
-| **UI components** | Ant Design Blazor 1.6.2 |
-| **Diagramming** | Z.Blazor.Diagrams 3.0.4.1 (NuGet) |
-| **Auth** | Microsoft Entra ID (MSAL via `Microsoft.Authentication.WebAssembly.Msal`) |
-| **Backend API** | ASP.NET Core gRPC with gRPC-Web (browser-compatible) |
-| **ORM** | Entity Framework Core (InMemory dev / SQL Server prod) |
-| **Mapping** | AutoMapper 12 + custom Roslyn source generator |
-| **Secrets** | Azure Key Vault (production) |
-| **Telemetry** | Azure Application Insights, server only and only when a connection string is configured. The client sends none. |
-| **IaC generation** | Azure.ResourceManager SDK, Azure.Deployments.Core |
-| **Bicep** | Azure.Bicep.Decompiler (import existing .bicep files) |
-| **CI** | GitHub Actions, CodeQL, Nerdbank.GitVersioning |
-| **Deployment** | Docker, Kubernetes (deployment.yaml, ingress.yaml) |
+| **Operating system** | Windows 10 version 2004 (build 19041) or later, x64 |
+| **.NET SDK** | .NET 10 SDK (10.0.4xx or later) |
+| **Workloads** | .NET MAUI (`dotnet workload install maui-windows`) |
+| **Azure access** | An Azure account with at least Reader on the subscriptions you want to see. Deploying needs Contributor (or the role the deployment requires). |
+| **Optional** | Azure CLI (`az`), used as a sign-in fallback when the Windows broker is unavailable |
 
-### Key NuGet Packages
+### Build and run
 
-| Package | Purpose |
-|---|---|
-| `AntDesign` 0.14.4 | UI component library |
-| `AutoMapper` 12.0.1 | Object mapping |
-| `Google.Protobuf` + `Grpc.Net.Client` | gRPC communication |
-| `Microsoft.AspNetCore.Components.WebAssembly` 8.0.1 | WASM host |
-| `Azure.Bicep.Decompiler` 0.15.31 | Bicep → ARM conversion |
-| `Azure.ResourceManager` | Azure SDK for ARM deployment |
-| `Nerdbank.GitVersioning` 3.5.119 | Automatic versioning |
-
----
-
-## 📊 Supported Azure Resources
-
-| Category | Resource | Type | Base Class |
-|---|---|---|---|
-| **Network** | Virtual Network | Group | `AzureGroupBase` |
-| | Subnet | Group | `AzureGroupBase` |
-| | Azure Firewall | Leaf | `AzureNodeBase` |
-| | Azure Bastion | Leaf | `AzureNodeBase` |
-| | Public IP | Leaf | `AzureNodeBase` |
-| | Application Gateway | Leaf | `AzureNodeBase` |
-| **Compute** | Virtual Machine | Leaf | `AzureNodeBase` |
-| | App Service Plan | Group | `AzureGroupBase` |
-| | Function App | Leaf | `AzureNodeBase` |
-| | Web App | Leaf | `AzureNodeBase` |
-| | AKS | Leaf | `AzureNodeBase` |
-| **Data** | SQL Server | Group | `AzureGroupBase` |
-| | SQL Database | Leaf | `AzureNodeBase` |
-| **Integration** | API Management | Leaf | `AzureNodeBase` |
-| **Storage** | Storage Account | Leaf | `AzureNodeBase` |
-
----
-
-## 🏃 Architecture
-
-### End-to-End Flow
-
-```
-┌─────────────────────────────────────────────────────┐
-│                   Browser (Blazor WASM)              │
-│                                                      │
-│  Pages/Index.razor                                  │
-│  ├── TopMenu.razor      (save/load/export/code)    │
-│  ├── StencilPanel.razor  (resource palette)         │
-│  └── DiagramPanel.razor  (Z.Blazor.Diagrams canvas) │
-│                                                      │
-│  Components/                                        │
-│  ├── Stencil.razor       (individual drag icons)    │
-│  ├── NodeDrawerTemplate   (resource config forms)    │
-│  └── MenuDrawer/*        (save/code/export/sub)     │
-│                                                      │
-│  Services/                                          │
-│  ├── AdsContext.cs        (singleton state)          │
-│  ├── DesignGrpcService.cs  (gRPC client)            │
-│  ├── DeployGrpcService.cs  (gRPC client)            │
-│  └── AdsBicepDecompiler.cs (Bicep parsing)          │
-│                                                      │
-│  Auth: MSAL → Microsoft Entra ID                   │
-└──────────────┬──────────────────────────────────────┘
-              │ gRPC-Web (protobuf)
-              ▼
-┌─────────────────────────────────────────────────────┐
-│           AzureDesignStudio.Server (ASP.NET Core)    │
-│                                                      │
-│  Services/                                          │
-│  ├── DesignService.cs   ─── EF Core ───► SQL Server │
-│  │   (CRUD designs, quota: 10/user)                │
-│  ├── DeployService.cs   ─── Azure SDK ──► ARM API    │
-│  │   (deploy ARM templates, stream status)          │
-│  └── CryptoService.cs   (encrypt stored credentials) │
-│                                                      │
-│  Auth: JWT Bearer + AzureAd                        │
-│  Telemetry: Application Insights                 │
-└─────────────────────────────────────────────────────┘
-```
-
-### Key Design Decisions
-
-- **`AzureNodeBase`** extends Z.Blazor.Diagrams `NodeModel` and implements both `IAzureNode` and `IAzureResource` — a single class handles diagram appearance AND ARM template generation
-- **`AzureGroupBase`** extends `GroupModel` for container resources (VNet, SQL Server, App Service Plan). Children are visually nested and logically scoped
-- **`GetArmResources()`** on each model produces the ARM resource JSON. The model hierarchy mirrors the ARM resource nesting
-- **`IsDrappable()`** enforces placement rules — prevents nesting resources where Azure doesn't allow it
-
-### Source Generation (Roslyn)
-
-`AzureDesignStudio.SourceGeneration` is a Roslyn analyzer that at compile time:
-
-1. Scans resource model classes in `AzureDesignStudio.AzureResources`
-2. Generates DTO subclasses of `AzureNodeDto` for each resource
-3. Generates AutoMapper profiles (`AzureNodeProfile`) for model → DTO → model mapping
-4. Generates `GetDtoTypeFromKey()` and `GetNodeModelFromDto()` partial methods in `DataModelFactory`
-
-This eliminates manual DTO boilerplate when adding new Azure resource types.
-
----
-
-## 📖 Design Flow
-
-1. **Palette** → `StencilPanel.razor` reads `ads-stencils.json`, renders `Stencil.razor` for each resource
-2. **Drag** → User drags a stencil onto `DiagramPanel.razor` canvas (Z.Blazor.Diagrams)
-3. **Instantiation** → `DataModelFactory.CreateNodeModelFromKey()` creates the correct `AzureNodeBase`/`AzureGroupBase` subclass
-4. **Configuration** → Clicking a node opens `NodeDrawerTemplate.razor` with the resource's property form (e.g., `SqlServerForm.razor`)
-5. **Persistence** → Design serialized via `SaveDiagramToDto()` → `AzureNodeDto` graph → JSON → gRPC → Server → EF Core → SQL
-6. **Code Generation** → `GetArmResources()` + `GetArmParameters()` produce ARM template JSON (or Bicep via decompiler)
-7. **Deployment** → ARM template sent to `DeployService` → Azure SDK → Resource Manager API — deployment status streamed back to client via gRPC server-streaming
-
----
-
-## 🚀 Deployment
-
-### Docker
-- `src/AzureDesignStudio.Server/Dockerfile` — containerizes the Server project. The build context is the
-  **repository root** (the central `global.json` / `Directory.*.props` files live there); the image listens on port 80.
-- `src/DockerBuild.ps1 [-Tag name]` — computes the version with `nbgv` and builds the image (CI and release use this).
-- `.dockerignore` (repository root) — keeps `.git`, build output and unrelated projects out of the context.
-- **Configuration the container needs:** a database - either `KeyVaultName` naming a vault that holds the
-  `ads-main` connection string (and the `KeyVaultKeyName` key used to encrypt linked-subscription secrets),
-  or `ConnectionStrings__ads-main` directly - plus the `AzureAd__*` app registration. Without a database
-  it stops with a message saying what is missing. To try the image with nothing configured:
-
-  ```bash
-  docker run --rm -p 8080:80 -e Database__Provider=InMemory ads-server
-  ```
-
-  The in-memory database keeps nothing across restarts; it is for testing only.
-
-### Kubernetes
-- `Configurations/main/deployment.yaml` — K8s deployment
-- `Configurations/main/service.yaml` — K8s service
-- `Configurations/main/ingress.yaml` — K8s ingress
-
-### CI (GitHub Actions)
-- `build.yml` — locked restore, build, offline tests (.NET + the JS drag tests), Docker image, CodeQL, Desktop (Windows)
-- `publish.yml` — tagged releases: WASM zip, server image, Windows MSIX
-- `codeql-analysis.yml` — CodeQL security scanning (pull requests, monthly, manual)
-
-### Versioning
-- Nerdbank.GitVersioning via `version.json`
-- Version embedded at build time
-
----
-
-## 🔐 Authentication
-
-### Client-Side (WASM)
-- **Microsoft Entra ID** (work + personal accounts) with MSAL (`Microsoft.Authentication.WebAssembly.Msal`)
-- Login, logout, and token management
-- Single Sign-On support
-
-### Server-Side
-- **JWT Bearer** + AzureAd with `Microsoft.Identity.Web`
-- All gRPC endpoints decorated with `[Authorize]` + `[RequiredScope]`
-- Client uses MSAL (`AddMsalAuthentication`) with scoped HTTP message handler (`BaseAddressAuthorizationMessageHandler`)
-
----
-
-## 🧪 Development & Testing
-
-### Build Locally
-```bash
-# Full solution build (Windows; includes the MAUI desktop app)
-dotnet build src/AzureDesignStudio.sln
-
-# Everything except the MAUI desktop app (same set CI builds; Linux-safe).
-# RunAOTCompilation=false: Release turns on WASM AOT, which needs `dotnet workload install wasm-tools`.
-dotnet build src/AzureDesignStudio.Server -c Release -p:RunAOTCompilation=false && dotnet build src/AzureDesignStudio -c Release -p:RunAOTCompilation=false && dotnet build src/AzureDesignStudio.Mcp -c Release && dotnet build src/AzureDesignStudio.Core.Tests -c Release
-
-# Run unit tests
-dotnet test src/AzureDesignStudio.Core.Tests --filter "Category!=LiveAzure"
-dotnet test src/AzureDesignStudio.Server.Tests
-
-# Run the stencil drag state-machine tests (Node 20+)
-node --test src/AzureDesignStudio/JsTests/*.test.cjs
-
-# Run the server locally (Development): https://localhost:7203, http://localhost:5203,
-# plus http://localhost:5204 (HTTP/2 cleartext) for the Desktop app.
-dotnet run --project src/AzureDesignStudio.Server
-
-# Build Docker image (context = repository root)
-docker build -f src/AzureDesignStudio.Server/Dockerfile .
-
-# Package the Windows MSIX installer
-dotnet publish src/AzureDesignStudio.Desktop -c Release -f net10.0-windows10.0.19041.0 `
-  -p:WindowsPackageType=MSIX -p:RuntimeIdentifier=win-x64 -p:WindowsAppSDKSelfContained=true
-```
-
-### Test Tiers
-- **Offline (CI gate)** — `dotnet test src/AzureDesignStudio.Core.Tests --filter "Category!=LiveAzure"`:
-  ARM contract, validation, cost and editor-model tests; no network, no credentials. CI runs exactly this.
-- **Live Azure** — `dotnet test src/AzureDesignStudio.Core.Tests --filter "Category=LiveAzure"`:
-  deploys real template validations through `Microsoft.Resources`. Requires `az login` (or another
-  `DefaultAzureCredential` source), a subscription, and permissions to run deployments; the suite is
-  deployment-preflight only (no resources are left behind). Expect failures from environment quotas
-  (e.g. `SubscriptionIDOverQuotaForSku` on PIv2 cores) — those are subscription limits, not code bugs.
-
-### Clone the Repository
 ```bash
 git clone https://github.com/jacobeen3006/AzureDesignStudio.git
 cd AzureDesignStudio
+
+dotnet workload install maui-windows
+
+dotnet build src/AzureDesignStudio.Desktop -c Debug -f net10.0-windows10.0.19041.0
 ```
 
-### Development Environment
-- **Visual Studio 2022** (recommended for debugging)
-- **Azure CLI** (optional, for testing Azure resource deployment)
-- **Docker Desktop** (optional, for building Docker images)
+Then start the built app:
+
+```bash
+src/AzureDesignStudio.Desktop/bin/Debug/net10.0-windows10.0.19041.0/win-x64/AzureDesignStudio.Desktop.exe
+```
+
+Or open `src/AzureDesignStudio.sln` in Visual Studio 2022 with the .NET MAUI workload installed, select `AzureDesignStudio.Desktop` as the startup project, and press F5.
+
+### Sign in
+
+1. Open **User account** in the top menu and choose **Sign in**.
+2. Pick your account in the Windows sign-in window. The app asks Azure for permission to manage resources on your behalf (`user_impersonation`).
+
+The sign-in uses the Entra app registration whose client ID is set in [`src/AzureDesignStudio.Desktop/appsettings.json`](src/AzureDesignStudio.Desktop/appsettings.json) (`AzureAd:ClientId`). The registration is a public client that accepts both work and personal Microsoft accounts. To use your own registration, create one with:
+
+- supported account types: accounts in any organizational directory and personal Microsoft accounts
+- *Allow public client flows*: enabled
+- redirect URIs: `ms-appx-web://microsoft.aad.brokerplugin/<client-id>` and `http://localhost`
+- API permission: Azure Service Management → `user_impersonation` (delegated)
+
+Then put its client ID in `appsettings.json`.
+
+If the Windows sign-in broker is not available, the app falls back to the token from `az login`. Signing out turns that fallback off.
+
+### Where your data lives
+
+Everything is stored locally in the app's data folder (MAUI's `FileSystem.AppDataDirectory`):
+
+- `workspace.db`: saved designs, scans, and snapshots
+- `deploy.db`: deployment approvals, guardrails, linked subscriptions, and the audit log
+
+Saved designs stay on your machine and are not uploaded anywhere.
 
 ---
 
-## 📚 Documentation
+## Screenshots
 
-- [Architecture Overview](docs/architecture.md) — Detailed system architecture and design decisions
-- [Entra Setup & Desktop Build](docs/entra-setup.md) — App registration, auth configuration, MSIX packaging
-- [Development Guidelines](AGENTS.md) — Coding standards, conventions, and development workflow
-- [Changelog](CHANGELOG.md) — Release history
-- [Roadmap: v2 Plan](docs/v2-plan.md) — Live tenant analysis, drift, safe execution, decommissioning (phases 6–13)
-- [Proposal: v3 Plan](docs/v3-plan.md) — Next 50 improvements: delivery gates, security/tenancy, data scale, IaC depth, automation
-- [Execution Plan: Next Phases](docs/next-phases-plan.md) — Phase order, gates and verification for the next ~6 weeks
-- [Assessment 2026-10-21](docs/assessment-2026-10-21.md) — Findings F1–F7 and Round-2 slice review
-- [Improvement Backlog](docs/top-100-improvements.md) — The 100-item capability/competitive analysis behind the roadmap
-- [UI/UX Round 2](docs/top-100-ui-improvements.md) — The 100-item visual, motion, accessibility and help catalog
+**ARM template export.** Preview the generated template, then download it or deploy it.
+
+![ARM template export preview](docs/screenshots/arm-export.png)
 
 ---
 
-## 🤝 Contributing
+## Solution structure
 
-All feedback and suggestions are welcome! Please feel free to:
+```
+AzureDesignStudio.sln
+├── AzureDesignStudio.Desktop          — .NET MAUI Blazor Hybrid app for Windows (the main target)
+├── AzureDesignStudio                  — Blazor WebAssembly client (browser build, no new features)
+├── AzureDesignStudio.Services         — Service logic for designs, deployment, and prices; runs in-process in the desktop app
+├── AzureDesignStudio.Server           — ASP.NET Core gRPC host for the browser build
+├── AzureDesignStudio.Core             — Resource models, diagram logic, ARM generation, validation
+├── AzureDesignStudio.AzureResources   — ARM resource type definitions
+├── AzureDesignStudio.Discovery        — Tenant scans, What-If, guardrails, deployment stacks
+├── AzureDesignStudio.Workspace        — SQLite storage for designs, scans, and audit
+├── AzureDesignStudio.SharedModels     — Protobuf contracts
+├── AzureDesignStudio.Mcp              — Read-only MCP server over the local workspace
+├── AzureDesignStudio.SourceGeneration — Roslyn source generator for DTO mappings
+├── AzureDesignStudio.Core.Tests       — Unit tests (run with `--filter "Category!=LiveAzure"`)
+└── AzureDesignStudio.Server.Tests     — Tests of the gRPC services and the in-process host
+```
 
-- 🐛 Report bugs via GitHub Issues
-- 🚀 Submit feature requests
-- 📝 Create pull requests
+### Tests
 
-All contributions are welcome. Make sure to follow the existing patterns and conventions in the codebase.
+```bash
+dotnet test src/AzureDesignStudio.Core.Tests --filter "Category!=LiveAzure"
+dotnet test src/AzureDesignStudio.Server.Tests
+```
 
 ---
 
-## ⚠️ Disclaimer
+## Built with
 
-Azure Design Studio is a personal project without any warranty. It is neither an official product from Microsoft nor supported by Microsoft. Use it at your own risk.
+- .NET 10, Blazor, .NET MAUI Blazor Hybrid
+- [Ant Design Blazor](https://antblazor.com/) for the UI
+- [Z.Blazor.Diagrams](https://github.com/Blazor-Diagrams/Blazor.Diagrams) for the canvas
+- Microsoft Authentication Library (MSAL) with the Windows account broker
+- Entity Framework Core with SQLite
+- Azure.ResourceManager and Azure.Deployments.Core
 
 ---
 
-## 📄 License
+## Background
 
-This project is licensed under the **GPL v3** License - see the [LICENSE](LICENSE) file for details.
+Azure Design Studio won **3rd place** in the Microsoft Global Hackathon 2022.
+
+## License
+
+Released under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0).

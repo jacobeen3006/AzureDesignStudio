@@ -2,6 +2,7 @@ using AutoMapper;
 using AzureDesignStudio.AzureResources.Base;
 using AzureDesignStudio.AzureResources.Network;
 using AzureDesignStudio.Core.Web;
+using AzureDesignStudio.Core.APIM;
 using AzureDesignStudio.Core.DTO;
 using AzureDesignStudio.Core.Models;
 using AzureDesignStudio.Core.SQL;
@@ -169,11 +170,87 @@ namespace AzureDesignStudio.Core.Network
                 });
             }
 
+            // API Management in a network refuses a subnet without a network security group
+            // (NetworkSecurityGroupNotFound) - at create time, not in validate or what-if. The
+            // subnet brings its own, with the rules the service documents as required.
+            _apimNsg = BuildApiManagementNsg(vnet);
+            if (_apimNsg is not null)
+            {
+                var nsgId = $"[resourceId('{_apimNsg.Type}', '{_apimNsg.Name}')]";
+                _subnet.Properties.NetworkSecurityGroup = new() { Id = nsgId };
+                _subnet.DependsOn.Add(nsgId);
+            }
+            else
+            {
+                _subnet.Properties.NetworkSecurityGroup = null;
+            }
+
             // Don't include them in the serialization if they are empty. 
             if (_subnet.Properties.ServiceEndpoints.Count == 0)
                 _subnet.Properties.ServiceEndpoints = null;
             if (_subnet.Properties.Delegations.Count == 0)
                 _subnet.Properties.Delegations = null;
+        }
+
+        private NetworkSecurityGroups? _apimNsg;
+
+        public override IList<ResourceBase> GetArmResources()
+        {
+            var subnet = base.GetArmResources();
+            return _apimNsg is null ? subnet : [_apimNsg, .. subnet];
+        }
+
+        /// <summary>
+        /// The NSG an API Management subnet needs (learn.microsoft.com, "Virtual network
+        /// configuration reference: API Management"): management on 3443 from the ApiManagement
+        /// tag and the load balancer probe on 6390 in both modes, client traffic on 80/443 in
+        /// External mode, and the service's own dependencies outbound. Null when the subnet
+        /// hosts no API Management.
+        /// </summary>
+        private NetworkSecurityGroups? BuildApiManagementNsg(VirtualNetworkModel vnet)
+        {
+            var apim = Children.OfType<APIMModel>().FirstOrDefault();
+            if (apim is null)
+                return null;
+
+            var rules = new List<object>();
+            var priority = 100;
+            void Rule(string name, string direction, string source, string destination, string ports)
+            {
+                rules.Add(new Dictionary<string, object>
+                {
+                    ["name"] = name,
+                    ["properties"] = new Dictionary<string, object>
+                    {
+                        ["protocol"] = "Tcp",
+                        ["sourcePortRange"] = "*",
+                        ["destinationPortRanges"] = ports.Split(','),
+                        ["sourceAddressPrefix"] = source,
+                        ["destinationAddressPrefix"] = destination,
+                        ["access"] = "Allow",
+                        ["priority"] = priority,
+                        ["direction"] = direction,
+                    },
+                });
+                priority += 10;
+            }
+
+            if (string.Equals(apim.VnetType, "External", StringComparison.OrdinalIgnoreCase))
+                Rule("AllowClientHttps", "Inbound", "Internet", "VirtualNetwork", "80,443");
+            Rule("AllowApiManagementManagement", "Inbound", "ApiManagement", "VirtualNetwork", "3443");
+            Rule("AllowAzureLoadBalancerProbe", "Inbound", "AzureLoadBalancer", "VirtualNetwork", "6390");
+            priority = 100;
+            Rule("AllowStorage", "Outbound", "VirtualNetwork", "Storage", "443");
+            Rule("AllowSql", "Outbound", "VirtualNetwork", "Sql", "1433");
+            Rule("AllowKeyVault", "Outbound", "VirtualNetwork", "AzureKeyVault", "443");
+            Rule("AllowAzureMonitor", "Outbound", "VirtualNetwork", "AzureMonitor", "1886,443");
+
+            return new NetworkSecurityGroups
+            {
+                Name = $"nsg-{vnet.Name}-{ArmName}",
+                Location = vnet.Location,
+                Properties = new() { SecurityRules = rules },
+            };
         }
 
         public override AzureNodeDto GetNodeDto(IMapper mapper)

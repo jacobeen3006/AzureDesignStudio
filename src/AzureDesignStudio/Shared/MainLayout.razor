@@ -3,8 +3,8 @@
 @inherits LayoutComponentBase
 @inject AdsCommandService Commands
 
-<Message />
-
+@* No <Message /> here: App.razor's <AntContainer /> already hosts the message area, and a
+   second host made every notification appear twice (or more, as the layout re-rendered). *@
 <div class="ads-shell">
     <header class="ads-header">
         <div class="ads-brand">

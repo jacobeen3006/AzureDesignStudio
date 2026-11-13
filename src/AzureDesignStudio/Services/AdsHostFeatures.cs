@@ -10,6 +10,10 @@ public class AdsHostFeatures
     /// <summary>Menu label when the host offers tenant discovery; null hides the menu item.</summary>
     public string? TenantScanLabel { get; set; }
 
+    /// <summary>Designs are kept on this machine (the desktop app), not in an account on a
+    /// server: saving and loading them needs no sign-in.</summary>
+    public bool DesignsAreLocal { get; set; }
+
     /// <summary>Opens the host's scan drawer using the current circuit's services.</summary>
     public Func<IServiceProvider, Task>? OpenTenantScan { get; set; }
 

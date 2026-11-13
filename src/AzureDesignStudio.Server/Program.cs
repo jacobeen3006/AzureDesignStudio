@@ -1,7 +1,8 @@
 using Azure.Extensions.AspNetCore.Configuration.Secrets;
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
-using AzureDesignStudio.Server.Models;
+using AzureDesignStudio.Services;
+using AzureDesignStudio.Services.Models;
 using AzureDesignStudio.Discovery.Iac.WhatIf;
 using AzureDesignStudio.Server.Services;
 using AzureDesignStudio.Server.Utils;
@@ -75,7 +76,7 @@ builder.Services.AddSingleton<ITelemetryInitializer, AdsTelemetryInitializer>();
 builder.Services.AddApplicationInsightsTelemetry();
 
 builder.Services.AddRazorPages();
-builder.Services.AddGrpc();
+builder.Services.AddGrpc(options => options.Interceptors.Add<CallerInterceptor>());
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient("RetailPrices", client => client.Timeout = TimeSpan.FromSeconds(30));
 
@@ -216,8 +217,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.UseGrpcWeb();
-app.MapGrpcService<DesignService>().EnableGrpcWeb();
-app.MapGrpcService<DeployService>().EnableGrpcWeb();
+app.MapGrpcService<HostedDesignService>().EnableGrpcWeb();
+app.MapGrpcService<HostedDeployService>().EnableGrpcWeb();
 app.MapGrpcService<RetailPriceService>().EnableGrpcWeb();
 
 #if DEBUG

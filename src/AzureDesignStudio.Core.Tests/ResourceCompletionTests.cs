@@ -89,6 +89,16 @@ namespace AzureDesignStudio.Core.Tests
         }
 
         [Fact]
+        public void CostEstimateUsesTheVirtualMachinesConfiguredSize()
+        {
+            // The estimator priced every machine as the cost map's default, whatever its size.
+            var vm = new VirtualMachineModel { Name = "vm1", VmSize = "Standard_E4s_v5" };
+
+            Assert.Equal("Standard_E4s_v5", Core.Cost.CostSkuResolver.Resolve(vm));
+            Assert.Equal(VmImages.DefaultSize, Core.Cost.CostSkuResolver.Resolve(new VirtualMachineModel { Name = "vm2" }));
+        }
+
+        [Fact]
         public void VirtualMachineWithoutANetworkIsNotExportable()
         {
             Assert.False(new VirtualMachineModel { Name = "vm1" }.IsValid);
@@ -328,6 +338,63 @@ namespace AzureDesignStudio.Core.Tests
             Assert.Contains(a.ResourceId, DependsOn(1));
             Assert.Contains(b.ResourceId, DependsOn(2));
             Assert.DoesNotContain(c.ResourceId, DependsOn(0));
+        }
+
+        // --- API Management / Key Vault: refused only by a real create, not validate or what-if ---
+
+        [Theory]
+        [InlineData("Internal", false)]
+        [InlineData("External", true)]
+        public void ApiManagementSubnetBringsTheNetworkSecurityGroupTheServiceRequires(string mode, bool clientRule)
+        {
+            // Without one: NetworkSecurityGroupNotFound, "requires a Network Security Group to be associated".
+            var vnet = new VirtualNetworkModel { Name = "vnet-apim" };
+            var subnet = vnet.AddSubnet(new SubnetModel { Name = "snet-apim", AddressPrefix = "10.20.2.0/24" });
+            subnet.AddChild(new APIM.APIMModel { Name = "apim1", VnetType = mode });
+
+            var resources = Export(vnet);
+            var nsg = OfType(resources, "Microsoft.Network/networkSecurityGroups");
+            var subnetResource = OfType(resources, "Microsoft.Network/virtualNetworks/subnets");
+
+            var nsgId = $"[resourceId('Microsoft.Network/networkSecurityGroups', '{nsg.GetProperty("name").GetString()}')]";
+            Assert.Equal(nsgId, subnetResource.GetProperty("properties").GetProperty("networkSecurityGroup").GetProperty("id").GetString());
+            Assert.Contains(nsgId, subnetResource.GetProperty("dependsOn").EnumerateArray().Select(d => d.GetString()));
+
+            var rules = nsg.GetProperty("properties").GetProperty("securityRules").EnumerateArray()
+                .Select(r => r.GetProperty("properties")).ToArray();
+            bool Allows(string direction, string source, string port) => rules.Any(r =>
+                r.GetProperty("direction").GetString() == direction && r.GetProperty("sourceAddressPrefix").GetString() == source &&
+                r.GetProperty("destinationPortRanges").EnumerateArray().Any(p => p.GetString() == port));
+            Assert.True(Allows("Inbound", "ApiManagement", "3443"));
+            Assert.True(Allows("Inbound", "AzureLoadBalancer", "6390"));
+            Assert.Equal(clientRule, Allows("Inbound", "Internet", "443"));
+            // Priorities are unique per direction.
+            foreach (var direction in rules.GroupBy(r => r.GetProperty("direction").GetString()))
+                Assert.Equal(direction.Count(), direction.Select(r => r.GetProperty("priority").GetInt32()).Distinct().Count());
+        }
+
+        [Fact]
+        public void SubnetWithoutApiManagementHasNoGeneratedSecurityGroup()
+        {
+            var vnet = new VirtualNetworkModel { Name = "vnet" };
+            vnet.AddSubnet(new SubnetModel { Name = "snet", AddressPrefix = "10.0.1.0/24" });
+
+            var resources = Export(vnet);
+
+            Assert.DoesNotContain(resources, r => r.GetProperty("type").GetString() == "Microsoft.Network/networkSecurityGroups");
+            Assert.False(OfType(resources, "Microsoft.Network/virtualNetworks/subnets").GetProperty("properties").TryGetProperty("networkSecurityGroup", out _));
+        }
+
+        [Fact]
+        public void KeyVaultSkuSitsInsideProperties()
+        {
+            // A top-level sku is "The key vault sku is invalid" at create time.
+            var vault = OfType(Export(new KeyVaultModel { Name = "kv-test-1" }), "Microsoft.KeyVault/vaults");
+
+            Assert.False(vault.TryGetProperty("sku", out _));
+            var sku = vault.GetProperty("properties").GetProperty("sku");
+            Assert.Equal("A", sku.GetProperty("family").GetString());
+            Assert.Equal("standard", sku.GetProperty("name").GetString());
         }
 
         // --- AKS ---

@@ -1,5 +1,3 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.Identity.Web.Resource;
 using AzureDesignStudio.SharedModels.Protos;
 using AzureDesignStudio.Core.Common;
 using AzureDesignStudio.Discovery.Arm;
@@ -9,7 +7,7 @@ using AzureDesignStudio.Discovery.Iac.WhatIf;
 using AzureDesignStudio.Discovery.ResourceGraph;
 using AzureDesignStudio.Discovery.Decommission;
 using AzureDesignStudio.Discovery.Unmanaged;
-using AzureDesignStudio.Server.Models;
+using AzureDesignStudio.Services.Models;
 using Grpc.Core;
 using Microsoft.EntityFrameworkCore;
 using Azure.Identity;
@@ -22,10 +20,8 @@ using Azure.ResourceManager.Resources.Deployments.Models;
 using System.Globalization;
 using System.Text.Json;
 
-namespace AzureDesignStudio.Server.Services
+namespace AzureDesignStudio.Services
 {
-    [Authorize]
-    [RequiredScope(RequiredScopesConfigurationKey = "AzureAd:Scopes")]
     public class DeployService : Deploy.DeployBase
     {
         private readonly DesignDbContext _designContext;
@@ -33,8 +29,9 @@ namespace AzureDesignStudio.Server.Services
         private readonly ICryptoService _cryptoService;
         private readonly WhatIfTokenGate _whatIfGate;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly IAmbientAzureCredential? _ambient;
         public DeployService(DesignDbContext context, ILogger<DeployService> logger, ICryptoService cryptoService,
-            WhatIfTokenGate whatIfGate, IHttpClientFactory httpClientFactory)
+            WhatIfTokenGate whatIfGate, IHttpClientFactory httpClientFactory, IAmbientAzureCredential? ambient = null)
         {
             _designContext = context;
 
@@ -42,6 +39,7 @@ namespace AzureDesignStudio.Server.Services
             _cryptoService = cryptoService;
             _whatIfGate = whatIfGate;
             _httpClientFactory = httpClientFactory;
+            _ambient = ambient;
         }
         public override async Task<SaveSubInfoResponse> SaveSubscriptionInfo(SubscriptionInfo request, ServerCallContext context)
         {
@@ -133,7 +131,7 @@ namespace AzureDesignStudio.Server.Services
 
             return response;
         }
-        public override Task<LoadSubInfoResponse> LoadSubscriptionInfo(Empty request, ServerCallContext context)
+        public override async Task<LoadSubInfoResponse> LoadSubscriptionInfo(Empty request, ServerCallContext context)
         {
             var response = new LoadSubInfoResponse();
 
@@ -142,7 +140,7 @@ namespace AzureDesignStudio.Server.Services
             {
                 _logger.LogWarning("Access denied. userIdClaim is empty.");
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                return Task.FromResult(response);
+                return response;
             }
             var userId = new Guid(userIdClaim);
 
@@ -160,9 +158,33 @@ namespace AzureDesignStudio.Server.Services
                     SubscriptionName = subResource.SubscriptionName,
                 });
             }
+
+            // The signed-in user's own subscriptions, after the linked ones (a linked service
+            // principal wins for its subscription, so it is listed once, under its link name).
+            if (_ambient is not null)
+            {
+                try
+                {
+                    foreach (var subscription in await _ambient.ListSubscriptionsAsync(context.CancellationToken))
+                    {
+                        if (response.SubscriptionData.Any(s => string.Equals(s.SubscriptionId, subscription.SubscriptionId, StringComparison.OrdinalIgnoreCase)))
+                            continue;
+                        response.SubscriptionData.Add(new SubscriptionRes
+                        {
+                            SubscriptionId = subscription.SubscriptionId,
+                            SubscriptionName = subscription.DisplayName,
+                        });
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // The linked ones are still an answer; the user's own list is a bonus.
+                    _logger.LogWarning(ex, "The signed-in user's subscriptions could not be listed.");
+                }
+            }
             response.StatusCode = StatusCodes.Status200OK;
 
-            return Task.FromResult(response);
+            return response;
         }
         private async Task<AzureSubscriptionModel?> GetSubscriptionInfo(Guid userId, Guid subscriptionId)
         {
@@ -229,7 +251,7 @@ namespace AzureDesignStudio.Server.Services
             {
                 _logger.LogWarning(ex, "Azure could not be reached for resource group {ResourceGroup}.", resourceGroupName);
                 return (null, StatusCodes.Status502BadGateway,
-                    "Azure could not be reached with the linked subscription's credential.");
+                    "Azure could not be reached with the subscription's credential.");
             }
         }
 
@@ -238,13 +260,31 @@ namespace AzureDesignStudio.Server.Services
         /// authenticate through one linked subscription.</summary>
         private async Task<ArmClient?> GetArmClient(Guid userId, Guid subscriptionId)
         {
-            var subModel = await GetSubscriptionInfo(userId, subscriptionId);
-            if (subModel == null)
-                return null;
+            var credential = await GetCredentialAsync(userId, subscriptionId);
+            return credential is null ? null : new ArmClient(credential, subscriptionId.ToString());
+        }
 
-            var azCred = new ClientSecretCredential(subModel.TenantId.ToString(),
-                subModel.ClientId.ToString(), subModel.ClientSecret);
-            return new ArmClient(azCred, subModel.SubscriptionId.ToString());
+        /// <summary>
+        /// Who acts on Azure for this subscription. A linked service principal when the user
+        /// linked one; otherwise, where the host has an ambient identity (the desktop app),
+        /// the signed-in user. Null - answered as "no subscription", 404 - when there is
+        /// neither, and when a link exists but its secret can no longer be read: that link is
+        /// broken and must be linked again, and quietly acting as somebody else instead would
+        /// change who deploys without anyone choosing it.
+        /// </summary>
+        private async Task<Azure.Core.TokenCredential?> GetCredentialAsync(Guid userId, Guid subscriptionId)
+        {
+            var linked = await _designContext.AzureSubscriptions.AsNoTracking()
+                .AnyAsync(s => s.UserId == userId && s.SubscriptionId == subscriptionId);
+            if (linked)
+            {
+                var subModel = await GetSubscriptionInfo(userId, subscriptionId);
+                return subModel is null
+                    ? null
+                    : new ClientSecretCredential(subModel.TenantId.ToString(), subModel.ClientId.ToString(), subModel.ClientSecret);
+            }
+
+            return _ambient?.Credential;
         }
 
         /// <summary>
@@ -352,8 +392,8 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var subModel = await GetSubscriptionInfo(userId, subscriptionId);
-            if (subModel == null)
+            var credential = await GetCredentialAsync(userId, subscriptionId);
+            if (credential == null)
             {
                 response.StatusCode = StatusCodes.Status404NotFound;
                 response.ErrorMessage = "No subscription is found.";
@@ -364,8 +404,6 @@ namespace AzureDesignStudio.Server.Services
 
             try
             {
-                var credential = new ClientSecretCredential(subModel.TenantId.ToString(),
-                    subModel.ClientId.ToString(), subModel.ClientSecret);
                 var armClient = new ArmClient(credential, subscriptionId.ToString());
                 string location;
                 if (target.Kind == DeployScopeKind.ResourceGroup)
@@ -521,8 +559,8 @@ namespace AzureDesignStudio.Server.Services
                 response.ErrorMessage = monitorScopeError;
                 return response;
             }
-            var subModel = await GetSubscriptionInfo(userId, subscriptionId);
-            if (subModel == null)
+            var credential = await GetCredentialAsync(userId, subscriptionId);
+            if (credential == null)
             {
                 response.StatusCode = StatusCodes.Status404NotFound;
                 response.ErrorMessage = "No subscription is found.";
@@ -531,8 +569,6 @@ namespace AzureDesignStudio.Server.Services
 
             try
             {
-                var credential = new ClientSecretCredential(subModel.TenantId.ToString(),
-                    subModel.ClientId.ToString(), subModel.ClientSecret);
                 var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), credential,
                     ArmEndpointSet.AzureCloud);
                 var managementEndpoint = transport.Endpoints.ManagementEndpoint;
@@ -717,7 +753,7 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var displayName = context.GetHttpContext().User.FindFirst("name")?.Value;
+            var displayName = ServiceTools.GetUser(context).FindFirst("name")?.Value;
             var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
 
             var existing = await _designContext.AdsPlanApprovals.FindAsync([planHash], context.CancellationToken);
@@ -1047,8 +1083,8 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var subModel = await GetSubscriptionInfo(userId, subscriptionId);
-            if (subModel == null)
+            var credential = await GetCredentialAsync(userId, subscriptionId);
+            if (credential == null)
             {
                 _logger.LogWarning("No subscription is found.");
                 response.StatusCode = StatusCodes.Status404NotFound;
@@ -1058,8 +1094,6 @@ namespace AzureDesignStudio.Server.Services
 
             // The stack lives in the resource group's region - the same honest ArmClient lookup
             // the WhatIf path uses; a stack location is never guessed or defaulted.
-            var credential = new ClientSecretCredential(subModel.TenantId.ToString(),
-                subModel.ClientId.ToString(), subModel.ClientSecret);
             var armClient = new ArmClient(credential, subscriptionId.ToString());
             var (rg, rgStatus, rgError) = await FindResourceGroupAsync(armClient, request.ResourceGroupName, context.CancellationToken);
             if (rg == null)
@@ -1297,8 +1331,8 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var subModel = await GetSubscriptionInfo(userId, subscriptionId);
-            if (subModel == null)
+            var credential = await GetCredentialAsync(userId, subscriptionId);
+            if (credential == null)
             {
                 _logger.LogWarning("No subscription is found.");
                 response.StatusCode = StatusCodes.Status404NotFound;
@@ -1306,8 +1340,6 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var credential = new ClientSecretCredential(subModel.TenantId.ToString(),
-                subModel.ClientId.ToString(), subModel.ClientSecret);
             var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), credential, ArmEndpointSet.AzureCloud);
 
             string stackJson;
@@ -1443,7 +1475,7 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var displayName = context.GetHttpContext().User.FindFirst("name")?.Value;
+            var displayName = ServiceTools.GetUser(context).FindFirst("name")?.Value;
             var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
 
             var row = await _designContext.AdsGuardrailPolicies.FindAsync([GuardrailRowId], context.CancellationToken);
@@ -1915,8 +1947,8 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var subModel = await GetSubscriptionInfo(new Guid(userIdClaim), subscriptionId);
-            if (subModel == null)
+            var credential = await GetCredentialAsync(new Guid(userIdClaim), subscriptionId);
+            if (credential == null)
             {
                 _logger.LogWarning("No subscription is found.");
                 response.StatusCode = StatusCodes.Status404NotFound;
@@ -1924,7 +1956,7 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var displayName = context.GetHttpContext().User.FindFirst("name")?.Value;
+            var displayName = ServiceTools.GetUser(context).FindFirst("name")?.Value;
             var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
 
             var existing = await _designContext.AdsDecomApprovals.FindAsync([executionHash], context.CancellationToken);
@@ -1997,8 +2029,8 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var subModel = await GetSubscriptionInfo(new Guid(userIdClaim), subscriptionId);
-            if (subModel == null)
+            var credential = await GetCredentialAsync(new Guid(userIdClaim), subscriptionId);
+            if (credential == null)
             {
                 _logger.LogWarning("No subscription is found.");
                 response.StatusCode = StatusCodes.Status404NotFound;
@@ -2075,8 +2107,6 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var credential = new ClientSecretCredential(subModel.TenantId.ToString(),
-                subModel.ClientId.ToString(), subModel.ClientSecret);
 
             var findings = new List<string>();
             var emptyTags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -2122,7 +2152,7 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var displayName = context.GetHttpContext().User.FindFirst("name")?.Value;
+            var displayName = ServiceTools.GetUser(context).FindFirst("name")?.Value;
             var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
 
             // Consume the approval and land the Started row before any ARM mutation; a failed audit
@@ -2255,8 +2285,8 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var subModel = await GetSubscriptionInfo(new Guid(userIdClaim), subscriptionId);
-            if (subModel == null)
+            var credential = await GetCredentialAsync(new Guid(userIdClaim), subscriptionId);
+            if (credential == null)
             {
                 _logger.LogWarning("No subscription is found.");
                 response.StatusCode = StatusCodes.Status404NotFound;
@@ -2271,7 +2301,7 @@ namespace AzureDesignStudio.Server.Services
                 return response;
             }
 
-            var displayName = context.GetHttpContext().User.FindFirst("name")?.Value;
+            var displayName = ServiceTools.GetUser(context).FindFirst("name")?.Value;
             var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
             var applyId = Guid.NewGuid();
 
@@ -2280,8 +2310,6 @@ namespace AzureDesignStudio.Server.Services
             await RecordDecomWindowEventAsync(applyId, request.WindowId, "", "",
                 subscriptionId.ToString(), principal, "Aborted", null);
 
-            var credential = new ClientSecretCredential(subModel.TenantId.ToString(),
-                subModel.ClientId.ToString(), subModel.ClientSecret);
             var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), credential, ArmEndpointSet.AzureCloud);
             var endpoint = transport.Endpoints.ManagementEndpoint + "/";
             var lockName = ProtectionWindowPlanner.LockNameFor(request.WindowId);

@@ -66,8 +66,11 @@ public static partial class ArmTemplateValidator
                 return diagnostics;
             }
 
-            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var dependencies = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            // A resource's identity is its type plus its name: ARM allows a storage account and a
+            // virtual network to share a name. Dependencies are keyed by identity, "type|name".
+            var identities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var identitiesByName = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            var declared = new List<(string Identity, string Name, List<string> DependsOn)>();
             foreach (var resource in resources.EnumerateArray())
             {
                 var name = Str(resource, "name");
@@ -83,24 +86,41 @@ public static partial class ArmTemplateValidator
                 if (string.IsNullOrEmpty(Str(resource, "apiVersion")))
                     diagnostics.Add(new ArmDiagnostic(ArmDiagnosticSeverity.Error, "resource.api_version", $"Resource '{label}' has no apiVersion"));
 
-                if (!string.IsNullOrEmpty(name) && !names.Add(name))
-                    diagnostics.Add(new ArmDiagnostic(ArmDiagnosticSeverity.Error, "resource.duplicate", $"Duplicate resource name '{name}'"));
+                if (string.IsNullOrEmpty(name))
+                    continue;
+                var identity = $"{type}|{name}";
+                if (!identities.Add(identity))
+                    diagnostics.Add(new ArmDiagnostic(ArmDiagnosticSeverity.Error, "resource.duplicate", $"Duplicate resource '{name}' of type '{type}'"));
+                if (!identitiesByName.TryGetValue(name, out var sameName))
+                    identitiesByName[name] = sameName = [];
+                sameName.Add(identity);
 
-                if (resource.TryGetProperty("dependsOn", out var dependsOn) && dependsOn.ValueKind == JsonValueKind.Array && !string.IsNullOrEmpty(name))
-                    dependencies[name] = dependsOn.EnumerateArray()
-                        .Where(d => d.ValueKind == JsonValueKind.String)
-                        .Select(d => d.GetString()!)
-                        .ToList();
+                var dependsOn = resource.TryGetProperty("dependsOn", out var d) && d.ValueKind == JsonValueKind.Array
+                    ? d.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!).ToList()
+                    : [];
+                declared.Add((identity, name, dependsOn));
             }
 
-            foreach (var (from, deps) in dependencies)
-                foreach (var dep in deps)
-                    if (!names.Contains(dep))
-                        diagnostics.Add(new ArmDiagnostic(ArmDiagnosticSeverity.Error, "dependency.unknown", $"'{from}' dependsOn '{dep}', which is not in the template"));
+            var labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var dependencies = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (identity, name, dependsOn) in declared)
+            {
+                labels.TryAdd(identity, name);
+                if (!dependencies.TryGetValue(identity, out var resolved))
+                    dependencies[identity] = resolved = [];
+                foreach (var dep in dependsOn)
+                {
+                    if (ResolveDependency(dep, identities, identitiesByName) is { } target)
+                        resolved.Add(target);
+                    else if (IsCheckable(dep))
+                        diagnostics.Add(new ArmDiagnostic(ArmDiagnosticSeverity.Error, "dependency.unknown", $"'{name}' dependsOn '{dep}', which is not in the template"));
+                }
+            }
 
             var cycle = FindCycle(dependencies);
             if (cycle is not null)
-                diagnostics.Add(new ArmDiagnostic(ArmDiagnosticSeverity.Error, "dependency.cycle", $"dependsOn cycle: {string.Join(" -> ", cycle)}"));
+                diagnostics.Add(new ArmDiagnostic(ArmDiagnosticSeverity.Error, "dependency.cycle",
+                    $"dependsOn cycle: {string.Join(" -> ", cycle.Select(c => labels.GetValueOrDefault(c, c)))}"));
 
             var referencedParameters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var referencedVariables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -128,6 +148,88 @@ public static partial class ArmTemplateValidator
         }
 
         return diagnostics;
+    }
+
+    [GeneratedRegex(@"^\[\s*resourceId\((?<args>.*)\)\s*\]$")]
+    private static partial Regex ResourceIdCall();
+
+    [GeneratedRegex(@"^\s*'(?<value>(?:[^']|'')*)'\s*$")]
+    private static partial Regex QuotedLiteral();
+
+    /// <summary>
+    /// A dependsOn entry is a resource name, or a <c>[resourceId('type', 'name', ...)]</c>
+    /// expression (the generator always writes the latter; an optional subscription and
+    /// resource-group argument may lead). Returns the matched identity, or null.
+    /// </summary>
+    private static string? ResolveDependency(string dependency, HashSet<string> identities, Dictionary<string, List<string>> identitiesByName)
+    {
+        if (!dependency.StartsWith('['))
+            return identitiesByName.TryGetValue(dependency, out var matches) && matches.Count == 1 ? matches[0] : null;
+
+        if (LiteralResourceIdArguments(dependency) is not { } args)
+            return null;
+        var typeIndex = args.FindIndex(IsResourceType);
+        if (typeIndex < 0 || typeIndex == args.Count - 1)
+            return null;
+        var identity = $"{args[typeIndex]}|{string.Join('/', args.Skip(typeIndex + 1))}";
+        return identities.Contains(identity) ? identity : null;
+    }
+
+    /// <summary>"Microsoft.Network/virtualNetworks": a dotted namespace, then a slash.</summary>
+    private static bool IsResourceType(string argument)
+    {
+        var slash = argument.IndexOf('/');
+        var dot = argument.IndexOf('.');
+        return slash > 0 && dot >= 0 && dot < slash;
+    }
+
+    /// <summary>
+    /// Whether a miss is a real error: bare names and all-literal resourceId() calls can be
+    /// checked here; anything built from parameters or other functions is left to ARM.
+    /// </summary>
+    private static bool IsCheckable(string dependency) =>
+        !dependency.StartsWith('[') || LiteralResourceIdArguments(dependency) is not null;
+
+    private static List<string>? LiteralResourceIdArguments(string expression)
+    {
+        var call = ResourceIdCall().Match(expression.Trim());
+        if (!call.Success)
+            return null;
+        var args = new List<string>();
+        foreach (var part in SplitArguments(call.Groups["args"].Value))
+        {
+            var literal = QuotedLiteral().Match(part);
+            if (!literal.Success)
+                return null;
+            args.Add(literal.Groups["value"].Value.Replace("''", "'"));
+        }
+        return args;
+    }
+
+    /// <summary>Splits top-level comma-separated arguments, honouring quotes and nested parentheses.</summary>
+    private static IEnumerable<string> SplitArguments(string text)
+    {
+        var depth = 0;
+        var quoted = false;
+        var start = 0;
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (c == '\'')
+                quoted = !quoted;
+            else if (quoted)
+                continue;
+            else if (c == '(')
+                depth++;
+            else if (c == ')')
+                depth--;
+            else if (c == ',' && depth == 0)
+            {
+                yield return text[start..i];
+                start = i + 1;
+            }
+        }
+        yield return text[start..];
     }
 
     private static IEnumerable<string> EnumerateStrings(JsonElement element)

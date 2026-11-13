@@ -4,24 +4,27 @@ using Microsoft.AspNetCore.Components.Authorization;
 namespace AzureDesignStudio.Desktop;
 
 /// <summary>
-/// Authentication state backed by the native MSAL account cache. Starts
-/// anonymous (or restores the persisted account on first call); reacts to
-/// sign-in/sign-out raised by <see cref="MsalAccountService"/>.
+/// Sign-in state for the shared UI, from <see cref="DesktopIdentity"/>: the account signed in
+/// inside the app, or else the Azure CLI's account. Restored on first use; follows sign-in and
+/// sign-out raised by <see cref="MsalAccountService"/>.
 /// </summary>
 public class DesktopAuthenticationStateProvider : AuthenticationStateProvider
 {
-    private readonly MsalAccountService _msal;
-    private AuthenticationState _current = new(new ClaimsPrincipal(new ClaimsIdentity()));
+    private readonly DesktopIdentity _identity;
+    private AuthenticationState _current = new(DesktopIdentity.Anonymous);
     private bool _restored;
 
-    public DesktopAuthenticationStateProvider(MsalAccountService msal)
+    public DesktopAuthenticationStateProvider(MsalAccountService msal, DesktopIdentity identity)
     {
-        _msal = msal;
-        _msal.AuthStateChanged += user =>
+        _identity = identity;
+        msal.AuthStateChanged += user =>
         {
-            _current = new AuthenticationState(user is null
-                ? new ClaimsPrincipal(new ClaimsIdentity())
-                : user);
+            if (user is null)
+                _identity.MarkSignedOut();
+            else
+                _identity.MarkSignedIn();
+
+            _current = new AuthenticationState(user ?? DesktopIdentity.Anonymous);
             NotifyAuthenticationStateChanged(Task.FromResult(_current));
             return Task.CompletedTask;
         };
@@ -32,9 +35,7 @@ public class DesktopAuthenticationStateProvider : AuthenticationStateProvider
         if (!_restored)
         {
             _restored = true;
-            var principal = await _msal.RestorePrincipalAsync();
-            if (principal != null)
-                _current = new AuthenticationState(principal);
+            _current = new AuthenticationState(await _identity.GetAsync());
         }
         return _current;
     }

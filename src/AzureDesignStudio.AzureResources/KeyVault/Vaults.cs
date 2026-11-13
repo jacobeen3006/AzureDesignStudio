@@ -32,12 +32,6 @@ namespace AzureDesignStudio.AzureResources.KeyVault
         public override string ApiVersion => "2023-07-01";
 
         /// <summary>
-        /// SKU details.
-        /// </summary>
-        [JsonPropertyName("sku")]
-        public VaultsSku Sku { get; set; }
-
-        /// <summary>
         /// Properties describing the Key vault as a resource
         /// </summary>
         [JsonPropertyName("properties")]
@@ -75,6 +69,13 @@ namespace AzureDesignStudio.AzureResources.KeyVault
     [GeneratedCode("ArmTypeGenerator", "0.2.1.52938")]
     public partial class VaultsProperties
     {
+        /// <summary>
+        /// SKU details. Unlike most resources, a vault's sku sits inside properties -
+        /// a top-level sku is rejected at create time ("The key vault sku is invalid").
+        /// </summary>
+        [JsonPropertyName("sku")]
+        public VaultsSku Sku { get; set; }
+
         /// <summary>
         /// An object containing info about the tenant for the vault.
         /// </summary>

@@ -17,13 +17,17 @@ public sealed class WhatIfClient(ArmTransport transport)
 
     private const string ApiVersion = "2025-04-01";
 
-    public async Task<WhatIfSummary> WhatIfAsync(string subscriptionId, string resourceGroupName, string location,
+    /// <summary>
+    /// What-if at a resource group. The request carries no location: ARM rejects one at
+    /// resource-group scope (InvalidDeployment) - the group is the deployment's home.
+    /// </summary>
+    public async Task<WhatIfSummary> WhatIfAsync(string subscriptionId, string resourceGroupName,
         string armTemplate, string parameters, CancellationToken ct = default)
     {
         var url = $"{transport.Endpoints.ManagementEndpoint}/subscriptions/{subscriptionId}/resourcegroups/{resourceGroupName}"
             + $"/providers/Microsoft.Resources/deployments/{DeploymentName}/whatIf?api-version={ApiVersion}";
 
-        var body = BuildRequestBody(location, armTemplate, parameters);
+        var body = BuildRequestBody(null, armTemplate, parameters);
         var responseJson = await transport.PostAsyncPolled(url, body, maxPolls: 60, ct).ConfigureAwait(false);
         return WhatIfParser.Parse(responseJson);
     }
@@ -33,6 +37,7 @@ public sealed class WhatIfClient(ArmTransport transport)
     /// canonical scope path - tenant posts at the management endpoint root. <paramref name="location"/>
     /// is mandatory for non-resource-group targets: ARM requires a deployment location there, and
     /// the caller has already rejected an empty one rather than send an unplaceable request.
+    /// A resource-group target sends none (ARM rejects it there), whatever is passed.
     /// </summary>
     public async Task<WhatIfSummary> WhatIfAsync(DeployTargetScope scope, string location,
         string armTemplate, string parameters, CancellationToken ct = default)
@@ -41,19 +46,21 @@ public sealed class WhatIfClient(ArmTransport transport)
         var url = $"{transport.Endpoints.ManagementEndpoint}{scopePath}"
             + $"/providers/Microsoft.Resources/deployments/{DeploymentName}/whatIf?api-version={ApiVersion}";
 
-        var body = BuildRequestBody(location, armTemplate, parameters);
+        var body = BuildRequestBody(scope.Kind == DeployScopeKind.ResourceGroup ? null : location, armTemplate, parameters);
         var responseJson = await transport.PostAsyncPolled(url, body, maxPolls: 60, ct).ConfigureAwait(false);
         return WhatIfParser.Parse(responseJson);
     }
 
-    internal static string BuildRequestBody(string location, string armTemplate, string parameters)
+    internal static string BuildRequestBody(string? location, string armTemplate, string parameters)
     {
         using var template = ParseObject(armTemplate, "template");
         using var parametersDoc = string.IsNullOrWhiteSpace(parameters) ? null : ParseObject(parameters, "parameters");
 
         var sb = new StringBuilder();
-        sb.Append("{\"location\":").Append(JsonSerializer.Serialize(location));
-        sb.Append(",\"properties\":{\"mode\":\"Incremental\"");
+        sb.Append('{');
+        if (!string.IsNullOrEmpty(location))
+            sb.Append("\"location\":").Append(JsonSerializer.Serialize(location)).Append(',');
+        sb.Append("\"properties\":{\"mode\":\"Incremental\"");
         sb.Append(",\"template\":").Append(template.RootElement.GetRawText());
         sb.Append(",\"parameters\":").Append(parametersDoc is null ? "{}" : parametersDoc.RootElement.GetRawText());
         sb.Append("}}");

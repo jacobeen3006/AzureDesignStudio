@@ -75,6 +75,7 @@
         <ProjectReference Include="..\AzureDesignStudio\AzureDesignStudio.csproj" />
         <ProjectReference Include="..\AzureDesignStudio.Workspace\AzureDesignStudio.Workspace.csproj" />
         <ProjectReference Include="..\AzureDesignStudio.Discovery\AzureDesignStudio.Discovery.csproj" />
+    <ProjectReference Include="..\AzureDesignStudio.Services\AzureDesignStudio.Services.csproj" />
     </ItemGroup>
 
     <ItemGroup>

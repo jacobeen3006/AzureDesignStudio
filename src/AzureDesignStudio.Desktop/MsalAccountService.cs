@@ -29,8 +29,11 @@ public sealed class MsalAccountService
 
         var clientId = config["AzureAd:ClientId"];
         var authority = config["AzureAd:Authority"] ?? "https://login.microsoftonline.com/common";
+        // Sign-in asks for Azure management access: the app works against Azure directly,
+        // with no server of its own. A ServerScope is only for a build that talks to the
+        // hosted server; "<...>" placeholders count as unset.
         var scope = config["ServerScope"];
-        _scopes = string.IsNullOrWhiteSpace(scope) ? Array.Empty<string>() : new[] { scope };
+        _scopes = string.IsNullOrWhiteSpace(scope) || scope.Contains('<') ? new[] { ArmScope } : new[] { scope };
 
         if (string.IsNullOrWhiteSpace(clientId) || clientId.StartsWith('<'))
         {
@@ -41,21 +44,12 @@ public sealed class MsalAccountService
         }
 
         // Extension (not instance method) - shadows the deprecated WithBroker(bool).
+        // The Windows broker (WAM) answers on ms-appx-web://microsoft.aad.brokerplugin/{clientId},
+        // packaged or not; MSAL picks that itself. The registration lists it next to
+        // http://localhost (MSAL's loopback when the broker is unavailable) - no custom redirect here.
         var builder = Microsoft.Identity.Client.Broker.BrokerExtension.WithBroker(
             PublicClientApplicationBuilder.Create(clientId).WithAuthority(authority),
             new BrokerOptions(BrokerOptions.OperatingSystems.Windows) { Title = "Azure Design Studio sign-in" });
-
-        // Packaged (MSIX) identity needs the broker's msauth redirect; unpackaged
-        // dev builds keep MSAL's default loopback redirect.
-        try
-        {
-            var packageFamilyName = Windows.ApplicationModel.Package.Current.Id.FamilyName;
-            builder = builder.WithRedirectUri($"msauth://{packageFamilyName}/auth");
-        }
-        catch (Exception)
-        {
-            // unpackaged
-        }
 
         _pca = builder.Build();
     }
@@ -246,15 +240,21 @@ public sealed class MsalAccountService
             await AuthStateChanged(BuildPrincipal(account));
     }
 
-    private static ClaimsPrincipal BuildPrincipal(IAccount account)
+    /// <summary>The account as a principal. The object id ("oid") is what the services key a
+    /// user's records by; without it every call answered "not signed in".</summary>
+    internal static ClaimsPrincipal BuildPrincipal(IAccount account)
     {
         var username = account.Username ?? account.HomeAccountId?.ObjectId ?? "signed-in";
-        var identity = new ClaimsIdentity(new[]
+        var claims = new List<Claim>
         {
-            new Claim(ClaimTypes.Name, username),
-            new Claim("preferred_username", username),
-        }, authenticationType: "sso");
-        return new ClaimsPrincipal(identity);
+            new(ClaimTypes.Name, username),
+            new("preferred_username", username),
+        };
+        if (account.HomeAccountId?.ObjectId is { } objectId)
+            claims.Add(new Claim("oid", objectId));
+        if (account.HomeAccountId?.TenantId is { } tenantId)
+            claims.Add(new Claim("tid", tenantId));
+        return new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "sso"));
     }
 
     private void ReportSignInFailure(Exception e)

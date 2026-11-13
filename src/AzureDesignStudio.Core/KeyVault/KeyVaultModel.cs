@@ -25,13 +25,13 @@ namespace AzureDesignStudio.Core.KeyVault
         public override string ServiceName => "Key Vault";
         private readonly Vaults _vault = new()
         {
-            Sku = new()
-            {
-                Family = "A",
-                Name = "standard"
-            },
             Properties = new()
             {
+                Sku = new()
+                {
+                    Family = "A",
+                    Name = "standard"
+                },
                 TenantId = "[subscription().tenantId]",
                 EnableRbacAuthorization = true,
                 AccessPolicies = new List<object>(),
@@ -43,8 +43,8 @@ namespace AzureDesignStudio.Core.KeyVault
         [DisplayName("SKU")]
         public string Sku
         {
-            get => _vault.Sku.Name;
-            set => _vault.Sku.Name = value;
+            get => _vault.Properties.Sku.Name;
+            set => _vault.Properties.Sku.Name = value;
         }
         [MapToDto]
         [DisplayName("RBAC authorization")]

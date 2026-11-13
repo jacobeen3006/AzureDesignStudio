@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
 using AzureDesignStudio.Core.Common;
 
-namespace AzureDesignStudio.Server.Models
+namespace AzureDesignStudio.Services.Models
 {
     public class DesignDbContext : DbContext
     {
@@ -12,8 +12,11 @@ namespace AzureDesignStudio.Server.Models
         }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
-            modelBuilder.Entity<DesignModel>()
-                .ToTable(t => t.HasCheckConstraint("ADS_CHECK_JSON", "ISJSON(DesignData)=1"));
+            // ISJSON is SQL Server's; the desktop app keeps this model in SQLite, which has no
+            // such function and would refuse to create the table.
+            if (Database.ProviderName == "Microsoft.EntityFrameworkCore.SqlServer")
+                modelBuilder.Entity<DesignModel>()
+                    .ToTable(t => t.HasCheckConstraint("ADS_CHECK_JSON", "ISJSON(DesignData)=1"));
             modelBuilder.Entity<PlanApplyEventModel>().HasIndex(e => e.ApplyId);
             modelBuilder.Entity<DecomWindowEventModel>().HasIndex(e => e.ApplyId);
         }

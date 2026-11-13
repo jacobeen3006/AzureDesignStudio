@@ -18,7 +18,7 @@ namespace AzureDesignStudio.Core.Cost
     {
         public static string? Resolve(NodeModel node) => node switch
         {
-            VirtualMachineModel => null,                       // form exposes no size; cost map default applies
+            VirtualMachineModel vm => vm.VmSize,               // the size the form sets (and the export deploys)
             APIMModel apim => apim.SkuName,
             AppServicePlanModel plan => plan.SkuName,
             SqlDatabaseModel db => db.SkuName,
