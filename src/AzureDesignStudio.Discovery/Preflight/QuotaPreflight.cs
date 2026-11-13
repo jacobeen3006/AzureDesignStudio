@@ -101,7 +101,8 @@ public sealed class QuotaPreflight(ArmTransport transport)
     /// its first resource). VMs count their <c>hardwareProfile.vmSize</c>; scale sets
     /// <c>sku.name</c> x <c>sku.capacity</c>; AKS node pools (cluster profiles and
     /// <c>agentPools</c> children, which take their cluster's location) <c>vmSize</c> x
-    /// <c>maxCount</c> when autoscaling, else <c>count</c>; public IPs one of <c>sku.name</c>
+    /// <c>maxCount</c> when autoscaling, else <c>count</c>, and a Modify releases only the before
+    /// pool's <c>count</c> (the nodes that exist, never its maxCount); public IPs one of <c>sku.name</c>
     /// (default Standard) per Create. Spot and low-priority capacity is a separate pool and is
     /// skipped with one note; a resource without a location or size is skipped with a note naming
     /// it. Sums of zero are dropped; ordered by location, then size or SKU (ordinal).
@@ -235,9 +236,9 @@ public sealed class QuotaPreflight(ArmTransport transport)
                 AddCompute(location, oldSize, -oldCapacity);
         }
 
-        /// <summary>Each <c>agentPoolProfiles[]</c> entry; a Modify subtracts the before pool of
-        /// the same name (case-insensitive). A pool that the after payload no longer lists is not
-        /// released.</summary>
+        /// <summary>Each <c>agentPoolProfiles[]</c> entry; a Modify subtracts the nodes of the
+        /// before pool of the same name (case-insensitive), its <c>count</c>. A pool that the after
+        /// payload no longer lists is not released.</summary>
         private void AddCluster(string id, JsonObject after, JsonObject? before)
         {
             if (Node(after, "properties", "agentPoolProfiles") is not JsonArray { Count: > 0 } pools)
@@ -291,8 +292,11 @@ public sealed class QuotaPreflight(ArmTransport transport)
                 return;
             }
             AddCompute(location, size, count);
+            // A Modify releases only the nodes that exist: usage counts the before pool's `count`,
+            // never its maxCount, whether or not it autoscales. Without a before count nothing is
+            // released, so the request can only be too high.
             if (previous is not null && !IsSpotPriority(Text(previous, "scaleSetPriority"))
-                && Text(previous, "vmSize") is { } oldSize && NodeCount(previous) is { } oldCount)
+                && Text(previous, "vmSize") is { } oldSize && Count(previous, "count") is { } oldCount)
                 AddCompute(location, oldSize, -oldCount);
         }
 

@@ -354,10 +354,42 @@ public class QuotaPreflightTests
 
         var demand = QuotaPreflight.DemandFrom([Modify(before, after)]);
 
-        // user: 10 - 5; system unchanged; the removed "old" pool is not released.
+        // user: the after maxCount 10 minus the 2 nodes that exist (never the before maxCount 5);
+        // system unchanged; the removed "old" pool is not released.
         Assert.Equal(
-            [new ComputeDemand("westeurope", "Standard_D8s_v5", 5), new ComputeDemand("westeurope", "Standard_E4s_v5", 2)],
+            [new ComputeDemand("westeurope", "Standard_D8s_v5", 8), new ComputeDemand("westeurope", "Standard_E4s_v5", 2)],
             demand.Compute);
+    }
+
+    [Fact]
+    public void Demand_AksModify_ReleasesOnlyTheNodesThatExist()
+    {
+        // Usage counts the nodes running now - the before pool's count - never its maxCount. A pool
+        // autoscaling between 3 and 20 nodes set to a fixed 10 adds 7, in a cluster profile and in
+        // an agentPools child alike.
+        var demand = QuotaPreflight.DemandFrom(
+        [
+            Modify(AksJson("aks1", Pool("user", "Standard_D8s_v5", 3, autoscale: true, maxCount: 20)),
+                AksJson("aks1", Pool("user", "Standard_D8s_v5", 10))),
+            Modify(AgentPoolJson("aks1", "burst", "Standard_D4s_v5", 3, autoscale: true, maxCount: 20),
+                AgentPoolJson("aks1", "burst", "Standard_D4s_v5", 10)),
+        ]);
+
+        Assert.Equal(
+            [new ComputeDemand("westeurope", "Standard_D4s_v5", 7), new ComputeDemand("westeurope", "Standard_D8s_v5", 7)],
+            demand.Compute);
+        Assert.Empty(demand.Notes);
+    }
+
+    [Fact]
+    public void Demand_AksModify_BeforePoolWithoutCount_ReleasesNothing()
+    {
+        var before = AksJson("aks1", WithoutCount(Pool("user", "Standard_D8s_v5", 3, autoscale: true, maxCount: 20)));
+        var after = AksJson("aks1", Pool("user", "Standard_D8s_v5", 4));
+
+        var demand = QuotaPreflight.DemandFrom([Modify(before, after)]);
+
+        Assert.Equal([new ComputeDemand("westeurope", "Standard_D8s_v5", 4)], demand.Compute);
     }
 
     [Fact]
@@ -572,6 +604,27 @@ public class QuotaPreflightTests
                 new QuotaFinding("westeurope", ESv5, "Standard ESv5 Family vCPUs", 0, 20, 4, QuotaStatus.Ok, "Standard_E4s_v5", null),
             ],
             result.Findings);
+    }
+
+    [Fact]
+    public async Task Check_AutoscaledPoolRedeploy_ReleasesNoQuotaItNeverUsed()
+    {
+        // A count-only redeploy over a pool that autoscales between 3 and 20 nodes changes nothing
+        // in DSv5. Releasing the before maxCount (17 x 8 vCPUs) would hide the new E16s_v5 VM from
+        // the regional total, where 85 + 16 of 100 exceeds it.
+        var arm = Arm()
+            .Route(SkusPath, SkuCatalog([.. Catalog(), Sku("Standard_E16s_v5", ESv5, "16")]))
+            .Route(ComputeUsagesPath("westeurope"), ComputeUsages(coresCurrent: 85));
+
+        var result = await Check(arm,
+            Modify(AksJson("aks1", Pool("user", "Standard_D8s_v5", 3, autoscale: true, maxCount: 20)),
+                AksJson("aks1", Pool("user", "Standard_D8s_v5", 3))),
+            Create(VmJson("vm1", "Standard_E16s_v5")));
+
+        var cores = Find(result, "cores");
+        Assert.Equal(QuotaStatus.Exceeds, cores.Status);
+        Assert.Equal(16, cores.Requested);
+        Assert.DoesNotContain(result.Findings, f => f.QuotaName == DSv5);
     }
 
     [Fact]
