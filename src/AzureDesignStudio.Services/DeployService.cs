@@ -1175,19 +1175,9 @@ namespace AzureDesignStudio.Services
             // Guardrails: the stack what-if rows carry ids and types, never tags. Scope and type rules
             // judge exactly as for a plain what-if; a tag rule cannot be judged, so any row that touches
             // an EXISTING resource (modify, detach, delete) is held back while tag rules exist.
-            var targets = summary.Changes.Where(c => c.Id.Length > 0)
-                .Select(c => new GuardrailTarget(c.Id, GuardrailEnforcement.TypeFromArmId(c.Id),
-                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase))).ToList();
-            var flags = GuardrailEnforcement.EvaluateTargets(prepared.Guardrails, targets).ToList();
+            var targets = StackGuardrailTargets(summary.Changes);
+            var flags = JudgeStackTargets(prepared.Guardrails, targets);
             var tagRules = prepared.Guardrails.ProtectedTags.Count > 0;
-            if (tagRules)
-            {
-                foreach (var touched in summary.Changes.Where(c => c.Id.Length > 0
-                             && c.Kind is StackChangeKind.Modify or StackChangeKind.Detach or StackChangeKind.Delete)
-                             .Select(c => c.Id).Distinct(StringComparer.OrdinalIgnoreCase))
-                    if (!flags.Any(f => string.Equals(f.ResourceId, touched, StringComparison.OrdinalIgnoreCase)))
-                        flags.Add(new GuardrailFinding(touched, "tag guardrails cannot be checked against a stack what-if (it carries no tags)"));
-            }
 
             var reason = summary.IndeterminacyReason;
             string? token = null;
@@ -1310,7 +1300,7 @@ namespace AzureDesignStudio.Services
             // from before the policy changed, is refused here without being spent.
             var whatIfCheck = _whatIfGate.ValidateAndConsumeForStack(request.WhatIfToken, subscriptionId.ToString(),
                 request.ResourceGroupName, body.PlanHash,
-                targets => GuardrailVeto(prepared.Guardrails, targets));
+                targets => StackGuardrailVeto(prepared.Guardrails, targets));
             if (!whatIfCheck.IsOk)
             {
                 _logger.LogWarning("Stack deploy blocked by what-if gate: {Code}", whatIfCheck.Code);
@@ -1542,6 +1532,43 @@ namespace AzureDesignStudio.Services
 
         /// <summary>Apply-time veto: the plan's bound targets against the live policy. The message
         /// lists every protected resource so the operator sees exactly what the list shields.</summary>
+        private const string TouchesExistingMarker = "ads:stack-touches-existing";
+        private const string TagRuleHoldBackReason = "tag guardrails cannot be checked against a stack what-if (it carries no tags)";
+
+        /// <summary>Guardrail targets for stack what-if rows. Rows carry ids and types, never tags; a row
+        /// that touches an EXISTING resource (modify, detach, delete) is marked, so the tag-rule hold-back
+        /// can be re-judged at apply time from the bound targets alone.</summary>
+        private static IReadOnlyList<GuardrailTarget> StackGuardrailTargets(IEnumerable<StackResourceChange> changes) =>
+            changes.Where(c => c.Id.Length > 0).Select(c =>
+            {
+                var tags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (c.Kind is StackChangeKind.Modify or StackChangeKind.Detach or StackChangeKind.Delete)
+                    tags[TouchesExistingMarker] = "true";
+                return new GuardrailTarget(c.Id, GuardrailEnforcement.TypeFromArmId(c.Id), tags);
+            }).ToList();
+
+        /// <summary>The one stack guardrail judgement, used by the preview and the apply so they cannot
+        /// drift: scope and type rules as for a plain what-if, and while the policy has tag rules every
+        /// marked (existing-resource) target is held back.</summary>
+        private static List<GuardrailFinding> JudgeStackTargets(GuardrailPolicy policy, IReadOnlyList<GuardrailTarget> targets)
+        {
+            var flags = GuardrailEnforcement.EvaluateTargets(policy, targets).ToList();
+            if (policy.ProtectedTags.Count > 0)
+                foreach (var touched in targets.Where(t => t.Tags.ContainsKey(TouchesExistingMarker))
+                             .Select(t => t.ResourceId).Distinct(StringComparer.OrdinalIgnoreCase))
+                    if (!flags.Any(f => string.Equals(f.ResourceId, touched, StringComparison.OrdinalIgnoreCase)))
+                        flags.Add(new GuardrailFinding(touched, TagRuleHoldBackReason));
+            return flags;
+        }
+
+        private static string? StackGuardrailVeto(GuardrailPolicy policy, IReadOnlyList<GuardrailTarget> targets)
+        {
+            var findings = JudgeStackTargets(policy, targets);
+            return findings.Count == 0
+                ? null
+                : "the plan touches do-not-touch resources: " + string.Join("; ", findings.Select(f => $"{f.ResourceId} ({f.Reason})"));
+        }
+
         private static string? GuardrailVeto(GuardrailPolicy policy, IReadOnlyList<GuardrailTarget> targets)
         {
             var findings = GuardrailEnforcement.EvaluateTargets(policy, targets);

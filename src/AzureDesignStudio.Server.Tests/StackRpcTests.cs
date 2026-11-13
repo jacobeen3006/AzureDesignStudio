@@ -258,6 +258,36 @@ public class StackRpcTests
     }
 
     [Fact]
+    public async Task CreateStack_TagRuleAddedAfterPreview_IsBlocked()
+    {
+        _arm.WhatIfResult = WhatIfBody(Change("Microsoft.Storage/storageAccounts/sa1", "modify"));
+        var preview = await Service.StackWhatIf(PreviewRequest(), Me);
+        Assert.NotEqual("", preview.WhatIfToken);
+        await Approve(preview.PlanHash);
+        await Service.SetGuardrailPolicy(new GuardrailPolicyRequest { Json = """{"tags":[{"key":"keep"}]}""" }, Me);
+
+        var response = await Service.CreateStack(CreateRequest(preview), Me);
+
+        Assert.Equal(400, response.StatusCode);
+        Assert.StartsWith("GUARDRAIL_PROTECTED", response.ErrorMessage);
+        Assert.False(_arm.Called("PUT", "/deploymentStacks/ads-stack"));
+        Assert.Single(_db.AdsPlanApprovals);
+        // Like other guardrail vetoes, the refusal does not spend the token: once the rule is gone it deploys.
+        await Service.SetGuardrailPolicy(new GuardrailPolicyRequest { Json = "{}" }, Me);
+        Assert.Equal(200, (await Service.CreateStack(CreateRequest(preview), Me)).StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateStack_TagRuleAddedAfterPreview_StillAllowsCreateOnlyStacks()
+    {
+        var preview = await Service.StackWhatIf(PreviewRequest(), Me);
+        await Approve(preview.PlanHash);
+        await Service.SetGuardrailPolicy(new GuardrailPolicyRequest { Json = """{"tags":[{"key":"keep"}]}""" }, Me);
+
+        Assert.Equal(200, (await Service.CreateStack(CreateRequest(preview), Me)).StatusCode);
+    }
+
+    [Fact]
     public async Task CreateStack_WithoutAToken_IsBlocked()
     {
         var preview = await Service.StackWhatIf(PreviewRequest(), Me);
