@@ -18,7 +18,7 @@ namespace AzureDesignStudio.Core.Models
 
         /// <summary>Every node connected to this one by a link, whichever end the link was
         /// drawn from - links on the canvas carry no direction the export can rely on.</summary>
-        protected IEnumerable<NodeModel> LinkedNodes =>
+        internal IEnumerable<NodeModel> LinkedNodes =>
             Ports.SelectMany(p => p.Links)
                 .SelectMany(l => new[] { (l.Source.Model as PortModel)?.Parent, (l.Target.Model as PortModel)?.Parent })
                 .OfType<NodeModel>()

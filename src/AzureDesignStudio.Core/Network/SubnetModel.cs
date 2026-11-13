@@ -185,6 +185,16 @@ namespace AzureDesignStudio.Core.Network
                 _subnet.Properties.NetworkSecurityGroup = null;
             }
 
+            if (NatGateway is { } nat)
+            {
+                _subnet.Properties.NatGateway = new() { Id = nat.ResourceId };
+                _subnet.DependsOn.Add(nat.ResourceId);
+            }
+            else
+            {
+                _subnet.Properties.NatGateway = null;
+            }
+
             // Don't include them in the serialization if they are empty. 
             if (_subnet.Properties.ServiceEndpoints.Count == 0)
                 _subnet.Properties.ServiceEndpoints = null;
@@ -193,6 +203,16 @@ namespace AzureDesignStudio.Core.Network
         }
 
         private NetworkSecurityGroups? _apimNsg;
+
+        /// <summary>The NAT gateway serving this subnet: the first one linked to a node placed in
+        /// the subnet, or in a group inside it (a VM in an availability set). Subnets have no
+        /// ports of their own, so the link is drawn to a machine.</summary>
+        public NatGatewayModel? NatGateway =>
+            Children.SelectMany(c => c is GroupModel g ? g.Children : [c])
+                .OfType<AzureNodeBase>()
+                .SelectMany(n => n.LinkedNodes)
+                .OfType<NatGatewayModel>()
+                .FirstOrDefault();
 
         public override IList<ResourceBase> GetArmResources()
         {

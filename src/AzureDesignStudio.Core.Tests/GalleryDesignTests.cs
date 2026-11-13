@@ -323,6 +323,9 @@ namespace AzureDesignStudio.Core.Tests
                 case "azure-firewall":
                     WithPublicIp(canvas.Add<NodeModel>(key, Name(key), 170, 170, Subnet("AzureFirewallSubnet")));
                     break;
+                case "nat-gateway": // ARM refuses one without a public IP
+                    WithPublicIp(canvas.Add<NodeModel>(key, Name(key), 170, 170));
+                    break;
                 case "azure-bastions":
                     WithPublicIp(canvas.Add<NodeModel>(key, Name(key), 170, 170, Subnet("AzureBastionSubnet")));
                     break;
