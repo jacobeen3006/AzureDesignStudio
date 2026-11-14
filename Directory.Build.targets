@@ -6,6 +6,6 @@
 
   <Target Name="AdsCheckAuditSuppressionExpiry" BeforeTargets="Restore;Build;PrepareForBuild">
     <Error Condition="$(_AdsExpiryCompare) &lt; 0"
-           Text="AutoMapper audit suppression expired on $(AdsAuditSuppressionAutoMapperExpires) (advisory GHSA-rvv3-g6hj-g44x); replace the package before this date. Today is $(_AdsToday)." />
+           Text="AutoMapper audit suppression expired on $(AdsAuditSuppressionAutoMapperExpires) (advisories GHSA-rvv3-g6hj-g44x, GHSA-gpwp-5797-mjff, GHSA-6vhm-j9h7-f9gh); replace the package before this date. Today is $(_AdsToday)." />
   </Target>
 </Project>

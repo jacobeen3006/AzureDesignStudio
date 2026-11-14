@@ -27,11 +27,21 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Single dated exception: AutoMapper 12.0.1 GHSA-rvv3-g6hj-g44x (DoS via
-         uncontrolled recursion). Mappings are shallow node DTOs; 13+ requires a
-         commercial license key. Phase 8 owns the replacement. The expiry property
-         above is enforced by Directory.Build.targets (AdsCheckAuditSuppressionExpiry). -->
+    <!-- Single dated exception covering three advisories, all High, all against
+         AutoMapper 12.0.1 (DoS via uncontrolled recursion):
+           GHSA-rvv3-g6hj-g44x (the original exception),
+           GHSA-gpwp-5797-mjff (recursion that bypasses MaxDepth) and
+           GHSA-6vhm-j9h7-f9gh (recursion with constructor parameters); the
+           second and third were published 2026-11-13, after the original
+           exception was measured. All three share the one expiry property above.
+         Mappings are shallow node DTOs; 13+ requires a commercial license key.
+         Phase 8 owns the replacement. The expiry is enforced by
+         Directory.Build.targets (AdsCheckAuditSuppressionExpiry).
+         NuGetAuditSuppress is advisory-scoped, not package-scoped: a different
+         package that carried one of these ids would be silenced too. -->
     <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-rvv3-g6hj-g44x" />
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-gpwp-5797-mjff" />
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-6vhm-j9h7-f9gh" />
   </ItemGroup>
 
 </Project>
