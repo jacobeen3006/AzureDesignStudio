@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Database Durability
 status: executing
-stopped_at: Completed 04-06-PLAN.md
-last_updated: "2026-11-14T12:56:20.968Z"
+stopped_at: Completed 04-07-PLAN.md
+last_updated: "2026-11-14T13:00:53.115Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 04 execution started
-state_head: a09fc09383519fdcd54afa713849be5a47bf83ce
+state_head: 023b702585017813f4558b3d65f266457413752b
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 34
-  completed_plans: 25
+  completed_plans: 26
   percent: 18
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 ## Current Position
 
 Phase: 04 (Database Durability) — EXECUTING
-Plan: 7 of 13
+Plan: 8 of 13
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 04 execution started
 
@@ -70,6 +70,7 @@ Progress: [██░░░░░░░░] 18%
 | Phase 04 P04 | 25min | 3 tasks | 13 files |
 | Phase 04 P05 | 40min | 3 tasks | 9 files |
 | Phase 04 P06 | 95min | 3 tasks | 10 files |
+| Phase 04 P07 | 30min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -103,6 +104,8 @@ Progress: [██░░░░░░░░] 18%
 - [Phase 04]: 04-05: integrity check classifies SQLite codes 3,5,6,7,8,10,13,14 as Inconclusive, never Corrupt; live file checked read-write, snapshots read-only
 - [Phase 04]: 04-05: .gitignore un-ignores src/AzureDesignStudio.Workspace/Backup/ (VS template ignores Backup*/)
 - [Phase 04]: 04-06: rollback is the rehearsed BACKUP/RESTORE sequence (a test runs it); Down() stays empty; a generated PK name is compared as PK_<table> and generated names match {8,16} hex digits
+- [Phase 04]: 04-07: premigration backup lives in WorkspaceSchema.UpgradeAsync (after the pending-migration read, before legacy adoption), so every entry point including new WorkspaceDb(path) shares it; a backup failure aborts the upgrade
+- [Phase 04]: 04-07: startup quarantine moves main+wal+shm to workspace.corrupt-<UTC>.db[-wal|-shm] (undo on partial failure); Inconclusive integrity results throw and move nothing
 
 ### Pending Todos
 
@@ -126,6 +129,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T12:56:20.864Z
-Stopped at: Completed 04-06-PLAN.md
+Last session: 2026-11-14T13:00:53.005Z
+Stopped at: Completed 04-07-PLAN.md
 Resume file: None

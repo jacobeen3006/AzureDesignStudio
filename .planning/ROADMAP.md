@@ -135,7 +135,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Startup `quick_check` surfaces a deliberately corrupted workspace instead of opening it, and a user can take a `VACUUM INTO` backup and restore it with data verified.
   5. MCP opens a WAL workspace read-only (or reports the explicit `ReadWrite + query_only` fallback it used) and passes a cold-workspace test; the baseline adopts existing DDL, reports or dedupes rows violating new unique indexes, and documents `__EFMigrationsLock` recovery.
 
-**Plans**: 6/13 plans executed
+**Plans**: 7/13 plans executed
 **Wave 1**
 - [x] 04-01-PLAN.md — Tooling and fixtures: dotnet-ef 10.0.13 root manifest, EF Design package, L1-L4 legacy workspace fixtures, loader and schema describer
 
@@ -149,7 +149,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 04-06-PLAN.md — SQL Server rehearsal in a container: parity, concurrent migrate, backup/restore rollback, migration 2, CI job
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 04-07-PLAN.md — Workspace startup: corruption quarantine with notice, premigration backup before any migration
+- [x] 04-07-PLAN.md — Workspace startup: corruption quarantine with notice, premigration backup before any migration
 - [ ] 04-08-PLAN.md — deploy.db under migrations (separable): SqliteDesignDbContext set, private backup, no model-creation calls outside the server bootstrapper
 
 **Wave 5** *(blocked on Wave 4 completion)*
@@ -285,7 +285,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 | 1. Land and Stabilize | 8/8 | Complete    | 2026-10-21 |
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
 | 3. Server Foundation and Integration Harness | 6/6 | Complete    | 2026-11-14 |
-| 4. Database Durability | 6/13 | In Progress | - |
+| 4. Database Durability | 7/13 | In Progress | - |
 | 5. Identity, Guardrails, and Offline Development | 0/TBD | Not started | - |
 | 6. Bounds, Payload Contract, and Health | 0/TBD | Not started | - |
 | 7. Round 2 Shell Completion | 0/TBD | Not started | - |
