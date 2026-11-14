@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Database Durability
 status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-11-14T12:08:54.719Z"
+stopped_at: Completed 04-04-PLAN.md
+last_updated: "2026-11-14T12:14:41.721Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 04 execution started
-state_head: 27346f0645ed16ede1d0506023d2f5a9cc870a76
+state_head: 4e525dcaa44a5efb0c660c50618cb29f5d01f653
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 34
-  completed_plans: 22
+  completed_plans: 23
   percent: 18
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 ## Current Position
 
 Phase: 04 (Database Durability) — EXECUTING
-Plan: 4 of 13
+Plan: 5 of 13
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 04 execution started
 
@@ -67,6 +67,7 @@ Progress: [██░░░░░░░░] 18%
 | Phase 04 P01 | 25min | 2 tasks | 14 files |
 | Phase 04 P02 | 30min | 3 tasks | 10 files |
 | Phase 04 P03 | 15min | 3 tasks | 11 files |
+| Phase 04 P04 | 25min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -93,6 +94,9 @@ Progress: [██░░░░░░░░] 18%
 - [Phase 04]: 04-01: legacy workspace fixtures are plain SQL built from shipped DDL; schema parity compared via pragmas, never sqlite_master text; fixture loader refuses non-temp targets
 - [Phase 04]: 04-02: workspace baseline migration is guarded SQL derived from EF's generated DDL; legacy adoption adds the Scans columns before it; Migrate bounded to 30s with lock-recovery message
 - [Phase 04]: 04-03: SQL Server migrations live in the Server project (SqlServerDesignDbContext); baseline Up is guarded T-SQL; Database:AllowCreate defaults to false and Database:Migrate=false with pending migrations refuses to start
+- [Phase 04]: Reader ladder descends only on SQLite codes 8 and 14; corrupt or foreign files fail loudly
+- [Phase 04]: synchronous stays FULL, journal_mode never set per open; one shared PragmaInterceptor per profile
+- [Phase 04]: Immutable rung refused when a non-empty -wal exists
 
 ### Pending Todos
 
@@ -116,6 +120,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T12:08:54.613Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-11-14T12:14:41.613Z
+Stopped at: Completed 04-04-PLAN.md
 Resume file: None
