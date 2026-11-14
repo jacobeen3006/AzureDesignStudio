@@ -229,7 +229,7 @@ public class StackRpcTests
         var plan = DeployPlanArtifact.Create(_subscription.ToString(), ResourceGroup, Template, "{}");
         var deploymentToken = _gate.Issue(_subscription.ToString(), ResourceGroup, Template, "{}",
             new WhatIfSummary { Status = "Succeeded", Changes = [new WhatIfChange(WhatIfChangeKind.Create, "/x", null, null, 0)] },
-            plan.CanonicalJson, plan.PlanHash);
+            plan.CanonicalJson, plan.PlanHash, scopeId: TestTenants.Contoso); // the caller's own scope
         var request = CreateRequest(preview);
         request.WhatIfToken = deploymentToken;
 

@@ -454,4 +454,66 @@ public sealed class TenantIsolationTests
         Assert.Empty(verify.AdsGuardrailPolicies);
         Assert.Empty(verify.AdsSecurityEvents);
     }
+
+    // --- previews belong to the scope that created them (D-07) ---
+
+    private static readonly string PlanHash = "sha256:" + new string('a', 64);
+
+    private static WhatIfSummary OneCreate() => new()
+    {
+        Status = "Succeeded",
+        Changes = [new WhatIfChange(WhatIfChangeKind.Create, "/x", null, null, 0)],
+    };
+
+    private DeployService ServiceOn(WhatIfTokenGate gate) => new(_db, NullLogger<DeployService>.Instance,
+        new FakeCryptoService(), gate, new ScriptedHttp(_ => null));
+
+    private Task<PlanApprovalResponse> Approve(DeployService service, ServerCallContext caller) =>
+        service.ApprovePlan(new PlanApprovalRequest { PlanHash = PlanHash }, caller);
+
+    [Fact]
+    public async Task AnotherScopesApprovalOfAPreviewIsStaleAndTheOwnersSucceeds()
+    {
+        var gate = new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl);
+        var service = ServiceOn(gate);
+        var contosoUser = Guid.NewGuid();
+        gate.Issue("sub", "rg", "tpl", "prm", OneCreate(), "{\"plan\":1}", PlanHash,
+            requestedByUserId: contosoUser.ToString("D"), scopeId: TestTenants.Contoso);
+
+        var foreign = await Approve(service, Member(Guid.NewGuid(), TestTenants.Fabrikam));
+
+        Assert.Equal(400, foreign.StatusCode);
+        Assert.StartsWith("WHAT_IF_STALE", foreign.ErrorMessage);
+        Assert.Empty(_db.AdsPlanApprovals);
+
+        var own = await Approve(service, Member(contosoUser, TestTenants.Contoso));
+
+        Assert.Equal(200, own.StatusCode);
+        Assert.Single(_db.AdsPlanApprovals);
+    }
+
+    [Fact]
+    public async Task APreviewIssuedWithoutAScopeCannotBeApprovedByAnyone()
+    {
+        var gate = new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl);
+        gate.Issue("sub", "rg", "tpl", "prm", OneCreate(), "{}", PlanHash);
+
+        var response = await Approve(ServiceOn(gate), Member(Guid.NewGuid(), TestTenants.Contoso));
+
+        Assert.StartsWith("WHAT_IF_STALE", response.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task TwoPersonalAccountsDoNotShareAPreview()
+    {
+        var gate = new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl);
+        var ada = Guid.NewGuid();
+        gate.Issue("sub", "rg", "tpl", "prm", OneCreate(), "{}", PlanHash, scopeId: ada);
+
+        var other = await Approve(ServiceOn(gate), Personal(Guid.NewGuid()));
+        var own = await Approve(ServiceOn(gate), Personal(ada));
+
+        Assert.StartsWith("WHAT_IF_STALE", other.ErrorMessage);
+        Assert.Equal(200, own.StatusCode);
+    }
 }

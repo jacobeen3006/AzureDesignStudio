@@ -44,11 +44,13 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
 
     private readonly object _sync = new();
     private readonly Dictionary<string, Entry> _tokens = new(StringComparer.Ordinal);
+    private long _sequence;
     private DateTimeOffset Now => (clock ?? (() => DateTimeOffset.UtcNow))();
 
     private sealed record Entry(string PayloadHash, DateTimeOffset Expires, bool HasDelete,
         IReadOnlyList<string> DeleteResourceIds, string CanonicalPlanJson, string PlanHash, string? RevertPlanJson,
-        IReadOnlyList<Unmanaged.GuardrailTarget>? GuardrailTargets, bool IsStack = false);
+        IReadOnlyList<Unmanaged.GuardrailTarget>? GuardrailTargets, bool IsStack = false,
+        string? RequestedByUserId = null, Guid? ScopeId = null, long Sequence = 0);
 
     /// <summary>
     /// Record a completed what-if review; returns the token the later deploy must present.
@@ -58,15 +60,20 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
     /// </summary>
     public string Issue(string subscriptionId, string resourceGroupName, string armTemplate, string parameters,
         WhatIfSummary summary, string canonicalPlanJson, string planHash, string? revertPlanJson = null,
-        IReadOnlyList<Unmanaged.GuardrailTarget>? guardrailTargets = null) =>
+        IReadOnlyList<Unmanaged.GuardrailTarget>? guardrailTargets = null,
+        string? requestedByUserId = null, Guid? scopeId = null) =>
         Issue(DeployTargetScope.ResourceGroupScope(subscriptionId, resourceGroupName), armTemplate, parameters,
-            summary, canonicalPlanJson, planHash, revertPlanJson, guardrailTargets);
+            summary, canonicalPlanJson, planHash, revertPlanJson, guardrailTargets, requestedByUserId, scopeId);
 
     /// <summary>Token bound to a full target identity (v2 11.2): the key names the canonical scope
-    /// path, so a token issued for one scope can never authorize the same bytes at another.</summary>
+    /// path, so a token issued for one scope can never authorize the same bytes at another.
+    /// <paramref name="requestedByUserId"/> and <paramref name="scopeId"/> record who asked and which
+    /// tenant scope (the caller's, D-07) the preview belongs to; the scope-aware peek and consume only
+    /// serve that scope.</summary>
     public string Issue(DeployTargetScope scope, string armTemplate, string parameters,
         WhatIfSummary summary, string canonicalPlanJson, string planHash, string? revertPlanJson = null,
-        IReadOnlyList<Unmanaged.GuardrailTarget>? guardrailTargets = null)
+        IReadOnlyList<Unmanaged.GuardrailTarget>? guardrailTargets = null,
+        string? requestedByUserId = null, Guid? scopeId = null)
     {
         // Fail closed: an indeterminate prediction never earns a deploy token, no matter
         // what the caller's checks looked like. This is the single choke point.
@@ -76,16 +83,20 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
         var token = Guid.NewGuid().ToString("N");
         var entry = new Entry(Hash(scope, armTemplate, parameters),
             Now.Add(ttl), summary.HasDelete, summary.DeleteResourceIds, canonicalPlanJson, planHash, revertPlanJson,
-            guardrailTargets);
+            guardrailTargets, RequestedByUserId: requestedByUserId, ScopeId: scopeId);
 
+        Store(token, entry);
+        return token;
+    }
+
+    private void Store(string token, Entry entry)
+    {
         lock (_sync)
         {
-            _tokens[token] = entry;
+            _tokens[token] = entry with { Sequence = ++_sequence };
             foreach (var key in _tokens.Where(kv => kv.Value.Expires <= Now).Select(kv => kv.Key).ToList())
                 _tokens.Remove(key);
         }
-
-        return token;
     }
 
     /// <summary>
@@ -111,24 +122,49 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
     }
 
     /// <summary>
+    /// Scope-aware peek (D-07): only live previews issued for <paramref name="scopeId"/> are considered
+    /// (a preview issued without a scope is invisible here). A deployment preview wins over a stack
+    /// preview of the same plan, then the newest wins. Also yields the requester recorded with the
+    /// winning preview.
+    /// </summary>
+    public bool TryPeekPlan(string planHash, Guid scopeId, out string canonicalPlanJson,
+        out string? revertPlanJson, out string? requestedByUserId)
+    {
+        lock (_sync)
+        {
+            var hit = _tokens.Values.Where(e => e.Expires > Now && e.ScopeId == scopeId
+                    && string.Equals(e.PlanHash, planHash, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(e => e.IsStack ? 1 : 0).ThenByDescending(e => e.Sequence).FirstOrDefault();
+            canonicalPlanJson = hit?.CanonicalPlanJson ?? string.Empty;
+            revertPlanJson = hit?.RevertPlanJson;
+            requestedByUserId = hit?.RequestedByUserId;
+            return hit is not null;
+        }
+    }
+
+    /// <summary>
     /// Validate and consume. A failed check never burns the token; a passed one is single-use.
     /// The optional guardrail veto runs on the targets bound at issue time - a vetoed plan is
     /// refused without spending the token, exactly like the read-only approval checks upstream.
     /// </summary>
     public WhatIfTokenCheck ValidateAndConsume(string? token, string subscriptionId, string resourceGroupName,
-        string armTemplate, string parameters, Func<IReadOnlyList<Unmanaged.GuardrailTarget>, string?>? guardrailVeto = null) =>
+        string armTemplate, string parameters, Func<IReadOnlyList<Unmanaged.GuardrailTarget>, string?>? guardrailVeto = null,
+        Guid? scopeId = null) =>
         ValidateAndConsume(token, DeployTargetScope.ResourceGroupScope(subscriptionId, resourceGroupName),
-            armTemplate, parameters, guardrailVeto);
+            armTemplate, parameters, guardrailVeto, scopeId);
 
+    /// <param name="scopeId">When given, the token must have been issued for that scope; any other
+    /// answers the same Stale result as an unknown token and is left alone.</param>
     public WhatIfTokenCheck ValidateAndConsume(string? token, DeployTargetScope scope,
-        string armTemplate, string parameters, Func<IReadOnlyList<Unmanaged.GuardrailTarget>, string?>? guardrailVeto = null)
+        string armTemplate, string parameters, Func<IReadOnlyList<Unmanaged.GuardrailTarget>, string?>? guardrailVeto = null,
+        Guid? scopeId = null)
     {
         if (string.IsNullOrWhiteSpace(token))
             return new WhatIfTokenCheck(WhatIfTokenStatus.Missing, "Run What-If on this exact template and parameters before deploying.");
 
         lock (_sync)
         {
-            if (!_tokens.TryGetValue(token, out var entry))
+            if (!_tokens.TryGetValue(token, out var entry) || (scopeId is { } caller && entry.ScopeId != caller))
                 return new WhatIfTokenCheck(WhatIfTokenStatus.Stale, "What-If token is unknown or already used; run What-If again.");
 
             if (entry.Expires <= Now)
@@ -167,19 +203,15 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
     /// </summary>
     public string IssueForStack(string subscriptionId, string resourceGroupName, string stackPlanHash,
         bool hasDelete, IReadOnlyList<string> deleteIds, string? approvalPlanHash = null,
-        string? canonicalPlanJson = null, IReadOnlyList<Unmanaged.GuardrailTarget>? guardrailTargets = null)
+        string? canonicalPlanJson = null, IReadOnlyList<Unmanaged.GuardrailTarget>? guardrailTargets = null,
+        string? requestedByUserId = null, Guid? scopeId = null)
     {
         var token = Guid.NewGuid().ToString("N");
         var entry = new Entry(StackHash(subscriptionId, resourceGroupName, stackPlanHash), Now.Add(ttl), hasDelete,
-            deleteIds, canonicalPlanJson ?? string.Empty, approvalPlanHash ?? string.Empty, null, guardrailTargets, IsStack: true);
+            deleteIds, canonicalPlanJson ?? string.Empty, approvalPlanHash ?? string.Empty, null, guardrailTargets, IsStack: true,
+            RequestedByUserId: requestedByUserId, ScopeId: scopeId);
 
-        lock (_sync)
-        {
-            _tokens[token] = entry;
-            foreach (var key in _tokens.Where(kv => kv.Value.Expires <= Now).Select(kv => kv.Key).ToList())
-                _tokens.Remove(key);
-        }
-
+        Store(token, entry);
         return token;
     }
 
@@ -187,14 +219,15 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
     /// check never burns it, a passed one is single-use, delete refuses, the guardrail veto runs on the
     /// bound targets), but a deployment token is refused with <see cref="WhatIfTokenStatus.PayloadChanged"/>.</summary>
     public WhatIfTokenCheck ValidateAndConsumeForStack(string? token, string subscriptionId, string resourceGroupName,
-        string stackPlanHash, Func<IReadOnlyList<Unmanaged.GuardrailTarget>, string?>? guardrailVeto = null)
+        string stackPlanHash, Func<IReadOnlyList<Unmanaged.GuardrailTarget>, string?>? guardrailVeto = null,
+        Guid? scopeId = null)
     {
         if (string.IsNullOrWhiteSpace(token))
             return new WhatIfTokenCheck(WhatIfTokenStatus.Missing, "Run the stack What-If on this exact template, parameters and stack policy before deploying.");
 
         lock (_sync)
         {
-            if (!_tokens.TryGetValue(token, out var entry))
+            if (!_tokens.TryGetValue(token, out var entry) || (scopeId is { } caller && entry.ScopeId != caller))
                 return new WhatIfTokenCheck(WhatIfTokenStatus.Stale, "What-If token is unknown or already used; run What-If again.");
 
             if (entry.Expires <= Now)

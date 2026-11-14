@@ -483,7 +483,8 @@ namespace AzureDesignStudio.Services
                 {
                     token = _whatIfGate.Issue(target, request.ArmTemplate, parametersJson, summary,
                         plan.CanonicalJson, plan.PlanHash, revert.DocumentJson,
-                        GuardrailEnforcement.Targets(summary.Changes));
+                        GuardrailEnforcement.Targets(summary.Changes),
+                        requestedByUserId: caller.UserIdText, scopeId: caller.ScopeId);
                 }
 
                 response.StatusCode = StatusCodes.Status200OK;
@@ -880,7 +881,9 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            if (!_whatIfGate.TryPeekPlan(planHash, out var planJson, out var revertJson))
+            // Only a preview issued for the caller's own scope is approvable (D-07). The requester it
+            // names is kept for the approval row (plan 05-08) and the approver rules (plan 05-09).
+            if (!_whatIfGate.TryPeekPlan(planHash, caller.ScopeId, out var planJson, out var revertJson, out _))
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
                 response.ErrorMessage = "WHAT_IF_STALE: no live What-If preview exists for this plan; run What-If first.";
@@ -1083,7 +1086,7 @@ namespace AzureDesignStudio.Services
             }
             var whatIfCheck = _whatIfGate.ValidateAndConsume(request.WhatIfToken, target,
                 request.ArmTemplate, parametersJson,
-                targets => GuardrailVeto(guardrailPolicy, targets));
+                targets => GuardrailVeto(guardrailPolicy, targets), scopeId: caller.ScopeId);
             if (!whatIfCheck.IsOk)
             {
                 _logger.LogWarning("Deploy blocked by what-if gate: {Code}", whatIfCheck.Code);
@@ -1328,7 +1331,8 @@ namespace AzureDesignStudio.Services
                     request.ArmTemplate, prepared.ParametersJson);
                 token = _whatIfGate.IssueForStack(prepared.SubscriptionId.ToString(), request.ResourceGroupName,
                     prepared.Body.PlanHash, summary.HasDelete, summary.DeleteResourceIds,
-                    plan.PlanHash, plan.CanonicalJson, targets);
+                    plan.PlanHash, plan.CanonicalJson, targets,
+                    requestedByUserId: prepared.Caller.UserIdText, scopeId: prepared.Caller.ScopeId);
             }
             else
                 _logger.LogWarning("Stack what-if is indeterminate; no token issued: {Reason}", reason);
@@ -1433,7 +1437,7 @@ namespace AzureDesignStudio.Services
             // from before the policy changed, is refused here without being spent.
             var whatIfCheck = _whatIfGate.ValidateAndConsumeForStack(request.WhatIfToken, subscriptionId.ToString(),
                 request.ResourceGroupName, body.PlanHash,
-                targets => StackGuardrailVeto(prepared.Guardrails, targets));
+                targets => StackGuardrailVeto(prepared.Guardrails, targets), scopeId: prepared.Caller.ScopeId);
             if (!whatIfCheck.IsOk)
             {
                 _logger.LogWarning("Stack deploy blocked by what-if gate: {Code}", whatIfCheck.Code);
