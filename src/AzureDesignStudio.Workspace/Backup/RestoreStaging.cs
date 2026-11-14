@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 
 namespace AzureDesignStudio.Workspace;
 
@@ -35,16 +36,20 @@ public static class RestoreStaging
         Path.Combine(Path.GetFullPath(appDataDirectory), StagingFolderName);
 
     /// <summary>
-    /// Verifies a candidate file in place: it exists and is not empty, starts with the SQLite header and
-    /// passes <c>integrity_check</c>. Callers verify the staged copy, never the user's original.
+    /// Verifies a candidate file in place: it exists and is not empty, starts with the SQLite header, passes
+    /// <c>integrity_check</c>, holds no triggers, views, virtual tables or tables outside the workspace model,
+    /// has only migration ids this build knows (a newer schema is refused; a file with no history table is a
+    /// legacy database that the startup upgrade migrates forward) and, when a manifest accompanies it,
+    /// matches the manifest's SHA-256 and row counts. Every reason is collected. Callers verify the staged
+    /// copy, never the user's original.
     /// </summary>
     public static Task<RestoreVerification> VerifyAsync(string candidatePath, string? manifestPath, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(candidatePath);
-        return Task.Run(() => Verify(Path.GetFullPath(candidatePath)), ct);
+        return Task.Run(() => Verify(Path.GetFullPath(candidatePath), manifestPath), ct);
     }
 
-    private static RestoreVerification Verify(string candidate)
+    private static RestoreVerification Verify(string candidate, string? manifestPath)
     {
         var reasons = new List<string>();
         if (!File.Exists(candidate))
@@ -56,9 +61,172 @@ public static class RestoreStaging
 
         var integrity = WorkspaceIntegrity.Check(candidate, IntegrityDepth.Full, IntegrityAccess.Snapshot);
         if (integrity.Outcome != IntegrityOutcome.Ok)
+        {
             reasons.Add($"The database failed its integrity check ({integrity.Outcome}): {string.Join("; ", integrity.Problems)}");
+            return new RestoreVerification(false, reasons);
+        }
 
-        return new RestoreVerification(reasons.Count == 0, reasons);
+        var counts = VerifySchema(candidate, reasons);
+        VerifyManifest(candidate, manifestPath, counts, reasons, out var note);
+
+        var accepted = reasons.Count == 0;
+        if (accepted && note is not null) reasons.Add(note);
+        return new RestoreVerification(accepted, reasons);
+    }
+
+    private static readonly string[] BookkeepingTables =
+        ["__EFMigrationsHistory", "__EFMigrationsLock", "sqlite_sequence", "sqlite_stat1"];
+
+    // Read once from the model and the compiled migrations: nothing here opens a database.
+    private static readonly Lazy<(HashSet<string> Tables, HashSet<string> Migrations)> Known = new(() =>
+    {
+        using var context = new WorkspaceDbContextFactory().CreateDbContext([]);
+        var tables = context.Model.GetEntityTypes()
+            .Select(e => e.GetTableName())
+            .OfType<string>()
+            .ToHashSet(StringComparer.Ordinal);
+        tables.UnionWith(BookkeepingTables);
+        return (tables, context.Database.GetMigrations().ToHashSet(StringComparer.Ordinal));
+    });
+
+    /// <summary>
+    /// Reads the schema on a read-only, unpooled connection with <c>trusted_schema</c> off. Returns the row
+    /// count of every table (only needed for the manifest comparison) or null when the schema was rejected.
+    /// Names read from the file are shown in reasons and used as quoted identifiers for counting only.
+    /// </summary>
+    private static Dictionary<string, long>? VerifySchema(string candidate, List<string> reasons)
+    {
+        var (knownTables, knownMigrations) = Known.Value;
+        try
+        {
+            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = candidate,
+                Mode = SqliteOpenMode.ReadOnly,
+                Pooling = false,
+            }.ToString());
+            connection.Open();
+            using (var pragma = connection.CreateCommand())
+            {
+                pragma.CommandText = "PRAGMA trusted_schema=OFF";
+                pragma.ExecuteNonQuery();
+            }
+
+            var tables = new List<string>();
+            var rejected = false;
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "SELECT type, name, sql FROM sqlite_master";
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                {
+                    var type = reader.GetString(0);
+                    var name = reader.GetString(1);
+                    var sql = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                    switch (type)
+                    {
+                        case "trigger":
+                            reasons.Add($"The database contains a trigger ({Safe(name)}); a workspace never has triggers.");
+                            rejected = true;
+                            break;
+                        case "view":
+                            reasons.Add($"The database contains a view ({Safe(name)}); a workspace never has views.");
+                            rejected = true;
+                            break;
+                        case "table" when sql.StartsWith("CREATE VIRTUAL TABLE", StringComparison.OrdinalIgnoreCase):
+                            reasons.Add($"The database contains a virtual table ({Safe(name)}); a workspace never has virtual tables.");
+                            rejected = true;
+                            break;
+                        case "table" when !knownTables.Contains(name):
+                            reasons.Add($"The database contains a table this app does not know ({Safe(name)}).");
+                            rejected = true;
+                            break;
+                        case "table":
+                            tables.Add(name);
+                            break;
+                    }
+                }
+            }
+
+            if (tables.Contains("__EFMigrationsHistory", StringComparer.Ordinal))
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT \"MigrationId\" FROM \"__EFMigrationsHistory\"";
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                {
+                    var id = reader.GetString(0);
+                    if (knownMigrations.Contains(id)) continue;
+                    reasons.Add($"The database comes from a newer version of the app (unknown migration {Safe(id)}); update the app to restore it.");
+                    rejected = true;
+                }
+            }
+
+            if (rejected) return null;
+
+            var counts = new Dictionary<string, long>(StringComparer.Ordinal);
+            // The manifest counts the same set as WorkspaceBackup: everything except SQLite's own sqlite_* tables.
+            foreach (var table in tables.Where(t => !t.StartsWith("sqlite_", StringComparison.Ordinal)))
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = $"SELECT COUNT(*) FROM \"{table.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+                counts[table] = Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+            }
+
+            return counts;
+        }
+        catch (SqliteException e)
+        {
+            reasons.Add($"The database schema could not be read (SQLite error {e.SqliteErrorCode}): {Safe(e.Message)}");
+            return null;
+        }
+    }
+
+    private static void VerifyManifest(
+        string candidate, string? manifestPath, Dictionary<string, long>? counts, List<string> reasons, out string? note)
+    {
+        note = null;
+        if (manifestPath is null || !File.Exists(manifestPath))
+        {
+            note = "No manifest came with the file, so its SHA-256 and row counts were not compared.";
+            return;
+        }
+
+        BackupManifest manifest;
+        try
+        {
+            manifest = BackupManifest.Read(manifestPath);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            reasons.Add($"The manifest next to the file could not be read: {Safe(e.Message)}");
+            return;
+        }
+
+        string actualHash;
+        using (var stream = File.OpenRead(candidate))
+            actualHash = Convert.ToHexStringLower(SHA256.HashData(stream));
+        if (!string.Equals(actualHash, manifest.Sha256, StringComparison.OrdinalIgnoreCase))
+            reasons.Add("The file's SHA-256 does not match its manifest; the file changed after the backup was taken.");
+
+        if (counts is null || manifest.TableCounts is null) return;
+        foreach (var (table, expected) in manifest.TableCounts)
+        {
+            if (!counts.TryGetValue(table, out var actual))
+                reasons.Add($"Table {Safe(table)} is in the manifest but not in the file.");
+            else if (actual != expected)
+                reasons.Add($"Table {Safe(table)} has {actual} rows but the manifest says {expected}.");
+        }
+
+        foreach (var table in counts.Keys.Where(t => !manifest.TableCounts.ContainsKey(t)))
+            reasons.Add($"Table {Safe(table)} is in the file but not in the manifest.");
+    }
+
+    // Text read from an untrusted file ends up in messages: no control characters, bounded length.
+    private static string Safe(string text)
+    {
+        var clean = new string(text.Select(c => char.IsControl(c) ? '?' : c).ToArray());
+        return clean.Length <= 80 ? clean : clean[..80] + "...";
     }
 
     private static bool HasSqliteHeader(string path)

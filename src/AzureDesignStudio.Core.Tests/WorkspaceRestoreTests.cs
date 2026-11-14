@@ -117,6 +117,270 @@ namespace AzureDesignStudio.Core.Tests
             Assert.False(Directory.Exists(_temp.Path("restore-staging.new")));
         }
 
+        // ---- Task 2: verification rules ----------------------------------------------------------------
+
+        /// <summary>A real backup (3 designs) with its manifest, in a folder away from the workspace.</summary>
+        private async Task<BackupResult> BaseBackupAsync()
+        {
+            var db = WorkspaceStartup.Open(Options()).Db;
+            AddDesigns(db, 3, "d-");
+            SqliteConnection.ClearAllPools();
+            return await WorkspaceBackup.CreateAsync(WorkspacePath, _temp.Path("source-backups"), BackupReason.Manual, Now.AddHours(-1));
+        }
+
+        /// <summary>Copies the backup to a fresh path (no sidecar) and lets <paramref name="mutate"/> change it on an unpooled connection.</summary>
+        private string MutatedCopy(BackupResult backup, string name, Action<SqliteConnection> mutate)
+        {
+            var path = _temp.Path(name);
+            File.Copy(backup.Path, path);
+            using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = path,
+                Mode = SqliteOpenMode.ReadWrite,
+                Pooling = false,
+            }.ToString()))
+            {
+                connection.Open();
+                mutate(connection);
+            }
+
+            return path;
+        }
+
+        private static void Exec(SqliteConnection connection, string sql)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            command.ExecuteNonQuery();
+        }
+
+        private async Task<RestoreVerification> StageAndExpectRejectedAsync(string picked)
+        {
+            var verdict = await RestoreStaging.StageAsync(picked, _temp.Root);
+            Assert.False(verdict.Accepted);
+            Assert.NotEmpty(verdict.Reasons);
+            Assert.Null(RestoreStaging.GetPending(_temp.Root));
+            Assert.False(Directory.Exists(_temp.Path("restore-staging")));
+            return verdict;
+        }
+
+        [Fact]
+        public async Task ACandidateWithATrigger_IsRejected()
+        {
+            var backup = await BaseBackupAsync();
+            var picked = MutatedCopy(backup, "trigger.db", c =>
+                Exec(c, "CREATE TRIGGER evil AFTER INSERT ON \"Designs\" BEGIN SELECT 1; END"));
+
+            var verdict = await StageAndExpectRejectedAsync(picked);
+
+            Assert.Contains(verdict.Reasons, r => r.Contains("trigger", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public async Task ACandidateWithAView_IsRejected()
+        {
+            var backup = await BaseBackupAsync();
+            var picked = MutatedCopy(backup, "view.db", c => Exec(c, "CREATE VIEW evil AS SELECT * FROM \"Designs\""));
+
+            var verdict = await StageAndExpectRejectedAsync(picked);
+
+            Assert.Contains(verdict.Reasons, r => r.Contains("view", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public async Task ACandidateWithAVirtualTable_IsRejected()
+        {
+            var backup = await BaseBackupAsync();
+            var picked = MutatedCopy(backup, "virtual.db", c => Exec(c, "CREATE VIRTUAL TABLE evil USING fts5(body)"));
+
+            var verdict = await StageAndExpectRejectedAsync(picked);
+
+            Assert.Contains(verdict.Reasons, r => r.Contains("virtual", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public async Task ACandidateWithATableOutsideTheModel_IsRejected()
+        {
+            var backup = await BaseBackupAsync();
+            var picked = MutatedCopy(backup, "unknown.db", c => Exec(c, "CREATE TABLE \"Evil\" (\"Id\" INTEGER)"));
+
+            var verdict = await StageAndExpectRejectedAsync(picked);
+
+            Assert.Contains(verdict.Reasons, r => r.Contains("Evil", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task ACandidateFromANewerSchema_IsRejected_WithAReasonThatSaysSo()
+        {
+            var backup = await BaseBackupAsync();
+            var picked = MutatedCopy(backup, "newer.db", c => Exec(c,
+                "INSERT INTO \"__EFMigrationsHistory\" (\"MigrationId\", \"ProductVersion\") VALUES ('99991231235959_FromTheFuture', '99.0.0')"));
+
+            var verdict = await StageAndExpectRejectedAsync(picked);
+
+            Assert.Contains(verdict.Reasons, r => r.Contains("newer", StringComparison.OrdinalIgnoreCase)
+                && r.Contains("99991231235959_FromTheFuture", StringComparison.Ordinal));
+        }
+
+        private string PickedWithSidecar(BackupResult backup, string name, Func<BackupManifest, BackupManifest> edit)
+        {
+            var picked = _temp.Path(name);
+            File.Copy(backup.Path, picked);
+            edit(BackupManifest.Read(backup.ManifestPath)).Write(BackupManifest.PathFor(picked));
+            return picked;
+        }
+
+        [Fact]
+        public async Task ACandidateWithAMatchingManifest_IsAccepted_AndTheManifestIsStagedWithIt()
+        {
+            var backup = await BaseBackupAsync();
+            var picked = PickedWithSidecar(backup, "ok.db", m => m);
+
+            var verdict = await RestoreStaging.StageAsync(picked, _temp.Root);
+
+            Assert.True(verdict.Accepted, string.Join("; ", verdict.Reasons));
+            Assert.True(File.Exists(_temp.Path("restore-staging/candidate.db.manifest.json")));
+        }
+
+        [Fact]
+        public async Task ACandidateWhoseManifestRowCountDiffers_IsRejected()
+        {
+            var backup = await BaseBackupAsync();
+            var picked = PickedWithSidecar(backup, "counts.db", m =>
+                m with { TableCounts = m.TableCounts.ToDictionary(c => c.Key, c => c.Key == "Designs" ? c.Value + 1 : c.Value) });
+
+            var verdict = await StageAndExpectRejectedAsync(picked);
+
+            Assert.Contains(verdict.Reasons, r => r.Contains("Designs", StringComparison.Ordinal)
+                && r.Contains("row", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public async Task ACandidateWhoseManifestSha256Differs_IsRejected()
+        {
+            var backup = await BaseBackupAsync();
+            var picked = PickedWithSidecar(backup, "sha.db", m => m with { Sha256 = new string('0', 64) });
+
+            var verdict = await StageAndExpectRejectedAsync(picked);
+
+            Assert.Contains(verdict.Reasons, r => r.Contains("SHA-256", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task ACandidateWithoutAManifest_IsAccepted_WithANote()
+        {
+            var backup = await BaseBackupAsync();
+            var picked = MutatedCopy(backup, "bare.db", _ => { });
+
+            var verdict = await RestoreStaging.StageAsync(picked, _temp.Root);
+
+            Assert.True(verdict.Accepted, string.Join("; ", verdict.Reasons));
+            Assert.Contains(verdict.Reasons, r => r.Contains("manifest", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public async Task AZeroByteFile_IsRejected()
+        {
+            var picked = _temp.Path("zero.db");
+            File.WriteAllBytes(picked, []);
+            await StageAndExpectRejectedAsync(picked);
+        }
+
+        [Fact]
+        public async Task ATextFile_IsRejected()
+        {
+            var picked = _temp.Path("text.db");
+            File.WriteAllText(picked, "this is not a database\n" + new string('a', 9000));
+            await StageAndExpectRejectedAsync(picked);
+        }
+
+        [Fact]
+        public async Task ATruncatedBackup_IsRejected()
+        {
+            var backup = await BaseBackupAsync();
+            var picked = _temp.Path("truncated.db");
+            File.Copy(backup.Path, picked);
+            using (var stream = new FileStream(picked, FileMode.Open, FileAccess.Write))
+                stream.SetLength(2 * 4096 + 1000);
+
+            await StageAndExpectRejectedAsync(picked);
+        }
+
+        [Fact]
+        public async Task AHeaderValidFileThatFailsFullIntegrity_IsRejected()
+        {
+            var backup = await BaseBackupAsync();
+            var picked = _temp.Path("damaged.db");
+            File.Copy(backup.Path, picked);
+            using (var stream = new FileStream(picked, FileMode.Open, FileAccess.Write))
+            {
+                stream.Position = 3 * 4096;
+                stream.Write(Enumerable.Repeat((byte)0xFF, 4096).ToArray());
+            }
+
+            var verdict = await StageAndExpectRejectedAsync(picked);
+
+            Assert.Contains(verdict.Reasons, r => r.Contains("integrity", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public async Task ALegacyCandidateWithNoHistoryTable_IsAccepted_AndUpgradedWithAPremigrationBackupAtTheNextStart()
+        {
+            WorkspaceStartup.Open(Options());
+            SqliteConnection.ClearAllPools();
+            var picked = _temp.Path("legacy-l2.db");
+            WorkspaceFixtures.Load(WorkspaceFixtures.L2PreGovernance, picked);
+
+            var verdict = await RestoreStaging.StageAsync(picked, _temp.Root);
+            Assert.True(verdict.Accepted, string.Join("; ", verdict.Reasons));
+
+            var result = WorkspaceStartup.Open(Options());
+            SqliteConnection.ClearAllPools();
+
+            Assert.True(result.Report.Restore!.Applied);
+            Assert.Equal(WorkspaceStartupOutcome.Upgraded, result.Report.Outcome);
+            var premigration = Assert.Single(WorkspaceBackup.List(BackupsPath), b => b.Reason == BackupReason.Premigration);
+            Assert.True(File.Exists(premigration.Path));
+            Assert.Equal(0, WorkspaceFixtures.Scalar(WorkspacePath, "SELECT COUNT(*) FROM \"GovernanceFindings\""));
+            Assert.Equal(WorkspaceFixtures.ExpectedCounts(WorkspaceFixtures.L2PreGovernance)["Designs"], DesignCount(WorkspacePath));
+        }
+
+        [Fact]
+        public async Task ACandidateModifiedAfterStaging_IsDiscardedAtApply_AndTheLiveWorkspaceIsUntouched()
+        {
+            var backup = await BaseBackupAsync();
+            Assert.True((await RestoreStaging.StageAsync(backup.Path, _temp.Root)).Accepted);
+            var liveBefore = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(WorkspacePath)));
+            using (var stream = new FileStream(_temp.Path("restore-staging/candidate.db"), FileMode.Append, FileAccess.Write))
+                stream.WriteByte(0x42);
+
+            var outcome = await RestoreStaging.ApplyPendingAsync(WorkspacePath, _temp.Root, new FixedClock(Now));
+
+            Assert.NotNull(outcome);
+            Assert.False(outcome.Applied);
+            Assert.Contains("changed", outcome.Problem, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(liveBefore, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(WorkspacePath))));
+            Assert.False(Directory.Exists(_temp.Path("restore-staging")));
+            Assert.Empty(Directory.GetFiles(_temp.Root, "workspace.pre-restore-*"));
+        }
+
+        [Fact]
+        public async Task CancelPending_RemovesTheStagingFolderAndNothingElse()
+        {
+            var backup = await BaseBackupAsync();
+            Assert.True((await RestoreStaging.StageAsync(backup.Path, _temp.Root)).Accepted);
+            var workspaceBefore = File.ReadAllBytes(WorkspacePath);
+            Assert.NotNull(RestoreStaging.GetPending(_temp.Root));
+
+            RestoreStaging.CancelPending(_temp.Root);
+
+            Assert.Null(RestoreStaging.GetPending(_temp.Root));
+            Assert.False(Directory.Exists(_temp.Path("restore-staging")));
+            Assert.True(File.Exists(backup.Path));
+            Assert.True(File.Exists(backup.ManifestPath));
+            Assert.Equal(workspaceBefore, File.ReadAllBytes(WorkspacePath));
+        }
+
         private sealed class FixedClock(DateTimeOffset now) : TimeProvider
         {
             public override DateTimeOffset GetUtcNow() => now;
