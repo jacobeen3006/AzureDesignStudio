@@ -23,6 +23,18 @@ public class SourceGuardTests
     private static readonly Regex EnsureCreatedCall =
         new(@"\.\s*EnsureCreated(Async)?\s*\(", RegexOptions.Compiled);
 
+    private static readonly Regex MigrateCall =
+        new(@"\.\s*Migrate(Async)?\s*\(", RegexOptions.Compiled);
+
+    /// <summary>The only files allowed to run schema migrations. The Workspace and Desktop files
+    /// arrive in later plans, so the guard checks a subset and never requires them to exist.</summary>
+    private static readonly string[] MigrationSites =
+    [
+        "src/AzureDesignStudio.Server/Persistence/DatabaseBootstrapper.cs",
+        "src/AzureDesignStudio.Workspace/WorkspaceSchema.cs",
+        "src/AzureDesignStudio.Desktop/DeployDbStartup.cs",
+    ];
+
     [Fact]
     public void ProgramHasNoPreprocessorConditionals()
     {
@@ -64,6 +76,32 @@ public class SourceGuardTests
             callers.Count == 1 && callers.ContainsKey(BootstrapperPath),
             $"EnsureCreated may be called only from {BootstrapperPath} (once, at startup), never on a request path. Found in:"
             + Environment.NewLine + (description.Length == 0 ? "(no file)" : description));
+    }
+
+    [Fact]
+    public void MigrateIsCalledOnlyBySchemaOwners()
+    {
+        var root = RepositoryRoot();
+        var callers = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var project in Directory.EnumerateDirectories(Path.Combine(root, "src"))
+                     .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
+                     .Where(relative => !relative.EndsWith(".Tests", StringComparison.Ordinal)))
+        {
+            // Generated migration classes are skipped: they declare Up/Down and never run a migration.
+            foreach (var relative in SourceFiles(root, project).Where(r => !r.Split('/').Contains("Migrations")))
+            {
+                if (File.ReadAllLines(Path.Combine(root, relative)).Any(line => MigrateCall.IsMatch(line)))
+                    callers.Add(relative);
+            }
+        }
+
+        var offenders = callers.Where(c => !MigrationSites.Contains(c, StringComparer.Ordinal)).ToList();
+        Assert.True(offenders.Count == 0,
+            "Schema changes run only at the three startup sites (" + string.Join(", ", MigrationSites)
+            + "), after the premigration backup; the read-only MCP project must never migrate. Found in:"
+            + Environment.NewLine + string.Join(Environment.NewLine, offenders));
+
+        Assert.DoesNotContain(callers, c => c.StartsWith("src/AzureDesignStudio.Mcp/", StringComparison.Ordinal));
     }
 
     [Fact]
