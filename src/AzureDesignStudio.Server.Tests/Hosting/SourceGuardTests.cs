@@ -1,0 +1,133 @@
+using System.Text.RegularExpressions;
+using Xunit;
+
+namespace AzureDesignStudio.Server.Tests.Hosting;
+
+/// <summary>
+/// Source-level guards for the structural guarantees of the server foundation. They are properties
+/// of source text (no compile-time provider choice, one schema-bootstrap call site, no test
+/// authentication in the shipped host), so a behavior test cannot notice them regressing. The tests
+/// only read files.
+/// </summary>
+public class SourceGuardTests
+{
+    private const string ProgramPath = "src/AzureDesignStudio.Server/Program.cs";
+    private const string BootstrapperPath = "src/AzureDesignStudio.Server/Persistence/DatabaseBootstrapper.cs";
+    private const string ServerDir = "src/AzureDesignStudio.Server";
+    private const string ServicesDir = "src/AzureDesignStudio.Services";
+    private const string ServicesCsprojPath = "src/AzureDesignStudio.Services/AzureDesignStudio.Services.csproj";
+
+    private static readonly Regex PreprocessorConditional =
+        new(@"^\s*#\s*(if|elif|else|endif)\b", RegexOptions.Compiled);
+
+    private static readonly Regex EnsureCreatedCall =
+        new(@"\.\s*EnsureCreated(Async)?\s*\(", RegexOptions.Compiled);
+
+    [Fact]
+    public void ProgramHasNoPreprocessorConditionals()
+    {
+        var offenders = new List<string>();
+        var lines = File.ReadAllLines(Path.Combine(RepositoryRoot(), ProgramPath));
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (PreprocessorConditional.IsMatch(lines[i]))
+                offenders.Add($"{ProgramPath}:{i + 1}: {lines[i].Trim()}");
+        }
+
+        Assert.True(offenders.Count == 0,
+            "Program.cs must not choose providers or diagnostics at compile time; configuration decides. Found:"
+            + Environment.NewLine + string.Join(Environment.NewLine, offenders));
+    }
+
+    [Fact]
+    public void EnsureCreatedIsCalledOnlyByTheDatabaseBootstrapper()
+    {
+        var root = RepositoryRoot();
+        var callers = new SortedDictionary<string, List<int>>(StringComparer.Ordinal);
+        foreach (var relative in SourceFiles(root, ServerDir).Concat(SourceFiles(root, ServicesDir)))
+        {
+            var lines = File.ReadAllLines(Path.Combine(root, relative));
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (EnsureCreatedCall.IsMatch(lines[i]))
+                {
+                    if (!callers.TryGetValue(relative, out var hits))
+                        callers[relative] = hits = new List<int>();
+                    hits.Add(i + 1);
+                }
+            }
+        }
+
+        var description = string.Join(Environment.NewLine,
+            callers.Select(c => $"{c.Key}: line(s) {string.Join(", ", c.Value)}"));
+        Assert.True(
+            callers.Count == 1 && callers.ContainsKey(BootstrapperPath),
+            $"EnsureCreated may be called only from {BootstrapperPath} (once, at startup), never on a request path. Found in:"
+            + Environment.NewLine + (description.Length == 0 ? "(no file)" : description));
+    }
+
+    [Fact]
+    public void ProductionServerHasNoTestAuthentication()
+    {
+        var root = RepositoryRoot();
+        string[] forbidden = ["TestAuthHandler", "x-test-user", "x-test-no-scope"];
+        var offenders = new List<string>();
+        foreach (var relative in SourceFiles(root, ServerDir))
+        {
+            var lines = File.ReadAllLines(Path.Combine(root, relative));
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var hit = forbidden.FirstOrDefault(f => lines[i].Contains(f, StringComparison.Ordinal));
+                if (hit is not null)
+                    offenders.Add($"{relative}:{i + 1}: {hit}");
+            }
+        }
+
+        Assert.True(offenders.Count == 0,
+            "The header-driven test authentication scheme is a credential bypass and must live only in Server.Tests. Found:"
+            + Environment.NewLine + string.Join(Environment.NewLine, offenders));
+    }
+
+    [Fact]
+    public void ServicesProjectStaysFreeOfWebHostAndProviderPackages()
+    {
+        string[] forbidden =
+        [
+            "Microsoft.EntityFrameworkCore.SqlServer",
+            "Microsoft.EntityFrameworkCore.Sqlite",
+            "Microsoft.AspNetCore",
+        ];
+        var text = File.ReadAllText(Path.Combine(RepositoryRoot(), ServicesCsprojPath));
+        var found = forbidden.Where(f => text.Contains(f, StringComparison.Ordinal)).ToList();
+
+        Assert.True(found.Count == 0,
+            $"{ServicesCsprojPath} runs in-process in the desktop app (no ASP.NET Core on Mac Catalyst) and database providers are the host's choice. Found: "
+            + string.Join(", ", found));
+    }
+
+    /// <summary>Walks up from the test output directory to the directory holding global.json.</summary>
+    private static string RepositoryRoot()
+    {
+        var start = AppContext.BaseDirectory;
+        var dir = new DirectoryInfo(start);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "global.json")))
+                return dir.FullName;
+            dir = Directory.GetParent(dir.FullName);
+        }
+
+        throw new InvalidOperationException(
+            $"Repository root not found: no global.json in '{start}' or any parent directory. The source guards need the checkout.");
+    }
+
+    /// <summary>Repository-relative (forward-slash) paths of the .cs files under a source directory, skipping bin and obj.</summary>
+    private static IEnumerable<string> SourceFiles(string root, string relativeDir)
+    {
+        var baseDir = Path.Combine(root, relativeDir);
+        return Directory.EnumerateFiles(baseDir, "*.cs", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
+            .Where(relative => !relative.Split('/').Any(segment => segment is "bin" or "obj"))
+            .OrderBy(relative => relative, StringComparer.Ordinal);
+    }
+}
