@@ -1929,16 +1929,15 @@ namespace AzureDesignStudio.Services
             // The caller's own row, found by scope - never the NULL-tenant default, which is
             // operator-seeded data. A first write by a scope creates its row; if a concurrent first
             // write by the same scope wins the unique index, re-read and update that row once.
-            DateTime updatedAtUtc;
-            try
+            var (written, failed) = await WriteWithRaceRetryAsync("Guardrail policy",
+                (attempt, ct) => UpsertGuardrailRowAsync(caller, json, attempt, ct), context.CancellationToken);
+            if (failed)
             {
-                updatedAtUtc = await UpsertGuardrailRowAsync(caller, json, context.CancellationToken);
+                response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                response.ErrorMessage = "GUARDRAIL_POLICY_NOT_SAVED: the policy could not be stored and nothing was changed. Try again; if it keeps failing, ask the operator to check the server log.";
+                return response;
             }
-            catch (DbUpdateException)
-            {
-                _designContext.ChangeTracker.Clear();
-                updatedAtUtc = await UpsertGuardrailRowAsync(caller, json, context.CancellationToken);
-            }
+            var updatedAtUtc = written;
 
             _logger.LogInformation("Guardrail policy updated by {Principal} ({Length} bytes).", principal, json.Length);
             response.StatusCode = StatusCodes.Status200OK;
@@ -1948,11 +1947,65 @@ namespace AzureDesignStudio.Services
             return response;
         }
 
-        private async Task<DateTime> UpsertGuardrailRowAsync(AdsCaller caller, string json, CancellationToken ct)
+        /// <summary>Marks whether one write attempt was an insert of a scope's first row.</summary>
+        private sealed class WriteAttempt
+        {
+            public bool Inserting { get; set; }
+        }
+
+        /// <summary>
+        /// Runs a per-scope upsert (WR-08). Only a failed INSERT is retried, once, after clearing the
+        /// tracker: that is a concurrent first write by the same scope winning the unique key, and the
+        /// second pass finds that row and updates it. Any other save failure - a failed update, a second
+        /// failed insert, a lost connection, a failed audit insert in the same commit - is logged
+        /// (critical when the commit carried a security event) and returned as <c>Failed</c> for an in-band
+        /// answer, never rethrown as an unhandled RPC fault.
+        /// </summary>
+        private async Task<(T Result, bool Failed)> WriteWithRaceRetryAsync<T>(
+            string what, Func<WriteAttempt, CancellationToken, Task<T>> write, CancellationToken ct)
+        {
+            var attempt = new WriteAttempt();
+            try
+            {
+                return (await write(attempt, ct), false);
+            }
+            catch (DbUpdateException ex) when (attempt.Inserting)
+            {
+                _logger.LogWarning(ex, "{What}: the first insert failed; re-reading once in case a concurrent first write by the same scope won the key.", what);
+                _designContext.ChangeTracker.Clear();
+            }
+            catch (DbUpdateException ex)
+            {
+                return (default!, FailedWrite(ex, what));
+            }
+
+            try
+            {
+                return (await write(new WriteAttempt(), ct), false);
+            }
+            catch (DbUpdateException ex)
+            {
+                return (default!, FailedWrite(ex, what));
+            }
+        }
+
+        private bool FailedWrite(DbUpdateException ex, string what)
+        {
+            var withAudit = _designContext.ChangeTracker.Entries<SecurityEventModel>().Any(e => e.State == EntityState.Added);
+            if (withAudit)
+                _logger.LogCritical(ex, "{What}: the commit that carried its security event failed; the change was not stored.", what);
+            else
+                _logger.LogError(ex, "{What}: the change could not be stored.", what);
+            _designContext.ChangeTracker.Clear();
+            return true;
+        }
+
+        private async Task<DateTime> UpsertGuardrailRowAsync(AdsCaller caller, string json, WriteAttempt attempt, CancellationToken ct)
         {
             var row = await _designContext.AdsGuardrailPolicies.FirstOrDefaultAsync(e => e.TenantId == caller.ScopeId, ct);
             if (row is null)
             {
+                attempt.Inserting = true;
                 // The key is explicit on this table (see GuardrailPolicyModel); the default row is Id 1.
                 var maxId = await _designContext.AdsGuardrailPolicies.Select(e => (int?)e.Id).MaxAsync(ct) ?? GuardrailRowId;
                 row = new GuardrailPolicyModel { Id = Math.Max(maxId, GuardrailRowId) + 1, TenantId = caller.ScopeId };
@@ -2058,23 +2111,20 @@ namespace AzureDesignStudio.Services
                     ErrorMessage = $"TENANT_SETTINGS_INVALID: guardrail_policy_mode must be '{GuardrailPolicyModes.Replace}' or '{GuardrailPolicyModes.Merge}'.",
                 };
 
-            TenantSettingsModel? row;
-            try
-            {
-                row = await UpsertTenantSettingsAsync(caller, request.AllowSelfApproval, mode, context.CancellationToken);
-            }
-            catch (DbUpdateException)
-            {
-                // A concurrent first write by the same scope won the key: re-read and apply once more.
-                _designContext.ChangeTracker.Clear();
-                row = await UpsertTenantSettingsAsync(caller, request.AllowSelfApproval, mode, context.CancellationToken);
-            }
+            var (row, failed) = await WriteWithRaceRetryAsync("Tenant settings",
+                (attempt, ct) => UpsertTenantSettingsAsync(caller, request.AllowSelfApproval, mode, attempt, ct), context.CancellationToken);
+            if (failed)
+                return new TenantSettingsResponse
+                {
+                    StatusCode = StatusCodes.Status503ServiceUnavailable,
+                    ErrorMessage = "TENANT_SETTINGS_NOT_SAVED: the settings could not be stored and nothing was changed. Try again; if it keeps failing, ask the operator to check the server log.",
+                };
 
             return SettingsResponse(row);
         }
 
         private async Task<TenantSettingsModel?> UpsertTenantSettingsAsync(
-            AdsCaller caller, bool allowSelfApproval, string mode, CancellationToken ct)
+            AdsCaller caller, bool allowSelfApproval, string mode, WriteAttempt attempt, CancellationToken ct)
         {
             var row = await _designContext.AdsTenantSettings.FirstOrDefaultAsync(e => e.TenantId == caller.ScopeId, ct);
             var oldSelfApproval = row?.AllowSelfApproval ?? false;
@@ -2086,6 +2136,7 @@ namespace AzureDesignStudio.Services
             var now = DateTime.UtcNow;
             if (row is null)
             {
+                attempt.Inserting = true;
                 row = new TenantSettingsModel { TenantId = caller.ScopeId };
                 _designContext.AdsTenantSettings.Add(row);
             }

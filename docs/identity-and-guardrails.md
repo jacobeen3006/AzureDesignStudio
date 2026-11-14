@@ -55,6 +55,8 @@ with the code.
 | `GUARDRAIL_ADMIN_REQUIRED` | 403 | Reading or changing the guardrail policy needs `Guardrail.Admin` (or a personal account's own scope, or the desktop host). | Have an administrator assign the role, then sign out and back in. |
 | `TENANT_SETTINGS_ADMIN_REQUIRED` | 403 | Reading or changing the tenant settings needs `Guardrail.Admin`. | Same as above. |
 | `TENANT_SETTINGS_INVALID` | 400 | `guardrail_policy_mode` is not `replace` or `merge`. | Send one of the two values. |
+| `GUARDRAIL_POLICY_NOT_SAVED` | 503 | The policy could not be stored (after one retry of a concurrent first write); nothing changed. The server log has the reason. | Try again; if it persists, check the server log. |
+| `TENANT_SETTINGS_NOT_SAVED` | 503 | The settings could not be stored; nothing changed. | Same as above. |
 | `PLAN_APPROVER_ROLE_REQUIRED` | 403 | Approving a plan needs `Deploy.Approver`. Checked first, before the plan is looked up. | Assign the role, sign in again. |
 | `PLAN_SELF_APPROVAL_REFUSED` | 403 | The principal that requested the review cannot approve it, and the tenant has not allowed self-approval. | Another `Deploy.Approver` approves it, or a `Guardrail.Admin` allows self-approval for the tenant. |
 | `PLAN_ALREADY_APPROVED` | 409 | The plan already has an approval by another principal; it is not replaced. | The named requester deploys it, or the principal that approved it approves again. |
