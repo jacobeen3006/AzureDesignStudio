@@ -31,7 +31,7 @@ public class WhatIfTokenGateScopeTests
         gate.IssueForStack("sub", "rg", StackHash, false, [], plan, "{\"kind\":\"stack\"}",
             requestedByUserId: requester, scopeId: scope);
 
-    // --- the optional parameters keep the old callers working ---
+    // --- an unscoped preview and an unscoped consume still pair; a scope never pairs with a missing one ---
 
     [Fact]
     public void IssueWithoutAScopeBehavesAsBefore()
@@ -44,12 +44,40 @@ public class WhatIfTokenGateScopeTests
     }
 
     [Fact]
-    public void AScopedTokenStillConsumesThroughTheScopeLessOverload()
+    public void AScopedTokenIsStaleWhenConsumedWithoutAScopeAndIsNotBurned()
     {
+        // WR-01: forgetting the optional scope must fail closed, not skip the tenant check.
         var gate = new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl);
         var token = IssueDeployment(gate, ScopeA);
 
-        Assert.True(gate.ValidateAndConsume(token, "sub", "rg", "tpl", "prm").IsOk);
+        var unscoped = gate.ValidateAndConsume(token, "sub", "rg", "tpl", "prm");
+        var unknown = gate.ValidateAndConsume("no-such-token", "sub", "rg", "tpl", "prm");
+
+        Assert.Equal(WhatIfTokenStatus.Stale, unscoped.Status);
+        Assert.Equal(unknown.Detail, unscoped.Detail);
+        Assert.True(gate.ValidateAndConsume(token, "sub", "rg", "tpl", "prm", scopeId: ScopeA).IsOk, "the owning scope still consumes it");
+    }
+
+    [Fact]
+    public void AScopedStackTokenIsStaleWhenConsumedWithoutAScope()
+    {
+        var gate = new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl);
+        var token = IssueStack(gate, ScopeA);
+
+        Assert.Equal(WhatIfTokenStatus.Stale, gate.ValidateAndConsumeForStack(token, "sub", "rg", StackHash).Status);
+        Assert.True(gate.ValidateAndConsumeForStack(token, "sub", "rg", StackHash, scopeId: ScopeA).IsOk);
+    }
+
+    [Fact]
+    public void TheScopeLessPeekNeverServesAScopedPreview()
+    {
+        var gate = new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl);
+        IssueDeployment(gate, ScopeA);
+        IssueStack(gate, ScopeB, plan: "sha256:other");
+
+        Assert.False(gate.TryPeekPlan(PlanHash, out _));
+        Assert.False(gate.TryPeekPlan(PlanHash, out _, out _));
+        Assert.False(gate.TryPeekPlan("sha256:other", out _));
     }
 
     // --- the scope-aware peek ---

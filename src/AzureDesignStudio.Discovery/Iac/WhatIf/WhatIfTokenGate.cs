@@ -101,18 +101,21 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
 
     /// <summary>
     /// Approved-plan flow: a plan hash is approvable only while its what-if preview is live.
-    /// Non-consuming peek by plan hash; expired previews are invisible here too.
+    /// Non-consuming peek by plan hash; expired previews are invisible here too. This overload is for
+    /// UNSCOPED previews only (issued without a scope id): a preview that belongs to a scope is never
+    /// served without that scope, so a caller that forgets the scope fails closed (WR-01).
     /// </summary>
     public bool TryPeekPlan(string planHash, out string canonicalPlanJson) =>
         TryPeekPlan(planHash, out canonicalPlanJson, out _);
 
-    /// <summary>Peek that also yields the revert plan document recorded with the preview (null if none).</summary>
+    /// <summary>Peek that also yields the revert plan document recorded with the preview (null if none).
+    /// Unscoped previews only, like <see cref="TryPeekPlan(string, out string)"/>.</summary>
     public bool TryPeekPlan(string planHash, out string canonicalPlanJson, out string? revertPlanJson)
     {
         lock (_sync)
         {
             // A deployment preview wins over a stack preview of the same plan: it carries the revert plan.
-            var hit = _tokens.Values.Where(e => e.Expires > Now
+            var hit = _tokens.Values.Where(e => e.Expires > Now && e.ScopeId is null
                     && string.Equals(e.PlanHash, planHash, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(e => e.IsStack ? 1 : 0).FirstOrDefault();
             canonicalPlanJson = hit?.CanonicalPlanJson ?? string.Empty;
@@ -153,8 +156,10 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
         ValidateAndConsume(token, DeployTargetScope.ResourceGroupScope(subscriptionId, resourceGroupName),
             armTemplate, parameters, guardrailVeto, scopeId);
 
-    /// <param name="scopeId">When given, the token must have been issued for that scope; any other
-    /// answers the same Stale result as an unknown token and is left alone.</param>
+    /// <param name="scopeId">The token must have been issued for exactly this scope. Any other scope,
+    /// including a null scope against a scoped token and a scope against an unscoped token, answers the
+    /// same Stale result as an unknown token and is left alone (fail closed, WR-01). Only a token issued
+    /// without a scope is consumed with a null scope.</param>
     public WhatIfTokenCheck ValidateAndConsume(string? token, DeployTargetScope scope,
         string armTemplate, string parameters, Func<IReadOnlyList<Unmanaged.GuardrailTarget>, string?>? guardrailVeto = null,
         Guid? scopeId = null)
@@ -164,7 +169,7 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
 
         lock (_sync)
         {
-            if (!_tokens.TryGetValue(token, out var entry) || (scopeId is { } caller && entry.ScopeId != caller))
+            if (!_tokens.TryGetValue(token, out var entry) || entry.ScopeId != scopeId)
                 return new WhatIfTokenCheck(WhatIfTokenStatus.Stale, "What-If token is unknown or already used; run What-If again.");
 
             if (entry.Expires <= Now)
@@ -227,7 +232,7 @@ public sealed class WhatIfTokenGate(TimeSpan ttl, Func<DateTimeOffset>? clock = 
 
         lock (_sync)
         {
-            if (!_tokens.TryGetValue(token, out var entry) || (scopeId is { } caller && entry.ScopeId != caller))
+            if (!_tokens.TryGetValue(token, out var entry) || entry.ScopeId != scopeId)
                 return new WhatIfTokenCheck(WhatIfTokenStatus.Stale, "What-If token is unknown or already used; run What-If again.");
 
             if (entry.Expires <= Now)

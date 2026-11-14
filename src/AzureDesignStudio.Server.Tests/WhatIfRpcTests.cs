@@ -171,7 +171,7 @@ public class WhatIfRpcTests
         Assert.True(response.StatusCode == 200, response.ErrorMessage);
         Assert.NotEqual("", response.WhatIfToken);
         Assert.False(response.GuardrailBlocked);
-        Assert.True(_gate.ValidateAndConsume(response.WhatIfToken, _subscription.ToString(), ResourceGroup, Template, "{}").IsOk);
+        Assert.True(_gate.ValidateAndConsume(response.WhatIfToken, _subscription.ToString(), ResourceGroup, Template, "{}", scopeId: TestTenants.Contoso).IsOk);
 
         var flag = Assert.Single(response.PolicyFlags);
         Assert.Equal(StorageId("sa1"), flag.ResourceId);
@@ -208,7 +208,7 @@ public class WhatIfRpcTests
         // The review is exactly what it is without the preflight; only the notes say what was not checked.
         Assert.True(response.StatusCode == 200, response.ErrorMessage);
         Assert.NotEqual("", response.WhatIfToken);
-        Assert.True(_gate.ValidateAndConsume(response.WhatIfToken, _subscription.ToString(), ResourceGroup, Template, "{}").IsOk);
+        Assert.True(_gate.ValidateAndConsume(response.WhatIfToken, _subscription.ToString(), ResourceGroup, Template, "{}", scopeId: TestTenants.Contoso).IsOk);
         Assert.Equal((baseline.Status, baseline.PlanHash, baseline.Caveats, baseline.ChangesJson, baseline.GuardrailBlocked),
             (response.Status, response.PlanHash, response.Caveats, response.ChangesJson, response.GuardrailBlocked));
         Assert.Equal((1, 0, 0), (response.Creates, response.Modifies, response.Deletes));
@@ -433,7 +433,7 @@ public class WhatIfRpcTests
         Assert.True(response.StatusCode == 200, response.ErrorMessage);
         Assert.NotEqual("", response.WhatIfToken);
         Assert.False(response.GuardrailBlocked);
-        Assert.True(_gate.ValidateAndConsume(response.WhatIfToken, _subscription.ToString(), ResourceGroup, request.ArmTemplate, "{}").IsOk);
+        Assert.True(_gate.ValidateAndConsume(response.WhatIfToken, _subscription.ToString(), ResourceGroup, request.ArmTemplate, "{}", scopeId: TestTenants.Contoso).IsOk);
         Assert.Equal((2, 0, 0), (response.Creates, response.Modifies, response.Deletes));
 
         // Two D4s_v5 ask 8 vCPUs: 44 + 8 > 50 for the family; 10 + 8 of 100 regionally.
@@ -490,7 +490,7 @@ public class WhatIfRpcTests
 
         Assert.True(response.StatusCode == 200, response.ErrorMessage);
         Assert.NotEqual("", response.WhatIfToken);
-        Assert.True(_gate.ValidateAndConsume(response.WhatIfToken, _subscription.ToString(), ResourceGroup, request.ArmTemplate, "{}").IsOk);
+        Assert.True(_gate.ValidateAndConsume(response.WhatIfToken, _subscription.ToString(), ResourceGroup, request.ArmTemplate, "{}", scopeId: TestTenants.Contoso).IsOk);
 
         var policy = Assert.Single(response.PolicyFlags);
         Assert.Equal((VmId("vm1"), "Deny"), (policy.ResourceId, policy.Verdict));
@@ -525,7 +525,7 @@ public class WhatIfRpcTests
 
         Assert.True(response.StatusCode == 200, response.ErrorMessage);
         Assert.NotEqual("", response.WhatIfToken);
-        Assert.True(_gate.ValidateAndConsume(response.WhatIfToken, _subscription.ToString(), ResourceGroup, request.ArmTemplate, "{}").IsOk);
+        Assert.True(_gate.ValidateAndConsume(response.WhatIfToken, _subscription.ToString(), ResourceGroup, request.ArmTemplate, "{}", scopeId: TestTenants.Contoso).IsOk);
         Assert.Equal((6, 0, 0), (response.Creates, response.Modifies, response.Deletes));
 
         // The five that answered are kept; the sixth is a note, not a silent "no findings".
