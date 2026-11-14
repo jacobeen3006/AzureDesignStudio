@@ -36,6 +36,14 @@ Both databases get one schema authority: existing installations upgrade without 
 - [Backups] Q: "Backup file naming" -> Selected: "`workspace-<UTC yyyyMMddTHHmmssZ>-<reason>.db` where reason is manual, scheduled or premigration" - naming is internal and parsed only by the retention code
 - [Quarantine] Q: "Quarantined file naming" -> Selected: "`workspace.corrupt-<UTC timestamp>.db` beside the data folder's workspace" - cheap to rename
 - [Migrations] Q: "Where do migration classes live" -> Selected: "in `AzureDesignStudio.Workspace` for the workspace and in the Services project for the deploy/server context, with design-time factories beside them" - moving files later is a local refactor
+- [Research A2] Q: "include deploy.db in Phase 4" -> Selected: "yes, as a separable final wave (it is the fourth EnsureCreated and Phase 5 adds tenant columns to tables in it)" - a wave can be dropped without touching stored data
+- [Research A3] Q: "do manual backups count toward retention pruning" -> Selected: "no, manual backups are exempt from the newest-5 / 30-day pruning" - retention rule is a constant
+- [Research A5] Q: "manual backup surface given MAUI Essentials has only an open-file picker" -> Selected: "manual backups are written to the backups folder with a Reveal-in-file-manager action, and Restore uses FilePicker to choose a file; no CommunityToolkit.Maui dependency" - UI detail, a save dialog can be added later
+- [Research A12] Q: "restore mechanics" -> Selected: "restore is staged and applied at the next launch, not a hot swap" - local startup behavior
+- [Research A4] Q: "production ads-main host" -> Selected: "the runbook documents both the Azure SQL and the self-hosted BACKUP/RESTORE variants" - documentation only
+- [Research C1] Q: "where SQL Server migrations live" -> Selected: "in AzureDesignStudio.Server (SqlServerDesignDbContext) because EF's generated SQL Server snapshot needs the SqlServer provider package; SQLite deploy.db migrations stay in Services (SqliteDesignDbContext)" - overrides the earlier note that put both in Services; compile-verified by research
+- [Research C5] Q: "corruption gate" -> Selected: "treat any exception from quick_check as corruption, use integrity_check for restore verification, SC4 fixture is a truncation or header overwrite" - test and check detail
+- [Research A1] Q: "Mac Catalyst migrate-at-startup verification" -> Selected: "a human-verify checkpoint that launches the built .app against a copy of the L2 fixture" - verification step
 - [Testing] Q: "How are concurrency and corruption tested" -> Selected: "xUnit tests on temp SQLite files (writer plus reader tasks, a deliberately truncated file) in Core.Tests, SQL Server parity in a separate container job" - test approach is local to the test project
 
 </decisions>
