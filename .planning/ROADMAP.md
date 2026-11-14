@@ -106,12 +106,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. A test that creates a design writes to a temporary SQLite file; no test touches a developer's `workspace.db` or a live tenant.
   4. `Program` is reachable from the test project, and the RPC hot path no longer calls `EnsureCreated`.
 
-**Plans**: 1/6 plans executed
+**Plans**: 2/6 plans executed
 **Wave 1**
 - [x] 03-01-PLAN.md — Restore unblock (two new AutoMapper advisories, same dated expiry), Mvc.Testing 10.0.15 / EF Core Sqlite / Core reference, only the Server and Server.Tests locks regenerated
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 03-02-PLAN.md — Tracer: the real host booted under `WebApplicationFactory<Program>`, test auth handler, TestServer gRPC channel, auth contract and the three-service surface
+- [x] 03-02-PLAN.md — Tracer: the real host booted under `WebApplicationFactory<Program>`, test auth handler, TestServer gRPC channel, auth contract and the three-service surface
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 03-03-PLAN.md — Config-selected providers: `DatabaseProvider`, `DatabaseBootstrapper`, `CryptoProvider`, no preprocessor conditionals, harness on a unique temp SQLite file
@@ -255,7 +255,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 |-------|----------------|--------|-----------|
 | 1. Land and Stabilize | 8/8 | Complete    | 2026-10-21 |
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
-| 3. Server Foundation and Integration Harness | 1/6 | In Progress | - |
+| 3. Server Foundation and Integration Harness | 2/6 | In Progress | - |
 | 4. Database Durability | 0/TBD | Not started | - |
 | 5. Identity, Guardrails, and Offline Development | 0/TBD | Not started | - |
 | 6. Bounds, Payload Contract, and Health | 0/TBD | Not started | - |

@@ -55,7 +55,7 @@ Requirements for the pilot-ready milestone. Each maps to exactly one roadmap pha
 
 ### Tests (TEST)
 
-- [ ] **TEST-01**: A server integration suite boots the real host and runs in CI without Azure credentials.
+- [x] **TEST-01**: A server integration suite boots the real host and runs in CI without Azure credentials.
 - [ ] **TEST-02**: Server tests prove user and tenant isolation, the 10-design quota, malformed names, what-if token single-use, approval ownership, and decommission kind-gating.
 - [ ] **TEST-03**: Component tests cover palette filter and keyboard navigation, owner-scoped registry removal, inspector selection, and status-bar counts.
 - [ ] **TEST-04**: A committed E2E smoke suite covers boot, stencil drop, port link, undo/redo, save→reload, offline save, scan browse, error toast, and zero console exceptions.
@@ -166,7 +166,7 @@ Updated 2026-10-21 during roadmap creation. Every v1 requirement maps to exactly
 | BUILD-03 | Phase 2 | Pending |
 | BUILD-04 | Phase 2 | Complete |
 | BUILD-05 | Phase 2 | Pending |
-| TEST-01 | Phase 3 | Pending |
+| TEST-01 | Phase 3 | Complete |
 | TEST-02 | Phase 8 | Pending |
 | TEST-03 | Phase 8 | Pending |
 | TEST-04 | Phase 8 | Pending |
