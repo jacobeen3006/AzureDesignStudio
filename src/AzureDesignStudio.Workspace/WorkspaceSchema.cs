@@ -10,7 +10,11 @@ namespace AzureDesignStudio.Workspace;
 /// <param name="JournalMode">The journal mode SQLite reported after the upgrade (expected <c>wal</c>).</param>
 /// <param name="PremigrationBackupPath">The backup written before the schema change, or null when none was needed.</param>
 public sealed record WorkspaceUpgradeResult(
-    bool Created, IReadOnlyList<string> AppliedMigrations, string JournalMode, string? PremigrationBackupPath = null);
+    bool Created, IReadOnlyList<string> AppliedMigrations, string JournalMode, string? PremigrationBackupPath = null)
+{
+    /// <summary>Duplicate rows the unique-index guard removed before the migration (empty when the data was clean).</summary>
+    public IReadOnlyList<UniqueIndexRepair> UniqueIndexRepairs { get; init; } = [];
+}
 
 /// <summary>The workspace database could not be brought to the current schema.</summary>
 public sealed class WorkspaceUpgradeException : Exception
@@ -72,6 +76,7 @@ internal static class WorkspaceSchema
         // The backup comes before anything alters the file (legacy adoption included). If it cannot be
         // written the upgrade is not attempted, so the live file is exactly as it was.
         string? premigrationBackup = null;
+        IReadOnlyList<UniqueIndexRepair> uniqueIndexRepairs = [];
         if (existed && pending.Count > 0)
         {
             var backupsDirectory = options.BackupsDirectory
@@ -89,6 +94,31 @@ internal static class WorkspaceSchema
                     "The workspace needs an upgrade but its backup could not be written, so the upgrade was not attempted " +
                     $"and the workspace file is unchanged. Reason: {e.Message} Backups folder: {backupsDirectory} " +
                     $"Database file: {databasePath}", e);
+            }
+        }
+
+        // Rows that would violate a unique index the baseline creates are removed (newest kept, the rest reported)
+        // only after the backup above exists; one transaction, so a failure leaves every row in place.
+        if (existed && pending.Count > 0)
+        {
+            try
+            {
+                using var raw = OpenRaw(databasePath);
+                await raw.OpenAsync(ct).ConfigureAwait(false);
+                uniqueIndexRepairs = UniqueIndexGuard.Repair(
+                    raw, UniqueIndexGuard.Specs, Path.GetDirectoryName(premigrationBackup!)!, options.Clock.GetUtcNow(), premigrationBackup!);
+            }
+            catch (SqliteException e)
+            {
+                throw new WorkspaceUpgradeException(
+                    $"Duplicate rows that the new unique indexes would reject could not be cleaned up ({e.Message}). " +
+                    $"Nothing was removed. The premigration backup is {premigrationBackup} Database file: {databasePath}", e);
+            }
+            catch (IOException e)
+            {
+                throw new WorkspaceUpgradeException(
+                    $"The report of removed duplicate rows could not be written ({e.Message}), so no row was removed. " +
+                    $"The premigration backup is {premigrationBackup} Database file: {databasePath}", e);
             }
         }
 
@@ -149,7 +179,10 @@ internal static class WorkspaceSchema
             throw new WorkspaceUpgradeException(
                 $"The workspace database stayed in journal mode '{journalMode}' instead of 'wal'. File: {databasePath}");
 
-        return new WorkspaceUpgradeResult(!existed, pending, journalMode, premigrationBackup);
+        return new WorkspaceUpgradeResult(!existed, pending, journalMode, premigrationBackup)
+        {
+            UniqueIndexRepairs = uniqueIndexRepairs,
+        };
     }
 
     private static WorkspaceUpgradeException StuckUpgrade(string databasePath, WorkspaceUpgradeOptions options) =>
