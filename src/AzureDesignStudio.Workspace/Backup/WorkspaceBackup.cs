@@ -138,6 +138,48 @@ public static class WorkspaceBackup
             .ToList();
     }
 
+    /// <summary>
+    /// Applies <see cref="BackupRetention.Plan"/> to <see cref="List"/> and deletes the planned backups
+    /// (the <c>.db</c> and its manifest). Only files whose full path is inside the backups directory are
+    /// touched; a file that cannot be deleted (in use, no permission) is reported through
+    /// <paramref name="onProblem"/> and skipped. Returns the backups that were deleted.
+    /// </summary>
+    public static Task<IReadOnlyList<BackupFile>> PruneAsync(
+        string backupsDirectory, DateTimeOffset now, string stem = "workspace", RetentionPolicy? policy = null,
+        CancellationToken ct = default, Action<string>? onProblem = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(backupsDirectory);
+        var directory = Path.GetFullPath(backupsDirectory);
+        var prefix = directory.EndsWith(Path.DirectorySeparatorChar) ? directory : directory + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+        var plan = BackupRetention.Plan(List(directory, stem), now, policy);
+        var deleted = new List<BackupFile>();
+        foreach (var file in plan.Delete)
+        {
+            ct.ThrowIfCancellationRequested();
+            var full = Path.GetFullPath(file.Path);
+            if (!full.StartsWith(prefix, comparison))
+            {
+                onProblem?.Invoke($"Skipped {full}: it is outside the backups directory {directory}.");
+                continue;
+            }
+
+            try
+            {
+                File.Delete(full);
+                File.Delete(BackupManifest.PathFor(full));
+                deleted.Add(file);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                onProblem?.Invoke($"Could not delete {full}: {e.Message}");
+            }
+        }
+
+        return Task.FromResult<IReadOnlyList<BackupFile>>(deleted);
+    }
+
     private static string AppVersion { get; } =
         typeof(WorkspaceBackup).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
         ?? typeof(WorkspaceBackup).Assembly.GetName().Version?.ToString()
