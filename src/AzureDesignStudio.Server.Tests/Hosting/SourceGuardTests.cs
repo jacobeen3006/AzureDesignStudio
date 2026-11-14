@@ -174,6 +174,99 @@ public class SourceGuardTests
             + string.Join(", ", found));
     }
 
+    // D-04: the single-user host marker is set by exactly one component (the in-process invoker) and read by
+    // exactly one (ServiceTools.TryGetCaller). A claim, a header or a Server file naming the key could forge it.
+    private const string SingleUserMarkerName = "SingleUserHostKey";
+
+    private static readonly string[] SingleUserMarkerSites =
+    [
+        "src/AzureDesignStudio.Services/ServiceTools.cs",
+        "src/AzureDesignStudio.Services/InProcess/InProcessCallInvoker.cs",
+    ];
+
+    // D-08: the one file that interprets the oid and tid claims.
+    private const string IdentityPath = "src/AzureDesignStudio.Services/Auth/AdsIdentity.cs";
+
+    private static readonly Regex ClaimInterpretation = new(
+        @"identity/claims/(objectidentifier|tenantid)"
+        + @"|\b(ObjectIdUriClaim|ObjectIdShortClaim|TenantIdUriClaim|TenantIdShortClaim)\b"
+        + "|Find(First|All)\\s*\\(\\s*\"(oid|tid)\"",
+        RegexOptions.Compiled);
+
+    [Fact]
+    public void SingleUserMarkerIsReferencedOnlyByTheCallerToolsAndTheInProcessInvoker()
+    {
+        var root = RepositoryRoot();
+        var offenders = new List<string>();
+        foreach (var project in Directory.EnumerateDirectories(Path.Combine(root, "src"))
+                     .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
+                     .Where(relative => !relative.EndsWith(".Tests", StringComparison.Ordinal)))
+        {
+            foreach (var relative in SourceFiles(root, project, "*.cs", "*.razor"))
+            {
+                if (SingleUserMarkerSites.Contains(relative, StringComparer.Ordinal))
+                    continue;
+                if (File.ReadAllText(Path.Combine(root, relative)).Contains(SingleUserMarkerName, StringComparison.Ordinal))
+                    offenders.Add(relative);
+            }
+        }
+
+        Assert.True(offenders.Count == 0,
+            $"{SingleUserMarkerName} may be referenced only by {string.Join(" and ", SingleUserMarkerSites)}; a host marker that "
+            + "anything else can set or read is a forgeable single-user claim (D-04). Found in:"
+            + Environment.NewLine + string.Join(Environment.NewLine, offenders));
+
+        // The allowed sites must actually use it, so the guard cannot go green by the constant being renamed.
+        foreach (var site in SingleUserMarkerSites)
+            Assert.Contains(SingleUserMarkerName, File.ReadAllText(Path.Combine(root, site)), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ServerProjectNeverChangesInboundClaimMapping()
+    {
+        var root = RepositoryRoot();
+        var offenders = new List<string>();
+        foreach (var relative in SourceFiles(root, ServerDir))
+        {
+            var lines = File.ReadAllLines(Path.Combine(root, relative));
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].Contains("MapInboundClaims", StringComparison.Ordinal))
+                    offenders.Add($"{relative}:{i + 1}: {lines[i].Trim()}");
+            }
+        }
+
+        Assert.True(offenders.Count == 0,
+            "The server keeps the default inbound claim mapping: AdsIdentity accepts both spellings, and changing the "
+            + "mapping silently changes which spelling reaches it (D-08). Found:"
+            + Environment.NewLine + string.Join(Environment.NewLine, offenders));
+    }
+
+    [Fact]
+    public void OnlyAdsIdentityInterpretsTheObjectIdAndTenantIdClaims()
+    {
+        var root = RepositoryRoot();
+        var offenders = new List<string>();
+        foreach (var relative in SourceFiles(root, ServicesDir).Concat(SourceFiles(root, ServerDir))
+                     .Where(r => !r.Split('/').Contains("Migrations"))
+                     .Where(r => !string.Equals(r, IdentityPath, StringComparison.Ordinal)))
+        {
+            var lines = File.ReadAllLines(Path.Combine(root, relative));
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (ClaimInterpretation.IsMatch(lines[i]))
+                    offenders.Add($"{relative}:{i + 1}: {lines[i].Trim()}");
+            }
+        }
+
+        Assert.True(offenders.Count == 0,
+            $"Only {IdentityPath} may interpret the oid and tid claims; a second derivation can disagree about who the "
+            + "caller or its tenant is (D-08). Found:" + Environment.NewLine + string.Join(Environment.NewLine, offenders));
+
+        Assert.True(ClaimInterpretation.IsMatch(File.ReadAllText(Path.Combine(root, IdentityPath))),
+            $"{IdentityPath} no longer matches the claim-interpretation pattern, so this guard has gone blind.");
+    }
+
     /// <summary>Walks up from the test output directory to the directory holding global.json.</summary>
     private static string RepositoryRoot()
     {
@@ -191,10 +284,11 @@ public class SourceGuardTests
     }
 
     /// <summary>Repository-relative (forward-slash) paths of the .cs files under a source directory, skipping bin and obj.</summary>
-    private static IEnumerable<string> SourceFiles(string root, string relativeDir)
+    private static IEnumerable<string> SourceFiles(string root, string relativeDir, params string[] patterns)
     {
         var baseDir = Path.Combine(root, relativeDir);
-        return Directory.EnumerateFiles(baseDir, "*.cs", SearchOption.AllDirectories)
+        return (patterns.Length == 0 ? ["*.cs"] : patterns)
+            .SelectMany(pattern => Directory.EnumerateFiles(baseDir, pattern, SearchOption.AllDirectories))
             .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
             .Where(relative => !relative.Split('/').Any(segment => segment is "bin" or "obj"))
             .OrderBy(relative => relative, StringComparer.Ordinal);

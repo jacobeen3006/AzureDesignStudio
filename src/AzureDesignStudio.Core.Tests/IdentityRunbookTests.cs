@@ -145,6 +145,27 @@ namespace AzureDesignStudio.Core.Tests
             Assert.Contains("docs/identity-and-guardrails.md", agents, StringComparison.Ordinal);
         }
 
+        [Fact]
+        public void AgentsMd_StatesTheIdentityConventions()
+        {
+            var agents = File.ReadAllText(Path.Combine(RepositoryRoot(), "AGENTS.md"));
+            string[] required =
+            [
+                "Guardrail.Admin",
+                "Deploy.Approver",
+                "ServiceTools.TryGetCaller",
+                "SingleUserHostKey",
+                "Cost.GetRetailPrices",
+                "Crypto:Provider",
+                "TenantApprovals",
+                "INTERPRETATION TO CONFIRM",
+                "service-worker.published.js",
+            ];
+            var missing = required.Where(r => !agents.Contains(r, StringComparison.Ordinal)).ToList();
+
+            Assert.True(missing.Count == 0, $"AGENTS.md lost identity conventions: {string.Join(" | ", missing)}");
+        }
+
         private static string ReadGuide()
         {
             var path = Path.Combine(RepositoryRoot(), "docs", "identity-and-guardrails.md");
