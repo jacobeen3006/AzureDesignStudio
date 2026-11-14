@@ -405,23 +405,25 @@ await db.SaveChangesAsync(ct);   // one SaveChanges: setting and audit row commi
 | A8 | Decom approvals need tenant scope and `Deploy.Approver`, but not the separate self-approval rule (no requester exists for decom) | Pitfall 8, Open Question 3 | Scope creep vs. leaving a hole |
 | A9 | A non-GUID-case difference in stored `ApprovedByUserId` is unlikely (Entra emits lowercase `D` format) | Pitfall 5 | Stored legacy approvals fail to match; mitigated by parsing both sides |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Where does `AdsIdentity` live?**
+> All five questions were answered in 05-CONTEXT.md ("Added after research" and the Decided autonomously block) on 2026-11-14.
+
+1. **Where does `AdsIdentity` live?** RESOLVED: AdsIdentity in Services, per the CONTEXT Decided-autonomously entry "Research Q1".
    - Known: CONTEXT puts it in `Server/Auth/`; `DeployService`/`DesignService` live in `AzureDesignStudio.Services`, which Desktop runs in-process and which cannot reference the Server.
    - Unclear: whether the user wants the Server copy to stay thin.
    - Recommendation: pure `AdsIdentity`/`AdsCaller` in Services; `Server/Auth/` holds `AdsPolicies` and the endpoint helper. This revises an autonomous (not user-locked) decision; confirm.
 
-2. **What does "self-approval" mean with the current approve-then-deploy flow?**
+2. **What does "self-approval" mean with the current approve-then-deploy flow?** RESOLVED: CONTEXT "Added after research" (implied roles; RequestedByUserId and scope recorded; requester may deploy an approval made by someone else).
    - Known: `WhatIf` records no requester; approval is consumable only by its approver; the web UI approves and deploys in one click by the same user (CodeDrawerTemplate.razor.cs:424-436). The setting defaults off.
    - Unclear: (a) should the WhatIf caller become the `RequestedByUserId` and be the one allowed to deploy an approval made by someone else; (b) should MSA scopes imply `Deploy.Approver` and Desktop imply both roles and self-approval.
    - Recommendation: (a) yes - record `RequestedByUserId` + scope in the gate entry and in the approval row; deploy requires caller == requester (or == approver for legacy/NULL-requester rows); (b) yes to both, with the per-tenant setting still honoured for MSA. Consequence to state in the release notes: on a hosted server with default settings, today's one-click UI is blocked at approval until a Guardrail.Admin enables self-approval or a second Deploy.Approver approves the shared plan hash.
 
-3. **Decommission approvals:** recommend tenant scope + `Deploy.Approver`, no separate self-approval rule (approver is also executor by design today). Confirm.
+3. **Decommission approvals:** RESOLVED: CONTEXT "Decom approvals: tenant scope plus Deploy.Approver only". recommend tenant scope + `Deploy.Approver`, no separate self-approval rule (approver is also executor by design today). Confirm.
 
-4. **Guardrail policy override semantics:** a tenant row replaces (does not merge with) the `Id=1` default, so a tenant admin can write `{}` and drop inherited protections. Confirm that is intended for the inherited default.
+4. **Guardrail policy override semantics:** RESOLVED: CONTEXT "Guardrail override semantics" (replace and merge both supported per tenant, default replace; interpretation to confirm). a tenant row replaces (does not merge with) the `Id=1` default, so a tenant admin can write `{}` and drop inherited protections. Confirm that is intended for the inherited default.
 
-5. **Guardrail change audit:** the decided scope audits only the self-approval setting. Cheap to also write `GuardrailPolicyChanged` events; recommended, not required.
+5. **Guardrail change audit:** RESOLVED: CONTEXT Decided-autonomously entry "Research Q5" (audit policy and setting changes). the decided scope audits only the self-approval setting. Cheap to also write `GuardrailPolicyChanged` events; recommended, not required.
 
 ## Environment Availability
 
