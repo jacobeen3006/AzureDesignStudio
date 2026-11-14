@@ -17,6 +17,10 @@ internal static class CryptoProvider
     /// <summary>Optional override of the development key-ring folder.</summary>
     public const string DevelopmentKeyRingPathKey = "Crypto:DevelopmentKeyRingPath";
 
+    /// <summary>Explicit opt-in that lets a non-Development, non-Production host use the development
+    /// provider (a test host, a deliberate local setup). Never admits Production.</summary>
+    public const string AllowDevelopmentProviderKey = "Crypto:AllowDevelopmentProvider";
+
     /// <summary>Application name of the standalone development provider.</summary>
     public const string DevelopmentApplicationName = "AzureDesignStudio.Dev";
 
@@ -32,11 +36,20 @@ internal static class CryptoProvider
 
         if (string.Equals(value.Trim(), Development, StringComparison.OrdinalIgnoreCase))
         {
-            // First thing, before anything is registered: a Production host stops during startup
-            // (CRED-02, D-10). Development keys never protect production secrets.
+            // First thing, before anything is registered: a host stops during startup unless it is
+            // explicitly a development host (CRED-02, D-10, WR-02). Development keys never protect
+            // production secrets, and "not Production" is too wide: Staging, UAT or "Prod" hosts hold
+            // real subscription links. An allow-list instead: the Development environment, or the
+            // explicit opt-in Crypto:AllowDevelopmentProvider=true (test hosts, a deliberate local
+            // setup). Production is never opted in.
             if (environment.IsProduction())
                 throw new InvalidOperationException(
                     $"{Key} is \"{Development}\", which is never allowed in the Production environment. Use {KeyVault}.");
+            if (!environment.IsDevelopment() && !configuration.GetValue<bool>(AllowDevelopmentProviderKey))
+                throw new InvalidOperationException(
+                    $"{Key} is \"{Development}\", which is only allowed in the Development environment (this host runs " +
+                    $"\"{environment.EnvironmentName}\"). Use {KeyVault}, or set {AllowDevelopmentProviderKey}=true for a host " +
+                    "that holds no real secrets.");
 
             var path = KeyRingPath(configuration);
             // Standalone, not AddDataProtection: this keeps the development key ring out of the

@@ -77,7 +77,7 @@ public class CryptoProviderTests
     [InlineData(" Development ")]
     public void DevelopmentValueRegistersASingletonBuiltByAFactory(string value)
     {
-        var descriptor = Registered(Config((CryptoProvider.Key, value)));
+        var descriptor = Registered(Config((CryptoProvider.Key, value)), "Development");
 
         Assert.Equal(ServiceLifetime.Singleton, descriptor.Lifetime);
         Assert.NotNull(descriptor.ImplementationFactory);
@@ -99,13 +99,56 @@ public class CryptoProviderTests
 
     [Theory]
     [InlineData("Development")]
-    [InlineData("Testing")]
-    [InlineData("Staging")]
-    public void DevelopmentIsAllowedOutsideProduction(string environment)
+    [InlineData("development")]
+    public void DevelopmentIsAllowedInTheDevelopmentEnvironment(string environment)
     {
         var descriptor = Registered(Config((CryptoProvider.Key, "Development")), environment);
 
         Assert.NotNull(descriptor.ImplementationFactory);
+    }
+
+    [Theory]
+    [InlineData("Testing")]
+    [InlineData("Staging")]
+    [InlineData("UAT")]
+    [InlineData("Prod")]
+    [InlineData("")]
+    public void DevelopmentIsRefusedOutsideTheDevelopmentEnvironmentWithoutTheOptIn(string environment)
+    {
+        var services = new ServiceCollection();
+
+        var failure = Assert.Throws<InvalidOperationException>(
+            () => CryptoProvider.Register(services, Config((CryptoProvider.Key, "Development")), new FakeEnvironment(environment)));
+
+        Assert.Contains(CryptoProvider.AllowDevelopmentProviderKey, failure.Message);
+        Assert.Contains("KeyVault", failure.Message);
+        Assert.Empty(services);
+    }
+
+    [Theory]
+    [InlineData("Testing")]
+    [InlineData("Staging")]
+    public void TheExplicitOptInAdmitsANonProductionEnvironment(string environment)
+    {
+        var descriptor = Registered(
+            Config((CryptoProvider.Key, "Development"), (CryptoProvider.AllowDevelopmentProviderKey, "true")), environment);
+
+        Assert.NotNull(descriptor.ImplementationFactory);
+    }
+
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("production")]
+    public void TheOptInNeverAdmitsProduction(string environment)
+    {
+        var services = new ServiceCollection();
+
+        var failure = Assert.Throws<InvalidOperationException>(() => CryptoProvider.Register(services,
+            Config((CryptoProvider.Key, "Development"), (CryptoProvider.AllowDevelopmentProviderKey, "true")),
+            new FakeEnvironment(environment)));
+
+        Assert.Contains("Production", failure.Message);
+        Assert.Empty(services);
     }
 
     [Fact]

@@ -255,8 +255,11 @@ The server stores linked subscription secrets encrypted. In production the key l
 
 - Select it with `Crypto__Provider=Development` (the `Crypto:Provider` setting). The Development launch
   profiles of the server project set it, so `dotnet run` needs no vault.
-- It works **only outside Production**. A Production host with this value refuses to start; Production still
-  needs Key Vault.
+- It works **only in the Development environment** (`ASPNETCORE_ENVIRONMENT=Development`). Any other host
+  (Production, Staging, UAT, a custom name) with this value refuses to start, and Production still needs Key
+  Vault. A test host or a deliberate local setup in another environment must opt in with
+  `Crypto__AllowDevelopmentProvider=true` (`Crypto:AllowDevelopmentProvider`); the opt-in never admits
+  Production. Do not set it on a host that holds real subscription links.
 - The key ring lives under `%LOCALAPPDATA%\AzureDesignStudio\dev-keys` on Windows and `~/.local/share/AzureDesignStudio/dev-keys`
   on macOS and Linux. Set `Crypto:DevelopmentKeyRingPath` (`Crypto__DevelopmentKeyRingPath`) to use another folder.
 - On Windows the keys are protected with DPAPI (current user). On macOS and Linux the keys are **plaintext XML**

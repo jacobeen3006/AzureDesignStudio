@@ -55,6 +55,7 @@ public class DevelopmentCryptoTests(AdsServerFactory factory) : IClassFixture<Ad
             using var host = factory.WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("Crypto:Provider", "Development");
+                builder.UseSetting("Crypto:AllowDevelopmentProvider", "true");
                 builder.UseSetting("Crypto:DevelopmentKeyRingPath", keyRing);
             });
             var configuration = host.Services.GetRequiredService<IConfiguration>();
@@ -117,6 +118,7 @@ public class DevelopmentCryptoTests(AdsServerFactory factory) : IClassFixture<Ad
             {
                 builder.UseEnvironment("Production");
                 builder.UseSetting("Crypto:Provider", "Development");
+                builder.UseSetting("Crypto:AllowDevelopmentProvider", "true");
                 builder.UseSetting("Crypto:DevelopmentKeyRingPath", keyRing);
             });
 
@@ -210,6 +212,7 @@ public class DevelopmentCryptoTests(AdsServerFactory factory) : IClassFixture<Ad
             using var host = factory.WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("Crypto:Provider", "Development");
+                builder.UseSetting("Crypto:AllowDevelopmentProvider", "true");
                 builder.UseSetting("Crypto:DevelopmentKeyRingPath", keyRing);
             });
             var user = Guid.NewGuid();
@@ -238,6 +241,33 @@ public class DevelopmentCryptoTests(AdsServerFactory factory) : IClassFixture<Ad
         }
     }
 
+    [Theory]
+    [InlineData("Staging")]
+    [InlineData("Prod")]
+    public void ANonDevelopmentHostWithTheDevelopmentProviderAndNoOptInDoesNotStart(string environment)
+    {
+        var keyRing = NewKeyRingDirectory();
+        try
+        {
+            using var host = factory.WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment(environment);
+                builder.UseSetting("Crypto:Provider", "Development");
+                builder.UseSetting("Crypto:DevelopmentKeyRingPath", keyRing);
+            });
+
+            var failure = Assert.ThrowsAny<Exception>(() => host.Services);
+
+            Assert.IsType<InvalidOperationException>(Innermost(failure));
+            Assert.True(Mentions(failure, "Crypto:AllowDevelopmentProvider"), failure.ToString());
+            Assert.False(Directory.Exists(keyRing));
+        }
+        finally
+        {
+            DeleteQuietly(keyRing);
+        }
+    }
+
     [Fact]
     public void KeyRingDirectoryIsCreatedOnFirstUseAndIsUserOnlyOnUnix()
     {
@@ -250,6 +280,7 @@ public class DevelopmentCryptoTests(AdsServerFactory factory) : IClassFixture<Ad
             using var host = factory.WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("Crypto:Provider", "Development");
+                builder.UseSetting("Crypto:AllowDevelopmentProvider", "true");
                 builder.UseSetting("Crypto:DevelopmentKeyRingPath", keyRing);
             });
             Assert.False(Directory.Exists(keyRing));
