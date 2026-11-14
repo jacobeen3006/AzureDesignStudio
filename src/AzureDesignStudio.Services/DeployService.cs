@@ -459,7 +459,7 @@ namespace AzureDesignStudio.Services
                 // resolved ids and payloads are the match surface. A protected plan earns no
                 // token, so it can never be approved or applied; the review still shows every
                 // row with its flag, and tightening the list later cannot be reviewed around.
-                var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(context.CancellationToken);
+                var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(caller.ScopeId, context.CancellationToken);
                 if (guardrailPolicy is null)
                 {
                     _logger.LogWarning("Guardrail policy unreadable: {Error}", policyError);
@@ -1070,7 +1070,7 @@ namespace AzureDesignStudio.Services
             // Guardrails are re-judged at apply time against the live policy, so a list tightened
             // after the review still stops the apply - the veto runs before consumption and never
             // burns the single-use token.
-            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(context.CancellationToken);
+            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(caller.ScopeId, context.CancellationToken);
             if (guardrailPolicy is null)
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -1225,7 +1225,7 @@ namespace AzureDesignStudio.Services
                 return (null, StatusCodes.Status400BadRequest, errors);
             }
 
-            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(context.CancellationToken);
+            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(caller.ScopeId, context.CancellationToken);
             if (guardrailPolicy is null)
                 return (null, StatusCodes.Status400BadRequest, policyError ?? "The guardrail policy could not be read.");
 
@@ -1639,16 +1639,32 @@ namespace AzureDesignStudio.Services
             return response;
         }
 
+        /// <summary>The operator-seeded row with a NULL tenant: the inherited default. No RPC writes it.</summary>
         private const int GuardrailRowId = 1;
 
         /// <summary>
-        /// Loads the server-side do-not-touch list. A missing row is an empty policy (vacuous
-        /// enforcement); an unreadable one fails closed - deploys refuse rather than guess the list.
+        /// The row that governs <paramref name="scopeId"/>: the scope's own row, else the NULL-tenant
+        /// default, else null. This is the replace semantics (D-05): an own row stands for the whole
+        /// list and is never combined with the default.
         /// </summary>
-        private async Task<(GuardrailPolicy? Policy, string? Error)> LoadGuardrailPolicy(CancellationToken ct)
+        private async Task<GuardrailPolicyModel?> FindEffectiveGuardrailRow(Guid scopeId, CancellationToken ct)
         {
-            var row = await _designContext.AdsGuardrailPolicies.AsNoTracking()
-                .FirstOrDefaultAsync(e => e.Id == GuardrailRowId, ct);
+            var own = await _designContext.AdsGuardrailPolicies.AsNoTracking()
+                .FirstOrDefaultAsync(e => e.TenantId == scopeId, ct);
+            if (own is not null) return own;
+            return await _designContext.AdsGuardrailPolicies.AsNoTracking()
+                .FirstOrDefaultAsync(e => e.TenantId == null && e.Id == GuardrailRowId, ct);
+        }
+
+        /// <summary>
+        /// Loads the server-side do-not-touch list of one scope: its own row, else the inherited
+        /// default row, else the empty policy (vacuous enforcement); a row that cannot be read fails
+        /// closed - deploys refuse rather than guess the list. An unreadable row affects only the scope
+        /// that resolves to it.
+        /// </summary>
+        internal async Task<(GuardrailPolicy? Policy, string? Error)> LoadGuardrailPolicy(Guid scopeId, CancellationToken ct)
+        {
+            var row = await FindEffectiveGuardrailRow(scopeId, ct);
             if (row is null || string.IsNullOrWhiteSpace(row.Json)) return (GuardrailPolicy.Empty, null);
             try
             {
@@ -1721,8 +1737,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var row = await _designContext.AdsGuardrailPolicies.AsNoTracking()
-                .FirstOrDefaultAsync(e => e.Id == GuardrailRowId, context.CancellationToken);
+            var row = await FindEffectiveGuardrailRow(caller.ScopeId, context.CancellationToken);
             response.StatusCode = StatusCodes.Status200OK;
             response.Json = row?.Json ?? "";
             response.UpdatedBy = row?.UpdatedBy ?? "";
@@ -1769,25 +1784,45 @@ namespace AzureDesignStudio.Services
 
             var principal = caller.Principal;
 
-            var row = await _designContext.AdsGuardrailPolicies.FindAsync([GuardrailRowId], context.CancellationToken);
-            if (row is null)
+            // The caller's own row, found by scope - never the NULL-tenant default, which is
+            // operator-seeded data. A first write by a scope creates its row; if a concurrent first
+            // write by the same scope wins the unique index, re-read and update that row once.
+            DateTime updatedAtUtc;
+            try
             {
-                row = new GuardrailPolicyModel { Id = GuardrailRowId };
-                _designContext.AdsGuardrailPolicies.Add(row);
+                updatedAtUtc = await UpsertGuardrailRowAsync(caller, json, context.CancellationToken);
             }
-
-            row.Json = json;
-            row.UpdatedBy = principal;
-            row.UpdatedByUserId = caller.UserIdText;
-            row.UpdatedAtUtc = DateTime.UtcNow;
-            await _designContext.SaveChangesAsync(context.CancellationToken);
+            catch (DbUpdateException)
+            {
+                _designContext.ChangeTracker.Clear();
+                updatedAtUtc = await UpsertGuardrailRowAsync(caller, json, context.CancellationToken);
+            }
 
             _logger.LogInformation("Guardrail policy updated by {Principal} ({Length} bytes).", principal, json.Length);
             response.StatusCode = StatusCodes.Status200OK;
             response.Json = json;
             response.UpdatedBy = principal;
-            response.UpdatedAt = row.UpdatedAtUtc.ToString("O");
+            response.UpdatedAt = updatedAtUtc.ToString("O");
             return response;
+        }
+
+        private async Task<DateTime> UpsertGuardrailRowAsync(AdsCaller caller, string json, CancellationToken ct)
+        {
+            var row = await _designContext.AdsGuardrailPolicies.FirstOrDefaultAsync(e => e.TenantId == caller.ScopeId, ct);
+            if (row is null)
+            {
+                // The key is explicit on this table (see GuardrailPolicyModel); the default row is Id 1.
+                var maxId = await _designContext.AdsGuardrailPolicies.Select(e => (int?)e.Id).MaxAsync(ct) ?? GuardrailRowId;
+                row = new GuardrailPolicyModel { Id = Math.Max(maxId, GuardrailRowId) + 1, TenantId = caller.ScopeId };
+                _designContext.AdsGuardrailPolicies.Add(row);
+            }
+
+            row.Json = json;
+            row.UpdatedBy = caller.Principal;
+            row.UpdatedByUserId = caller.UserIdText;
+            row.UpdatedAtUtc = DateTime.UtcNow;
+            await _designContext.SaveChangesAsync(ct);
+            return row.UpdatedAtUtc;
         }
 
 
@@ -2386,7 +2421,7 @@ namespace AzureDesignStudio.Services
             // Guardrail re-judgement BEFORE any ARM mutation: the scope ids and the resources under
             // them against the live policy. A match refuses with the offending ids; the approval is
             // never consumed and no lock is touched.
-            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(context.CancellationToken);
+            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(caller.ScopeId, context.CancellationToken);
             if (guardrailPolicy is null)
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
