@@ -539,3 +539,139 @@ public sealed class SelfApprovalAndRequesterTests
         Assert.DoesNotContain("MISMATCH", byApprover.ErrorMessage);
     }
 }
+
+/// <summary>
+/// Decommission approvals (D-06): tenant scope and Deploy.Approver only, with no separate
+/// self-approval rule. The execute step keeps its approver-only ownership check.
+/// </summary>
+public sealed class DecommissionApprovalRulesTests
+{
+    private static readonly string PlanHash = "sha256:" + new string('c', 64);
+    private static readonly string ExecutionHash = "sha256:" + new string('b', 64);
+
+    private readonly DesignDbContext _db = TestData.NewDb();
+    private readonly Guid _subscription = Guid.NewGuid();
+
+    private DeployService Service => new(_db, NullLogger<DeployService>.Instance, new FakeCryptoService(),
+        new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl), new ScriptedHttp(_ => null), new AmbientCredential());
+
+    private ApproveDecomWindowRequest Approval(string? planHash = null) => new()
+    {
+        SubscriptionId = _subscription.ToString(), WindowId = "w1", PlanHash = planHash ?? PlanHash, ExecutionHash = ExecutionHash,
+    };
+
+    private ExecuteDecomWindowRequest Execution() => new()
+    {
+        SubscriptionId = _subscription.ToString(), ScanId = Guid.NewGuid().ToString(), WindowId = "w1",
+        PlanHash = PlanHash, ExecutionHash = ExecutionHash,
+        WindowStartUtc = "2026-01-01T00:00:00.0000000+00:00", WindowEndUtc = "2026-01-02T00:00:00.0000000+00:00",
+        PurgeNotBeforeUtc = "2026-01-03T00:00:00.0000000+00:00",
+    };
+
+    private static ServerCallContext Organizational(Guid user, params string[] roles) =>
+        TestServerCallContext.ForUser(user, "Ada", TestTenants.Contoso, roles);
+
+    [Fact]
+    public async Task AnOrganizationalCallerWithoutTheRoleIsRefused()
+    {
+        var response = await Service.ApproveDecomWindow(Approval(), Organizational(Guid.NewGuid()));
+
+        Assert.Equal(403, response.StatusCode);
+        Assert.StartsWith("DECOM_APPROVER_ROLE_REQUIRED", response.ErrorMessage);
+        Assert.Contains("Deploy.Approver", response.ErrorMessage);
+        Assert.Empty(_db.AdsDecomApprovals);
+    }
+
+    [Fact]
+    public async Task TheRoleIsCheckedBeforeTheHashesAreRead()
+    {
+        var response = await Service.ApproveDecomWindow(Approval(planHash: "not-a-hash"), Organizational(Guid.NewGuid()));
+
+        Assert.Equal(403, response.StatusCode);
+        Assert.StartsWith("DECOM_APPROVER_ROLE_REQUIRED", response.ErrorMessage);
+    }
+
+    [Theory]
+    [InlineData("Guardrail.Admin")]
+    [InlineData("deploy.approver")]
+    public async Task AnotherRoleOrCasingIsRefused(string role)
+    {
+        var response = await Service.ApproveDecomWindow(Approval(), Organizational(Guid.NewGuid(), role));
+
+        Assert.Equal(403, response.StatusCode);
+        Assert.StartsWith("DECOM_APPROVER_ROLE_REQUIRED", response.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task AnApproverApproves()
+    {
+        var response = await Service.ApproveDecomWindow(Approval(), Organizational(Guid.NewGuid(), AdsIdentity.DeployApproverRole));
+
+        Assert.Equal(200, response.StatusCode);
+        Assert.Single(_db.AdsDecomApprovals);
+    }
+
+    [Fact]
+    public async Task APersonalAccountApprovesWithoutARole()
+    {
+        var response = await Service.ApproveDecomWindow(Approval(), TestServerCallContext.ForPersonalAccount(Guid.NewGuid(), "Ada"));
+
+        Assert.Equal(200, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TheSingleUserHostApprovesWithoutARole()
+    {
+        var response = await Service.ApproveDecomWindow(Approval(), TestServerCallContext.ForSingleUserHost(Guid.NewGuid(), "Ada"));
+
+        Assert.Equal(200, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task NoIdentityIs401()
+    {
+        var response = await Service.ApproveDecomWindow(Approval(), TestServerCallContext.WithoutIdentity());
+
+        Assert.Equal(401, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AnApproverWhoExecutesTheirOwnApprovalIsNotRefusedForSelfApproval()
+    {
+        var ada = Organizational(Guid.NewGuid(), AdsIdentity.DeployApproverRole);
+        Assert.Equal(200, (await Service.ApproveDecomWindow(Approval(), ada)).StatusCode);
+
+        var response = await Service.ExecuteDecomWindow(Execution(), ada);
+
+        // The ownership check passes; this request names no scopes, so a later check ends it.
+        Assert.NotEqual(403, response.StatusCode);
+        Assert.DoesNotContain("SELF_APPROVAL", response.ErrorMessage);
+        Assert.DoesNotContain("DECOM_APPROVER_MISMATCH", response.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task AnotherPrincipalStillCannotExecuteTheApproval()
+    {
+        Assert.Equal(200, (await Service.ApproveDecomWindow(Approval(),
+            Organizational(Guid.NewGuid(), AdsIdentity.DeployApproverRole))).StatusCode);
+
+        var response = await Service.ExecuteDecomWindow(Execution(),
+            Organizational(Guid.NewGuid(), AdsIdentity.DeployApproverRole));
+
+        Assert.Equal(403, response.StatusCode);
+        Assert.StartsWith("DECOM_APPROVER_MISMATCH", response.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ExecuteLooksRowsUpInTheCallersScopeOnly()
+    {
+        Assert.Equal(200, (await Service.ApproveDecomWindow(Approval(),
+            Organizational(Guid.NewGuid(), AdsIdentity.DeployApproverRole))).StatusCode);
+
+        var response = await Service.ExecuteDecomWindow(Execution(),
+            TestServerCallContext.ForUser(Guid.NewGuid(), "Bob", TestTenants.Fabrikam, [AdsIdentity.DeployApproverRole]));
+
+        Assert.Equal(412, response.StatusCode);
+        Assert.StartsWith("DECOM_APPROVAL_MISSING", response.ErrorMessage);
+    }
+}

@@ -2496,6 +2496,16 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
+            // Tenant scope and Deploy.Approver only (D-06): the decommission window has no requester, so
+            // there is no separate self-approval rule here. The role comes before anything is read.
+            if (!caller.CanApprove)
+            {
+                _logger.LogWarning("Decom window approval refused: the caller lacks {Role}.", AdsIdentity.DeployApproverRole);
+                response.StatusCode = StatusCodes.Status403Forbidden;
+                response.ErrorMessage = "DECOM_APPROVER_ROLE_REQUIRED: the Deploy.Approver app role is required to approve a decommission window.";
+                return response;
+            }
+
             var planHash = request.PlanHash ?? string.Empty;
             var executionHash = request.ExecutionHash ?? string.Empty;
             if (!IsValidHash(planHash) || !IsValidHash(executionHash))

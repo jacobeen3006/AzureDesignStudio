@@ -8,6 +8,7 @@ using AzureDesignStudio.Services.Models;
 using AzureDesignStudio.SharedModels.Protos;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -57,7 +58,7 @@ public class InProcessTests
 
     /// <summary>The desktop host's wiring, minus MAUI: services in DI, the invoker in front.</summary>
     private static (ServiceProvider Services, InProcessCallInvoker Invoker) Host(
-        ClaimsPrincipal? caller = null, IAmbientAzureCredential? ambient = null, ScriptedHttp? http = null)
+        ClaimsPrincipal? caller = null, IAmbientAzureCredential? ambient = null, IHttpClientFactory? http = null)
     {
         var databaseName = Guid.NewGuid().ToString();
         var services = new ServiceCollection();
@@ -247,6 +248,61 @@ public class InProcessTests
         Assert.True(after.AllowSelfApproval);
         Assert.Equal("merge", after.GuardrailPolicyMode);
         Assert.Equal("Ada <" + User + ">", after.UpdatedBy);
+    }
+
+    [Fact]
+    public async Task TheSingleUserCallerApprovesItsOwnPlanAndGetsPastTheRequesterCheck()
+    {
+        // The Desktop host has no second person: the single-user marker implies Deploy.Approver and
+        // self-approval (D-04), so the caller who ran the what-if approves it and then deploys it.
+        var subscription = Guid.NewGuid();
+        var group = $"/subscriptions/{subscription}/resourceGroups/rg";
+        var storage = $"{group}/providers/Microsoft.Storage/storageAccounts/sa1";
+        var arm = new RouteTableHttp();
+        arm.Answer(HttpMethod.Get, $"/subscriptions/{subscription}", System.Net.HttpStatusCode.OK,
+                "{\"id\":\"/subscriptions/" + subscription + "\",\"subscriptionId\":\"" + subscription + "\",\"displayName\":\"t\",\"state\":\"Enabled\"}")
+            .Answer(HttpMethod.Get, group, System.Net.HttpStatusCode.OK,
+                "{\"id\":\"" + group + "\",\"name\":\"rg\",\"location\":\"westeurope\",\"properties\":{\"provisioningState\":\"Succeeded\"}}")
+            .Answer(HttpMethod.Post, $"{group}/providers/Microsoft.Resources/deployments/{Discovery.Iac.WhatIf.WhatIfClient.DeploymentName}/whatIf",
+                System.Net.HttpStatusCode.OK,
+                "{\"status\":\"Succeeded\",\"properties\":{\"changes\":[{\"resourceId\":\"" + storage
+                + "\",\"changeType\":\"Create\",\"after\":{\"id\":\"" + storage
+                + "\",\"name\":\"sa1\",\"type\":\"Microsoft.Storage/storageAccounts\",\"apiVersion\":\"2023-01-01\","
+                + "\"location\":\"westeurope\",\"sku\":{\"name\":\"Standard_LRS\"},\"kind\":\"StorageV2\"}}]}}");
+        var (services, invoker) = Host(SignedIn(User), new AmbientUser([], new FixedCredential()), arm);
+        var client = new Deploy.DeployClient(invoker);
+        const string template =
+            """{"$schema":"https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#","contentVersion":"1.0.0.0","resources":[{"type":"Microsoft.Storage/storageAccounts","apiVersion":"2023-01-01","name":"sa1","location":"westeurope","sku":{"name":"Standard_LRS"},"kind":"StorageV2"}]}""";
+        var whatIf = await client.WhatIfAsync(new DeploymentRequest
+        {
+            SubscriptionId = subscription.ToString(), ResourceGroupName = "rg", ArmTemplate = template, Parameters = "{}",
+        });
+        Assert.True(whatIf.StatusCode == 200, whatIf.ErrorMessage);
+
+        var approval = await client.ApprovePlanAsync(new PlanApprovalRequest { PlanHash = whatIf.PlanHash });
+
+        Assert.True(approval.StatusCode == 200, approval.ErrorMessage);
+        using (var scope = services.CreateScope())
+        {
+            var row = await scope.ServiceProvider.GetRequiredService<DesignDbContext>().AdsPlanApprovals.SingleAsync();
+            Assert.Equal(User.ToString("D"), row.RequestedByUserId);
+            Assert.Equal(row.RequestedByUserId, row.ApprovedByUserId);
+        }
+
+        // No review token is sent, so the call stops at the token - after the approval comparison.
+        using var call = client.CreateDeployment(new DeploymentRequest
+        {
+            SubscriptionId = subscription.ToString(), ResourceGroupName = "rg", ArmTemplate = template, Parameters = "{}",
+            PlanHash = whatIf.PlanHash,
+        });
+        var messages = new List<DeploymentResponse>();
+        while (await call.ResponseStream.MoveNext(CancellationToken.None))
+            messages.Add(call.ResponseStream.Current);
+
+        var first = Assert.Single(messages);
+        Assert.Equal(400, first.StatusCode);
+        Assert.DoesNotContain("MISMATCH", first.ErrorMessage);
+        Assert.DoesNotContain("PLAN_NOT_APPROVED", first.ErrorMessage);
     }
 
     [Fact]
