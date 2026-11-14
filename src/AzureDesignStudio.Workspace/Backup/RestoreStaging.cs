@@ -257,6 +257,19 @@ public static class RestoreStaging
         if (!File.Exists(picked))
             return new RestoreVerification(false, [$"The chosen file does not exist: {picked}"]);
 
+        // Copying a database that is in use takes only its main file: commits still in its write-ahead log would
+        // be missing from the copy, and the copy can be torn by a checkpoint. Backups are single, journal-less files.
+        var comparison = OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        var live = Path.GetFullPath(Path.Combine(appDataDirectory, "workspace.db"));
+        if (string.Equals(picked, live, comparison))
+            return new RestoreVerification(false,
+                ["The chosen file is the live workspace. Use \"Back up now\" and restore that backup instead."]);
+        var pickedWal = new FileInfo(picked + "-wal");
+        if (pickedWal.Exists && pickedWal.Length > 0)
+            return new RestoreVerification(false,
+                [$"The chosen database has unflushed changes in {pickedWal.Name}, so a copy would be missing recent work. " +
+                 "Use \"Back up now\" and restore that backup instead."]);
+
         var final = StagingDirectory(appDataDirectory);
         var work = final + ".new";
         DeleteDirectory(work);

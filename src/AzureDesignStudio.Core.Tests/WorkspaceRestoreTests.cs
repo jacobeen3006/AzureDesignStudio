@@ -388,6 +388,39 @@ namespace AzureDesignStudio.Core.Tests
         }
 
         [Fact]
+        public async Task ThePickedLiveWorkspace_IsRejected_AndNothingIsStaged()
+        {
+            // WR-04: copying workspace.db alone drops the commits that sit in its live -wal
+            await BaseBackupAsync();
+
+            var verdict = await RestoreStaging.StageAsync(WorkspacePath, _temp.Root);
+
+            Assert.False(verdict.Accepted);
+            Assert.Contains(verdict.Reasons, r => r.Contains("live workspace", StringComparison.OrdinalIgnoreCase));
+            Assert.Null(RestoreStaging.GetPending(_temp.Root));
+            Assert.False(Directory.Exists(_temp.Path("restore-staging")));
+        }
+
+        [Fact]
+        public async Task AFileWithANonEmptyWalSidecar_IsRejected_AndAnEmptyOneIsNot()
+        {
+            var backup = await BaseBackupAsync();
+            var copy = _temp.Path("elsewhere.db");
+            File.Copy(backup.Path, copy);
+            File.WriteAllBytes(copy + "-wal", new byte[4096]);
+
+            var rejected = await RestoreStaging.StageAsync(copy, _temp.Root);
+
+            Assert.False(rejected.Accepted);
+            Assert.Contains(rejected.Reasons, r => r.Contains("-wal", StringComparison.Ordinal));
+            Assert.Null(RestoreStaging.GetPending(_temp.Root));
+
+            File.WriteAllBytes(copy + "-wal", []);
+            var accepted = await RestoreStaging.StageAsync(copy, _temp.Root);
+            Assert.True(accepted.Accepted, string.Join("; ", accepted.Reasons));
+        }
+
+        [Fact]
         public async Task CancelPending_RemovesTheStagingFolderAndNothingElse()
         {
             var backup = await BaseBackupAsync();
