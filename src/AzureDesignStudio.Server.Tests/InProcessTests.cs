@@ -138,6 +138,31 @@ public class InProcessTests
     }
 
     [Fact]
+    public void InProcessCallsCarryTheSingleUserMarker()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("oid", User.ToString()), new Claim("tid", TestTenants.Contoso.ToString())], "test"));
+        var context = new InProcessServerCallContext("/test", principal);
+
+        Assert.Equal(true, context.UserState[ServiceTools.SingleUserHostKey]);
+        Assert.True(ServiceTools.TryGetCaller(context, out var caller, out _));
+        Assert.True(caller.IsSingleUserHost);
+        Assert.True(caller.CanAdministerGuardrails);
+        Assert.True(caller.CanApprove);
+    }
+
+    [Fact]
+    public void AServerStyleContextIsNotASingleUserHost()
+    {
+        // The server's interceptor puts the principal and nothing else in UserState.
+        var context = TestServerCallContext.ForUser(User);
+
+        Assert.False(context.UserState.ContainsKey(ServiceTools.SingleUserHostKey));
+        Assert.True(ServiceTools.TryGetCaller(context, out var caller, out _));
+        Assert.False(caller.IsSingleUserHost);
+    }
+
+    [Fact]
     public async Task ServerStreamingCallDeliversItsMessages()
     {
         var (_, invoker) = Host(SignedIn(User));
