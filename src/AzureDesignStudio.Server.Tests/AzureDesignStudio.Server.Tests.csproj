@@ -33,11 +33,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AzureDesignStudio.Server\AzureDesignStudio.Server.csproj" />
+    <ProjectReference Include="..\AzureDesignStudio.Workspace\AzureDesignStudio.Workspace.csproj" />
   </ItemGroup>
 
   <!-- The logical-schema describer the durability tests of both test projects share (no copy). -->
   <ItemGroup>
     <Compile Include="..\AzureDesignStudio.Core.Tests\Support\SqliteSchemaDescriber.cs" Link="Persistence\SqliteSchemaDescriber.cs" />
+    <!-- The Desktop's deploy.db startup is a plain C# file; the MAUI project cannot be referenced, so it is compiled here. -->
+    <Compile Include="..\AzureDesignStudio.Desktop\DeployDbStartup.cs" Link="Persistence\DeployDbStartup.cs" />
   </ItemGroup>
 
   <!-- Analyzer donor via the WASM app's Azure.Bicep.Decompiler; keep out. -->

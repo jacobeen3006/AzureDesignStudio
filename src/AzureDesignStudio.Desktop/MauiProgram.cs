@@ -75,7 +75,8 @@ public static class MauiProgram
         // (AzureDesignStudio.Services, the same classes the hosted server exposes), reached by
         // the shared client code through generated gRPC clients on an in-process invoker.
         // Deploy approvals, guardrails, linked subscriptions and audit events go to deploy.db.
-        builder.Services.AddDbContext<AzureDesignStudio.Services.Models.DesignDbContext>(options =>
+        // The services ask for DesignDbContext; the SQLite flavour owns deploy.db's migrations.
+        builder.Services.AddDbContext<AzureDesignStudio.Services.Models.DesignDbContext, AzureDesignStudio.Services.Models.SqliteDesignDbContext>(options =>
             options.UseSqlite($"Data Source={System.IO.Path.Combine(appData, "deploy.db")}"));
         builder.Services.AddSingleton(new AzureDesignStudio.Discovery.Iac.WhatIf.WhatIfTokenGate(
             AzureDesignStudio.Discovery.Iac.WhatIf.WhatIfTokenGate.DefaultTtl));
@@ -204,10 +205,14 @@ public static class MauiProgram
         var app = builder.Build();
         Services = app.Services;
 
-        // deploy.db: created with the full schema on first run. (A later schema change needs a
-        // migration - EnsureCreated never alters an existing file.)
+        // deploy.db is under EF migrations: a new file gets the baseline, a file an earlier build
+        // created from the model adopts it, and an existing file is backed up (privately, in
+        // backups/deploy) before any pending migration. A later schema change is a migration.
         using (var scope = app.Services.CreateScope())
-            scope.ServiceProvider.GetRequiredService<AzureDesignStudio.Services.Models.DesignDbContext>().Database.EnsureCreated();
+            DeployDbStartup.Migrate(
+                scope.ServiceProvider.GetRequiredService<AzureDesignStudio.Services.Models.DesignDbContext>(),
+                System.IO.Path.Combine(appData, "deploy.db"),
+                System.IO.Path.Combine(appData, "backups", "deploy"));
         return app;
     }
 
