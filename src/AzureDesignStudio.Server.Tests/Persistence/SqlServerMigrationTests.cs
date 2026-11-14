@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using TenantApprovals = AzureDesignStudio.Server.Persistence.Migrations.TenantApprovals;
 
 namespace AzureDesignStudio.Server.Tests.Persistence;
 
@@ -83,6 +84,95 @@ public sealed class SqlServerMigrationTests
             WHERE parent_object_id IN (OBJECT_ID(N'AdsTenantSettings'), OBJECT_ID(N'AdsSecurityEvents'))
                OR (parent_object_id = OBJECT_ID(N'AdsGuardrailPolicies'))
             """));
+
+        // TenantApprovals: the pending legacy approvals are kept and sit in the empty-GUID scope (no real
+        // caller has it, so they fail closed), the keys are composite and no default was left on the column.
+        foreach (var table in new[] { "AdsPlanApprovals", "AdsDecomApprovals" })
+        {
+            Assert.Equal(before[table], SqlServerDatabaseFixture.Scalar<int>(fixture.ConnectionString,
+                $"SELECT COUNT(*) FROM {table} WHERE TenantId = '00000000-0000-0000-0000-000000000000'"));
+            Assert.Equal(0, SqlServerDatabaseFixture.Scalar<int>(fixture.ConnectionString, $"""
+                SELECT COUNT(*) FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'{table}') AND name = N'TenantId' AND is_nullable = 1
+                """));
+            Assert.Equal(0, SqlServerDatabaseFixture.Scalar<int>(fixture.ConnectionString, $"""
+                SELECT COUNT(*) FROM sys.default_constraints
+                WHERE parent_object_id = OBJECT_ID(N'{table}')
+                  AND COL_NAME(parent_object_id, parent_column_id) = N'TenantId'
+                """));
+        }
+
+        Assert.Equal("TenantId,PlanHash", PrimaryKeyColumns(fixture.ConnectionString, "AdsPlanApprovals"));
+        Assert.Equal("TenantId,ExecutionHash", PrimaryKeyColumns(fixture.ConnectionString, "AdsDecomApprovals"));
+        Assert.Equal("PK_AdsPlanApprovals", PrimaryKeyName(fixture.ConnectionString, "AdsPlanApprovals"));
+        Assert.Equal("PK_AdsDecomApprovals", PrimaryKeyName(fixture.ConnectionString, "AdsDecomApprovals"));
+        Assert.Equal(1, SqlServerDatabaseFixture.Scalar<int>(fixture.ConnectionString, """
+            SELECT COUNT(*) FROM sys.columns
+            WHERE object_id = OBJECT_ID(N'AdsPlanApprovals') AND name = N'RequestedByUserId' AND is_nullable = 1 AND max_length = 128
+            """));
+    }
+
+    private static string PrimaryKeyColumns(string connectionString, string table) =>
+        SqlServerDatabaseFixture.Scalar<string>(connectionString, $"""
+            SELECT STRING_AGG(c.name, N',') WITHIN GROUP (ORDER BY ic.key_ordinal)
+            FROM sys.key_constraints kc
+            JOIN sys.index_columns ic ON ic.object_id = kc.parent_object_id AND ic.index_id = kc.unique_index_id
+            JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+            WHERE kc.parent_object_id = OBJECT_ID(N'{table}') AND kc.type = 'PK'
+            """);
+
+    private static string PrimaryKeyName(string connectionString, string table) =>
+        SqlServerDatabaseFixture.Scalar<string>(connectionString,
+            $"SELECT name FROM sys.key_constraints WHERE parent_object_id = OBJECT_ID(N'{table}') AND type = 'PK'");
+
+    [SqlServerFact]
+    public void TenantApprovals_OnAFreshDatabase_AdmitsTheSameHashInTwoScopesAndRefusesItTwiceInOne()
+    {
+        using var fixture = new SqlServerDatabaseFixture();
+        Migrate(fixture.ConnectionString);
+        const string insert = "INSERT INTO AdsPlanApprovals (TenantId, PlanHash, PlanJson, Status, ApprovedBy, ApprovedByUserId, ApprovedAtUtc) VALUES ";
+        const string hash = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        SqlServerDatabaseFixture.ExecuteScript(fixture.ConnectionString,
+            insert + $"('55555555-5555-5555-5555-555555555555', N'{hash}', N'{{}}', N'Approved', N'a', N'u-a', SYSUTCDATETIME()), "
+                   + $"('66666666-6666-6666-6666-666666666666', N'{hash}', N'{{}}', N'Approved', N'b', N'u-b', SYSUTCDATETIME())");
+
+        Assert.ThrowsAny<SqlException>(() => SqlServerDatabaseFixture.ExecuteScript(fixture.ConnectionString,
+            insert + $"('55555555-5555-5555-5555-555555555555', N'{hash}', N'{{}}', N'Approved', N'a', N'u-a', SYSUTCDATETIME())"));
+    }
+
+    [SqlServerFact]
+    public void TenantApprovals_StatementsAreSafeToRunAgainOnAnUpgradedDatabase()
+    {
+        using var fixture = new SqlServerDatabaseFixture();
+        fixture.ExecuteScript(SqlServerDatabaseFixture.LegacyScript());
+        Migrate(fixture.ConnectionString);
+        SqlServerDatabaseFixture.ExecuteScript(fixture.ConnectionString,
+            "INSERT INTO AdsPlanApprovals (TenantId, PlanHash, PlanJson, Status, ApprovedBy, ApprovedByUserId, ApprovedAtUtc) VALUES " +
+            "('55555555-5555-5555-5555-555555555555', N'sha256:cccccccc', N'{}', N'Approved', N'a', N'u-a', SYSUTCDATETIME())");
+        var before = RowCounts(fixture.ConnectionString);
+
+        foreach (var sql in new[]
+                 {
+                     TenantApprovals.AddPlanTenantIdSql,
+                     TenantApprovals.AddPlanRequestedByUserIdSql,
+                     TenantApprovals.BackfillPlanTenantIdSql,
+                     TenantApprovals.RequirePlanTenantIdSql,
+                     TenantApprovals.DropPlanOldKeySql,
+                     TenantApprovals.AddPlanKeySql,
+                     TenantApprovals.AddDecomTenantIdSql,
+                     TenantApprovals.BackfillDecomTenantIdSql,
+                     TenantApprovals.RequireDecomTenantIdSql,
+                     TenantApprovals.DropDecomOldKeySql,
+                     TenantApprovals.AddDecomKeySql,
+                 })
+            SqlServerDatabaseFixture.ExecuteScript(fixture.ConnectionString, sql);
+
+        Assert.Equal(before, RowCounts(fixture.ConnectionString));
+        Assert.Equal("TenantId,PlanHash", PrimaryKeyColumns(fixture.ConnectionString, "AdsPlanApprovals"));
+        Assert.Equal("TenantId,ExecutionHash", PrimaryKeyColumns(fixture.ConnectionString, "AdsDecomApprovals"));
+        // A second run backfills only NULL, so the real scope's row is not dragged into the empty one.
+        Assert.Equal(1, SqlServerDatabaseFixture.Scalar<int>(fixture.ConnectionString,
+            "SELECT COUNT(*) FROM AdsPlanApprovals WHERE TenantId = '55555555-5555-5555-5555-555555555555'"));
     }
 
     [SqlServerFact]
