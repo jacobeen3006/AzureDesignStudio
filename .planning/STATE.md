@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Database Durability
 status: executing
-stopped_at: Completed 04-11-PLAN.md
-last_updated: "2026-11-14T13:31:01.563Z"
+stopped_at: Completed 04-12-PLAN.md
+last_updated: "2026-11-14T13:37:09.728Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 04 execution started
-state_head: fa4c337b48ce4c04aa2d42bac8a243976e3f783d
+state_head: 93e99fe8dd44eaa6c33ecfee38d3bdbc3f32f448
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 34
-  completed_plans: 30
+  completed_plans: 31
   percent: 18
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 ## Current Position
 
 Phase: 04 (Database Durability) — EXECUTING
-Plan: 12 of 13
+Plan: 13 of 13
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 04 execution started
 
@@ -75,6 +75,7 @@ Progress: [██░░░░░░░░] 18%
 | Phase 04 P09 | 30min | 3 tasks | 5 files |
 | Phase 04 P10 | 25min | 3 tasks | 4 files |
 | Phase 04 P11 | 35min | 3 tasks | 10 files |
+| Phase 04 P12 | 45min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -118,6 +119,8 @@ Progress: [██░░░░░░░░] 18%
 - [Phase 04]: 04-10: unique-index guard runs after the premigration backup (required argument), keeps newest per key, writes a jsonl report before one-transaction delete; abandoned __EFMigrationsLock stays manual-recovery
 - [Phase 04]: 04-11: a WorkspaceUpgradeException or deploy.db InvalidOperationException at launch sets MauiProgram.StartupFailure and App.CreateWindow shows the native StartupFailurePage before touching any service
 - [Phase 04]: 04-11: ADS_DATA_DIR redirects the Desktop data root (workspace.db, deploy.db, backups) for testing only; VerifyDesktopWorkspace.sh polls workspace.db with a normal connection because -readonly cannot open a WAL database without an -shm file
+- [Phase 04]: 04-12: the runbook documents the real gaps (deploy.db migration not time-bounded; only a failed deploy.db premigration backup reaches the failure page) instead of describing intended behavior
+- [Phase 04]: 04-12: DatabaseRunbookTests guards the runbook (required statements, cited src/ paths, no credentials) and the AGENTS.md link
 
 ### Pending Todos
 
@@ -141,6 +144,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T13:31:01.448Z
-Stopped at: Completed 04-11-PLAN.md
+Last session: 2026-11-14T13:37:09.606Z
+Stopped at: Completed 04-12-PLAN.md
 Resume file: None
