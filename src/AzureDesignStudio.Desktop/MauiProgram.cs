@@ -222,9 +222,11 @@ public static class MauiProgram
         // DrawerService must be the current circuit's instance - the func gets the
         // scoped provider straight from the click site in TopMenu.
         AntDesign.DrawerRef<string>? scanDrawer = null;
+        AntDesign.DrawerRef<string>? workspaceDrawer = null;
         builder.Services.AddSingleton(new AdsHostFeatures
         {
             TenantScanLabel = "Tenant scan",
+            WorkspaceDataLabel = "Workspace data",
             DesignsAreLocal = true,
             OpenTenantScan = async circuitServices =>
             {
@@ -237,6 +239,16 @@ public static class MauiProgram
                     new AntDesign.DrawerOptions { Title = "Tenant scan", Width = "720" }, string.Empty);
                 drawerRef.OnClose = () => { scanDrawer = null; return Task.CompletedTask; };
                 scanDrawer = drawerRef;
+            },
+            OpenWorkspaceData = async circuitServices =>
+            {
+                var drawers = circuitServices.GetRequiredService<AntDesign.DrawerService>();
+                if (workspaceDrawer is not null)
+                    await workspaceDrawer.CloseAsync();
+                var drawerRef = await drawers.CreateAsync<Components.WorkspaceDataDrawerTemplate, string, string>(
+                    new AntDesign.DrawerOptions { Title = "Workspace data", Width = "720" }, string.Empty);
+                drawerRef.OnClose = () => { workspaceDrawer = null; return Task.CompletedTask; };
+                workspaceDrawer = drawerRef;
             },
             // v2 10.4 online half: the naming drawer's live availability rides the same ARM
             // plumbing; the browser host leaves these null and the affordance vanishes.

@@ -82,6 +82,14 @@ namespace AzureDesignStudio.Components
                         await openScan(Services!);
                     }
                     break;
+                case "workspace":
+                    if (features.OpenWorkspaceData is { } openWorkspaceData)
+                    {
+                        // Opened by the host too; close ours first so they do not overlap.
+                        await ResetDrawerRef(string.Empty);
+                        await openWorkspaceData(Services!);
+                    }
+                    break;
                 default:
                     {
                         await ResetDrawerRef(string.Empty);

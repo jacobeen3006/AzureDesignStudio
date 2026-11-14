@@ -44,6 +44,10 @@
         {
             <div title="@scanLabel"><MenuItem Key="scan" Icon="@IconType.Outline.Global" RouterMatch="@NavLinkMatch.Prefix" /></div>
         }
+        @if (features.WorkspaceDataLabel is { } dataLabel)
+        {
+            <div title="@dataLabel"><MenuItem Key="workspace" Icon="@IconType.Outline.Database" RouterMatch="@NavLinkMatch.Prefix" /></div>
+        }
     </Menu>
 </div>
 
