@@ -230,6 +230,21 @@ public class ReportGovernanceTests
     }
 
     [Fact]
+    public void Csv_TenantText_NeverStartsAFormula()
+    {
+        // A policy assignment name may start with "=" (ARM refuses only <>*%&:\?.+/ there), and a
+        // custom Defender assessment's display name is free text.
+        var formula = Policy with { Title = "=cmd|'calc'!A0" };
+        var custom = Defender with { RecordId = "/a/2", Title = "@SUM(1)\r=1+1" };
+        var csv = ReportBundle.ControlsCsv(With([formula, custom],
+            (GovernanceSources.Policy, Collected(1)), (GovernanceSources.Defender, Collected(1))));
+
+        Assert.Contains($"policy-noncompliant,{Sa},Medium,UNMAPPED,-,policy-noncompliant,'=cmd|'calc'!A0\n", csv);
+        // A bare CR is quoted too, so it cannot start a row whose first cell is a formula.
+        Assert.Contains($"defender-assessment,{Vm},Low,UNMAPPED,-,defender-assessment,\"'@SUM(1)\r=1+1\"\n", csv);
+    }
+
+    [Fact]
     public void Csv_LegacyScan_HasNoGovernanceRows()
     {
         var lines = ReportBundle.ControlsCsv(Bare()).TrimEnd('\n').Split('\n');

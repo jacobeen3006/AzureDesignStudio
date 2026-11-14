@@ -99,12 +99,19 @@ public static class ReportBundle
     };
 
     private static void Csv(StringBuilder sb, string kind, string resourceId, string severity, ControlMapping c, string detail) =>
-        sb.Append(Cell(kind)).Append(',').Append(Cell(resourceId)).Append(',').Append(Cell(severity))
+        sb.Append(Cell(kind)).Append(',').Append(Cell(Inert(resourceId))).Append(',').Append(Cell(severity))
             .Append(',').Append(Cell(c.Framework)).Append(',').Append(Cell(c.Control))
-            .Append(',').Append(Cell(c.Title)).Append(',').Append(Cell(detail)).Append('\n');
+            .Append(',').Append(Cell(c.Title)).Append(',').Append(Cell(Inert(detail))).Append('\n');
+
+    // Text from the tenant (policy assignment names, custom Defender assessments) must not open
+    // as a formula (OWASP CSV injection): a leading = + - @ tab or CR gets a ' so a spreadsheet
+    // shows text. Only resource_id and detail - the fixed columns stay as they are ("-" is the
+    // UNMAPPED control).
+    private static string Inert(string value) =>
+        value.Length > 0 && value[0] is '=' or '+' or '-' or '@' or '\t' or '\r' ? "'" + value : value;
 
     private static string Cell(string value) =>
-        value.Contains(',') || value.Contains('"') || value.Contains('\n')
+        value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r')
             ? "\"" + value.Replace("\"", "\"\"") + "\""
             : value;
 }
