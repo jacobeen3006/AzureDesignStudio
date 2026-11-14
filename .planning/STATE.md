@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Database Durability
 status: executing
-stopped_at: Completed 04-09-PLAN.md
-last_updated: "2026-11-14T13:14:12.481Z"
+stopped_at: Completed 04-10-PLAN.md
+last_updated: "2026-11-14T13:19:34.173Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 04 execution started
-state_head: ccdfd76c3c23185bb229a39cb428bfd267d6b08a
+state_head: a380d83119d66dab6d5b27a7a209d8f8147f05f7
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 34
-  completed_plans: 28
+  completed_plans: 29
   percent: 18
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 ## Current Position
 
 Phase: 04 (Database Durability) — EXECUTING
-Plan: 10 of 13
+Plan: 11 of 13
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 04 execution started
 
@@ -73,6 +73,7 @@ Progress: [██░░░░░░░░] 18%
 | Phase 04 P07 | 30min | 2 tasks | 4 files |
 | Phase 04 P08 | 40min | 3 tasks | 11 files |
 | Phase 04 P09 | 30min | 3 tasks | 5 files |
+| Phase 04 P10 | 25min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -113,6 +114,7 @@ Progress: [██░░░░░░░░] 18%
 - [Phase 04]: 04-09: restore is staged into restore-staging.new and swapped over restore-staging only after acceptance, so a rejected file keeps an earlier pending restore
 - [Phase 04]: 04-09: a stale -wal/-shm that cannot be deleted at the restore target throws instead of being swallowed (a surviving log could be replayed onto the restored file)
 - [Phase 04]: 04-09: scheduled backup is due when the newest scheduled/premigration backup is more than 24 h old; manual backups never count and are never pruned
+- [Phase 04]: 04-10: unique-index guard runs after the premigration backup (required argument), keeps newest per key, writes a jsonl report before one-transaction delete; abandoned __EFMigrationsLock stays manual-recovery
 
 ### Pending Todos
 
@@ -136,6 +138,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T13:14:12.367Z
-Stopped at: Completed 04-09-PLAN.md
+Last session: 2026-11-14T13:19:34.056Z
+Stopped at: Completed 04-10-PLAN.md
 Resume file: None
