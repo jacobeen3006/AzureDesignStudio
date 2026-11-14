@@ -125,6 +125,52 @@ namespace AzureDesignStudio.Core.Tests
         {
             Assert.Equal(5, RetentionPolicy.Default.KeepNewest);
             Assert.Equal(TimeSpan.FromDays(30), RetentionPolicy.Default.PremigrationWindow);
+            Assert.Equal(2, RetentionPolicy.Default.KeepNewestWithData);
+        }
+
+        [Fact]
+        public void TheNewestTwoBackupsThatHoldData_SurviveAFlowOfEmptyBackups()
+        {
+            // WR-02: after a quarantine the fresh empty workspace is backed up daily; the pre-corruption
+            // backups must not be pushed out of the newest five by backups of an empty database
+            var empty = Enumerable.Range(1, 7).Select(i => File_(BackupReason.Scheduled, Now.AddHours(-i))).ToList();
+            var withData = Enumerable.Range(10, 3).Select(i => File_(BackupReason.Scheduled, Now.AddDays(-i))).ToList();
+            var dataPaths = withData.Select(f => f.Path).ToHashSet();
+
+            var plan = BackupRetention.Plan([.. empty, .. withData], Now, holdsData: f => dataPaths.Contains(f.Path));
+
+            Assert.Contains(withData[0], plan.Keep);
+            Assert.Contains(withData[1], plan.Keep);
+            Assert.Contains(withData[2], plan.Delete);   // only the newest two that hold data are exempt
+            Assert.Equal(empty.Take(5), plan.Keep.Where(f => !dataPaths.Contains(f.Path)).OrderByDescending(f => f.CreatedUtc));
+            Assert.All(empty.Skip(5), f => Assert.Contains(f, plan.Delete));
+        }
+
+        [Fact]
+        public void WithoutAHoldsDataProbe_OrWithTheRuleOff_NothingExtraIsKept()
+        {
+            var files = Enumerable.Range(1, 8).Select(i => File_(BackupReason.Scheduled, Now.AddDays(-i))).ToList();
+
+            Assert.Equal(3, BackupRetention.Plan(files, Now).Delete.Count);
+            Assert.Equal(3, BackupRetention.Plan(files, Now, new RetentionPolicy(5, TimeSpan.FromDays(30), 0), _ => true).Delete.Count);
+        }
+
+        [Fact]
+        public async Task PruneAsync_ReadsTheManifestTableCounts_ToProtectTheBackupsThatHoldData()
+        {
+            var dir = _temp.Path("backups");
+            Directory.CreateDirectory(dir);
+            var empty = Enumerable.Range(1, 6).Select(i => Seed(dir, BackupReason.Scheduled, Now.AddHours(-i), designs: 0)).ToList();
+            var withData = Enumerable.Range(10, 3).Select(i => Seed(dir, BackupReason.Scheduled, Now.AddDays(-i), designs: 4)).ToList();
+
+            var deleted = await WorkspaceBackup.PruneAsync(dir, Now);
+
+            Assert.Equal(2, deleted.Count);
+            Assert.False(File.Exists(empty[5]));
+            Assert.False(File.Exists(withData[2]));
+            Assert.False(File.Exists(withData[2] + ".manifest.json"));
+            Assert.True(File.Exists(withData[0]));
+            Assert.True(File.Exists(withData[1]));
         }
 
         [Fact]
@@ -258,11 +304,16 @@ namespace AzureDesignStudio.Core.Tests
             }
         }
 
-        private static string Seed(string dir, BackupReason reason, DateTimeOffset created)
+        private static string Seed(string dir, BackupReason reason, DateTimeOffset created, int? designs = null)
         {
             var path = Path.Combine(dir, BackupNaming.FileName("workspace", created, reason));
             File.WriteAllText(path, "db");
-            File.WriteAllText(path + ".manifest.json", "{}");
+            if (designs is { } count)
+                new BackupManifest(created, reason, "test", "m1",
+                    new Dictionary<string, long> { ["__EFMigrationsHistory"] = 1, ["Designs"] = count }, "00", 2, "workspace.db")
+                    .Write(path + ".manifest.json");
+            else
+                File.WriteAllText(path + ".manifest.json", "{}");
             return path;
         }
     }

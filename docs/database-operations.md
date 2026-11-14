@@ -43,7 +43,7 @@ The desktop app opens the workspace in this order. Each step runs before the nex
 1. **Apply a staged restore**, if one is pending (see Restore). The current workspace is moved aside, never deleted.
 2. **Integrity check** (`PRAGMA quick_check`) of the live file. A missing file or a valid empty database is fine.
    - Corrupt: the file is **quarantined** (see Corruption), and a new empty workspace is created. A native "Workspace recovered" alert tells you where the old file went and which backups exist.
-   - Inconclusive (the file is locked by another process, a permissions or I/O problem): nothing is moved. The app stops with a message naming the file. Close any other copy of the app or `ads-mcp` and start again.
+   - Inconclusive (the file is locked by another process, a permissions or I/O problem, or any SQLite error other than the three that mean damaged content: `SQLITE_CORRUPT`, `SQLITE_FORMAT`, `SQLITE_NOTADB`): nothing is moved. The app stops with a message naming the file. Close any other copy of the app or `ads-mcp` and start again.
 3. **Premigration backup.** If the file exists, is not empty and has migrations pending, a `premigration` backup is written to `backups/` first. If the backup cannot be written (no space, no permission), the upgrade is not attempted and the workspace file is unchanged.
 4. **Unique-index dedupe.** Rows that would violate a unique index the new schema creates are removed, newest kept, and written to a report first (see Removed duplicate rows).
 5. **Legacy column adoption.** A workspace that predates migrations gets the two scan columns the baseline cannot add.
@@ -68,7 +68,8 @@ Retention, applied after each scheduled backup:
 
 - every **manual** backup is kept forever (never pruned);
 - of the scheduled and premigration backups, the **newest five** are kept;
-- every **premigration** backup from the **last 30 days** is kept as well.
+- every **premigration** backup from the **last 30 days** is kept as well;
+- the **newest two** scheduled or premigration backups whose manifest `tableCounts` show data (any table other than the migration bookkeeping tables has rows) are kept as well. After a quarantine or an unnoticed wipe the app runs on an empty workspace and backs that up every day; without this rule five days of backups of an empty database would push every backup that holds your data out of the newest five. A backup with a missing or unreadable manifest counts as holding data. These two extra files stay until two newer backups with data exist, so after you deliberately empty a workspace they are not pruned; delete them yourself when you no longer need them.
 
 Everything else is deleted together with its manifest. Only files whose names match the pattern above are ever touched, so files you put in `backups/` yourself are left alone. `deploy.db` premigration backups in `backups/deploy/` keep the newest three, with no age rule.
 

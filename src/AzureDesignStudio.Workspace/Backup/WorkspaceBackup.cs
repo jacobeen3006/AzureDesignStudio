@@ -153,7 +153,7 @@ public static class WorkspaceBackup
         var prefix = directory.EndsWith(Path.DirectorySeparatorChar) ? directory : directory + Path.DirectorySeparatorChar;
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
-        var plan = BackupRetention.Plan(List(directory, stem), now, policy);
+        var plan = BackupRetention.Plan(List(directory, stem), now, policy, HoldsData);
         var deleted = new List<BackupFile>();
         foreach (var file in plan.Delete)
         {
@@ -178,6 +178,25 @@ public static class WorkspaceBackup
         }
 
         return Task.FromResult<IReadOnlyList<BackupFile>>(deleted);
+    }
+
+    /// <summary>
+    /// Whether the manifest says the backup holds user data: any table other than the EF bookkeeping tables
+    /// has rows. A missing or unreadable manifest counts as "holds data": retention keeps at most two such
+    /// backups, which is cheaper than deleting the only copy of something it could not read.
+    /// </summary>
+    internal static bool HoldsData(BackupFile file)
+    {
+        try
+        {
+            var manifest = BackupManifest.Read(BackupManifest.PathFor(file.Path));
+            return manifest.TableCounts is null
+                || manifest.TableCounts.Any(t => t.Value > 0 && !t.Key.StartsWith("__EF", StringComparison.Ordinal));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException)
+        {
+            return true;
+        }
     }
 
     private static string AppVersion { get; } =
