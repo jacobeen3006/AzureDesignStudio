@@ -2,6 +2,8 @@ using AzureDesignStudio.Server.Persistence;
 using AzureDesignStudio.Services.Models;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -173,5 +175,26 @@ public sealed class DatabaseBootstrapperTests : IDisposable
 
         Assert.Contains("No database is configured", failure.Message);
         Assert.Contains("ConnectionStrings__ads-main", failure.Message);
+    }
+
+    [Fact]
+    public void DesignTimeFactoryReportsSqlServerAndBuildsTheModelWithoutConnecting()
+    {
+        using var db = new DesignDbContextFactory().CreateDbContext([]);
+
+        Assert.Equal("Microsoft.EntityFrameworkCore.SqlServer", db.Database.ProviderName);
+
+        // Only inspected: nothing here opens a connection, so no LocalDB is needed.
+        var connectionString = db.Database.GetConnectionString();
+        Assert.NotNull(connectionString);
+        Assert.DoesNotContain("Password", connectionString, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("User ID", connectionString, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Integrated Security", connectionString, StringComparison.OrdinalIgnoreCase);
+
+        Assert.NotNull(db.Model.FindEntityType(typeof(DesignModel)));
+
+        var model = db.GetService<IDesignTimeModel>().Model;
+        var designs = Assert.Single(model.GetRelationalModel().Tables, t => t.EntityTypeMappings.Any(m => m.TypeBase.ClrType == typeof(DesignModel)));
+        Assert.Contains(designs.CheckConstraints, c => c.Name == "ADS_CHECK_JSON");
     }
 }
