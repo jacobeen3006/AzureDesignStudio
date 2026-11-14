@@ -179,7 +179,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. A caller without `Guardrail.Admin` receives 403 for guardrail read/mutation, two tenants cannot read or overwrite each other's policies or approvals, and approval requires `Deploy.Approver` with self-approval refused as a separate rule.
   5. A DEBUG developer registers and exercises a subscription with no Key Vault and no Azure credentials, while Production refuses development keys and still requires Key Vault.
 
-**Plans**: 10/11 plans executed
+**Plans**: 11/11 plans executed
 **Wave 1**
 - [x] 05-01-PLAN.md — Typed caller identity foundation (AdsIdentity, AdsCaller, `ServiceTools.TryGetCaller` traced through `Design.GetSaved`), in-process single-user marker, extended test helpers
 
@@ -207,7 +207,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 05-10-PLAN.md — Service-worker precache exclusion, appRoles and operator documents with the settings call recipe, AGENTS.md, source guards
 
 **Wave 9** *(blocked on Wave 8 completion)*
-- [ ] 05-11-PLAN.md — Phase gate and human verification (real token claims, macOS deploy.db upgrade, documents and the policy-mode interpretation) — non-autonomous
+- [x] 05-11-PLAN.md — Phase gate and human verification (real token claims, macOS deploy.db upgrade, documents and the policy-mode interpretation) — non-autonomous
 
 **Implementation note**: new server `Auth/AdsIdentity.TryFrom` (accept mapped `oid` and the legacy URI claim through `Guid.TryParse`; never `sub`; never flip `MapInboundClaims`; in-band 401 rather than `RpcException`). `AdsPolicies` fallback plus `Guardrail.Admin`/`Deploy.Approver` app roles; tenant column on the guardrail and approval rows after Phase 4's migrations, with the legacy `Id=1`/NULL-tenant row retained as the inherited default. `ICryptoService` with a DPAPI/Data-Protection DEBUG implementation selected by `Crypto:Provider`; exclude `appsettings*.json` from service-worker precache so role/scope changes are not sticky.
 
@@ -315,7 +315,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
 | 3. Server Foundation and Integration Harness | 6/6 | Complete    | 2026-11-14 |
 | 4. Database Durability | 13/13 | Complete    | 2026-11-14 |
-| 5. Identity, Guardrails, and Offline Development | 10/11 | In Progress | - |
+| 5. Identity, Guardrails, and Offline Development | 11/11 | In Progress | - |
 | 6. Bounds, Payload Contract, and Health | 0/TBD | Not started | - |
 | 7. Round 2 Shell Completion | 0/TBD | Not started | - |
 | 8. Verification Depth and Diagnostics | 0/TBD | Not started | - |

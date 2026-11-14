@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Identity, Guardrails, and Offline Development
-status: executing
-stopped_at: Completed 05-10-PLAN.md
-last_updated: "2026-11-14T16:21:54.831Z"
+status: verifying
+stopped_at: Completed 05-11-PLAN.md
+last_updated: "2026-11-14T16:28:24.014Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 05 execution started
-state_head: 4f227a881097228de483b276eee415edfc883cc0
+state_head: a8b429bd302659eb71b2ce1a01185898943a3d07
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 45
-  completed_plans: 42
+  completed_plans: 43
   percent: 27
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 
 Phase: 05 (Identity, Guardrails, and Offline Development) — EXECUTING
 Plan: 11 of 11
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-11-14 — Phase 05 execution started
 
 Progress: [███░░░░░░░] 27%
@@ -88,6 +88,7 @@ Progress: [███░░░░░░░] 27%
 | Phase 05 P08 | 40min | 3 tasks | 12 files |
 | Phase 05 P09 | 35min | 3 tasks | 4 files |
 | Phase 05 P10 | 40min | 3 tasks | 8 files |
+| Phase 05 P11 | not measured | 4 tasks | 0 files |
 
 ## Accumulated Context
 
@@ -148,6 +149,7 @@ Progress: [███░░░░░░░] 27%
 - [Phase 05]: 05-08: plan and decommission approvals keyed by (TenantId, hash); SQL Server key rebuild proven in the container (11 passed, 0 skipped)
 - [Phase 05]: 05-09: role check precedes hash/preview/setting lookups; self-approval is a separate rule with its own code; the recorded requester deploys, a row without one keeps approver-only; decommission approvals need the role with no self-approval rule
 - [Phase 05]: 05-10: precache excludes only appsettings*.json; operator guide documents the tenant-settings call recipe (token via ADS_TOKEN) and records the replace/merge reading as INTERPRETATION TO CONFIRM
+- [Phase 05]: 05-11: guardrail override reading CONFIRMED by the user (replace default + merge, per tenant, audited, set by Guardrail.Admin)
 
 ### Pending Todos
 
@@ -171,6 +173,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T16:21:54.694Z
-Stopped at: Completed 05-10-PLAN.md
+Last session: 2026-11-14T16:28:23.852Z
+Stopped at: Completed 05-11-PLAN.md
 Resume file: None
