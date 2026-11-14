@@ -633,17 +633,17 @@ public sealed class TenantIsolationTests
     {
         var gate = new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl);
         var service = ServiceOn(gate);
-        var contosoUser = Guid.NewGuid();
+        var requester = Guid.NewGuid();
         gate.Issue("sub", "rg", "tpl", "prm", OneCreate(), "{\"plan\":1}", PlanHash,
-            requestedByUserId: contosoUser.ToString("D"), scopeId: TestTenants.Contoso);
+            requestedByUserId: requester.ToString("D"), scopeId: TestTenants.Contoso);
 
-        var foreign = await Approve(service, Member(Guid.NewGuid(), TestTenants.Fabrikam));
+        var foreign = await Approve(service, Approver(Guid.NewGuid(), TestTenants.Fabrikam));
 
         Assert.Equal(400, foreign.StatusCode);
         Assert.StartsWith("WHAT_IF_STALE", foreign.ErrorMessage);
         Assert.Empty(_db.AdsPlanApprovals);
 
-        var own = await Approve(service, Member(contosoUser, TestTenants.Contoso));
+        var own = await Approve(service, Approver(Guid.NewGuid(), TestTenants.Contoso));
 
         Assert.Equal(200, own.StatusCode);
         Assert.Single(_db.AdsPlanApprovals);
@@ -655,7 +655,7 @@ public sealed class TenantIsolationTests
         var gate = new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl);
         gate.Issue("sub", "rg", "tpl", "prm", OneCreate(), "{}", PlanHash);
 
-        var response = await Approve(ServiceOn(gate), Member(Guid.NewGuid(), TestTenants.Contoso));
+        var response = await Approve(ServiceOn(gate), Approver(Guid.NewGuid(), TestTenants.Contoso));
 
         Assert.StartsWith("WHAT_IF_STALE", response.ErrorMessage);
     }

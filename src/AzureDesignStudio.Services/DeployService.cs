@@ -873,6 +873,16 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
+            // The role comes before any hash, preview or setting lookup (D-02, D-04), so a caller
+            // without it cannot probe which hashes have a live preview.
+            if (!caller.CanApprove)
+            {
+                _logger.LogWarning("Plan approval refused: the caller lacks {Role}.", AdsIdentity.DeployApproverRole);
+                response.StatusCode = StatusCodes.Status403Forbidden;
+                response.ErrorMessage = "PLAN_APPROVER_ROLE_REQUIRED: the Deploy.Approver app role is required to approve a plan. If the role was just assigned, sign out and back in to get a new token.";
+                return response;
+            }
+
             var planHash = request.PlanHash ?? string.Empty;
             if (!planHash.StartsWith(DeployPlanArtifact.HashPrefix, StringComparison.Ordinal) || planHash.Length != 71)
             {
