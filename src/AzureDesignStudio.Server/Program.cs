@@ -4,6 +4,7 @@ using Azure.Security.KeyVault.Secrets;
 using AzureDesignStudio.Services;
 using AzureDesignStudio.Services.Models;
 using AzureDesignStudio.Discovery.Iac.WhatIf;
+using AzureDesignStudio.Server.Persistence;
 using AzureDesignStudio.Server.Services;
 using AzureDesignStudio.Server.Utils;
 using Microsoft.ApplicationInsights.Extensibility;
@@ -34,14 +35,17 @@ builder.Services.Configure<JwtBearerOptions>(
         options.TokenValidationParameters.NameClaimType = "name";
     });
 
-#if DEBUG
-builder.Services.AddDbContext<DesignDbContext>(options => options.UseInMemoryDatabase("adsdb-inmem"));
-#else
+// The one value read before Build(): the vault decision below needs it. Tests must therefore
+// supply Database:Provider with UseSetting, not ConfigureAppConfiguration.
+var databaseKind = DatabaseProvider.Resolve(builder.Configuration);
+
 // Key Vault supplies configuration (the "ads-main" connection string among it) when one is
 // named. The checked-in appsettings.json names a placeholder, "<kv name>": building the vault
 // URL from it threw UriFormatException before anything could say what was missing.
+// Only the SQL Server provider needs a vault-supplied connection string; a Sqlite or InMemory
+// host must never make a vault round trip at boot.
 var keyVaultName = builder.Configuration["KeyVaultName"];
-if (ServiceTools.IsConfigured(keyVaultName))
+if (databaseKind == DatabaseKind.SqlServer && ServiceTools.IsConfigured(keyVaultName))
 {
     var secretClient = new SecretClient(
         new Uri($"https://{keyVaultName}.vault.azure.net/"),
@@ -49,26 +53,11 @@ if (ServiceTools.IsConfigured(keyVaultName))
     builder.Configuration.AddAzureKeyVault(secretClient, new KeyVaultSecretManager());
 }
 
-// The database: SQL Server, from the vault's "ads-main" secret or from ordinary
-// configuration (ConnectionStrings__ads-main, e.g. a Kubernetes secret). Database:Provider
-// set to InMemory runs without one - for a smoke test of the image, never for real use:
-// nothing survives a restart.
-var connectionString = builder.Configuration["ads-main"] ?? builder.Configuration.GetConnectionString("ads-main");
-if (string.Equals(builder.Configuration["Database:Provider"], "InMemory", StringComparison.OrdinalIgnoreCase))
-{
-    builder.Services.AddDbContext<DesignDbContext>(options => options.UseInMemoryDatabase("adsdb-inmem"));
-}
-else if (ServiceTools.IsConfigured(connectionString))
-{
-    builder.Services.AddDbContext<DesignDbContext>(options => options.UseSqlServer(connectionString));
-}
-else
-{
-    throw new InvalidOperationException(
-        "No database is configured. Name a Key Vault that holds an \"ads-main\" connection string (KeyVaultName), " +
-        "or set ConnectionStrings__ads-main. Database__Provider=InMemory starts the server without one, for testing only.");
-}
-#endif
+// The callback runs when the first context is built (inside the startup bootstrap, before any
+// request), so a connection string from the vault source or from late configuration is
+// honoured and a missing one still stops the host before it serves.
+builder.Services.AddDbContext<DesignDbContext>((serviceProvider, options) =>
+    DatabaseProvider.Configure(options, serviceProvider.GetRequiredService<IConfiguration>()));
 
 builder.Services.AddSingleton<ICryptoService, CryptoService>();
 
@@ -110,9 +99,11 @@ using (var scope = app.Services.CreateScope())
 #if !DEBUG
     // EnsureCreated creates a brand-new database with the full schema, and does nothing at
     // all for one that already exists - it never adds a missing table. The guarded DDL below
-    // is what brings a database created by an earlier release up to date.
+    // is what brings a database created by an earlier release up to date. The DDL is T-SQL, so
+    // the guard is the SQL Server check: with SQLite selectable in Release builds the generic
+    // relational check would run T-SQL against SQLite and fail at startup.
     {
-        if (db.Database.IsRelational())
+        if (db.Database.IsSqlServer())
         {
             db.Database.ExecuteSqlRaw("""
                 IF OBJECT_ID(N'AdsPlanApprovals', N'U') IS NULL

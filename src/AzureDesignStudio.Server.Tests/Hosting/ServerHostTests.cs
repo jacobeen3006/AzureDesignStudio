@@ -3,7 +3,9 @@ using AzureDesignStudio.SharedModels.Protos;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.AspNetCore.Server;
 using Grpc.Core;
+using AzureDesignStudio.Services.Models;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -31,6 +33,24 @@ public class ServerHostTests(AdsServerFactory factory) : IClassFixture<AdsServer
         var loaded = await design.LoadAsync(new LoadDesignRequest { Name = "tracer design" });
         Assert.Equal(200, loaded.StatusCode);
         Assert.Equal("""{"nodes":[]}""", loaded.Data);
+    }
+
+    [Fact]
+    public async Task TempSqliteSaveCreatesTheDatabaseFileUnderTheTempDirectory()
+    {
+        using var channel = factory.CreateGrpcChannel(Guid.NewGuid());
+        var saved = await new Design.DesignClient(channel).SaveAsync(
+            new SaveDesignRequest { Name = "sqlite design", Data = """{"nodes":[]}""" });
+        Assert.Equal(200, saved.StatusCode);
+
+        Assert.True(File.Exists(factory.DbFile));
+        Assert.Equal(Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            Path.GetDirectoryName(factory.DbFile));
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DesignDbContext>();
+        Assert.Equal("Microsoft.EntityFrameworkCore.Sqlite", db.Database.ProviderName);
+        Assert.Contains(factory.DbFile, db.Database.GetConnectionString());
     }
 
     [Fact]
