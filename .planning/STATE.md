@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Identity, Guardrails, and Offline Development
 status: executing
-stopped_at: Completed 05-08-PLAN.md
-last_updated: "2026-11-14T16:07:48.812Z"
+stopped_at: Completed 05-09-PLAN.md
+last_updated: "2026-11-14T16:15:14.447Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 05 execution started
-state_head: 5dab6b231b54ea4aac03389f19d0ee82a6ff698d
+state_head: 996b81c3ff0548eeee149ba3d9cda6ccc7759301
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 45
-  completed_plans: 40
+  completed_plans: 41
   percent: 27
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 ## Current Position
 
 Phase: 05 (Identity, Guardrails, and Offline Development) — EXECUTING
-Plan: 9 of 11
+Plan: 10 of 11
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 05 execution started
 
@@ -86,6 +86,7 @@ Progress: [███░░░░░░░] 27%
 | Phase 05 P06 | 35min | 3 tasks | 8 files |
 | Phase 05 P07 | 35 min | 3 tasks | 10 files |
 | Phase 05 P08 | 40min | 3 tasks | 12 files |
+| Phase 05 P09 | 35min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -144,6 +145,7 @@ Progress: [███░░░░░░░] 27%
 - [Phase 05]: 05-07: tenant settings Set replaces both values; GetGuardrailPolicy keeps replace semantics while only enforcement (LoadGuardrailPolicy) honors the per-tenant mode; unrecognised stored mode is judged as merge; interpretation of 'Option 1 and option 2' (both modes selectable, replace default) still to confirm
 - [Phase 05]: 05-08: approval backfill to the empty-GUID scope is an UPDATE, never a column default; pending legacy approvals fail closed and must be re-approved
 - [Phase 05]: 05-08: plan and decommission approvals keyed by (TenantId, hash); SQL Server key rebuild proven in the container (11 passed, 0 skipped)
+- [Phase 05]: 05-09: role check precedes hash/preview/setting lookups; self-approval is a separate rule with its own code; the recorded requester deploys, a row without one keeps approver-only; decommission approvals need the role with no self-approval rule
 
 ### Pending Todos
 
@@ -167,6 +169,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T16:07:48.704Z
-Stopped at: Completed 05-08-PLAN.md
+Last session: 2026-11-14T16:15:14.337Z
+Stopped at: Completed 05-09-PLAN.md
 Resume file: None

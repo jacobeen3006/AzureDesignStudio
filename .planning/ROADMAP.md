@@ -179,7 +179,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. A caller without `Guardrail.Admin` receives 403 for guardrail read/mutation, two tenants cannot read or overwrite each other's policies or approvals, and approval requires `Deploy.Approver` with self-approval refused as a separate rule.
   5. A DEBUG developer registers and exercises a subscription with no Key Vault and no Azure credentials, while Production refuses development keys and still requires Key Vault.
 
-**Plans**: 8/11 plans executed
+**Plans**: 9/11 plans executed
 **Wave 1**
 - [x] 05-01-PLAN.md — Typed caller identity foundation (AdsIdentity, AdsCaller, `ServiceTools.TryGetCaller` traced through `Design.GetSaved`), in-process single-user marker, extended test helpers
 
@@ -201,7 +201,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 05-08-PLAN.md — Scope-keyed plan and decommission approvals (`TenantApprovals` migration), fail-closed legacy rows, SQL Server proof
 
 **Wave 7** *(blocked on Wave 6 completion)*
-- [ ] 05-09-PLAN.md — `Deploy.Approver` rule, self-approval as a separate rule, requester deploys, decommission approvals
+- [x] 05-09-PLAN.md — `Deploy.Approver` rule, self-approval as a separate rule, requester deploys, decommission approvals
 
 **Wave 8** *(blocked on Wave 7 completion)*
 - [ ] 05-10-PLAN.md — Service-worker precache exclusion, appRoles and operator documents with the settings call recipe, AGENTS.md, source guards
@@ -315,7 +315,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
 | 3. Server Foundation and Integration Harness | 6/6 | Complete    | 2026-11-14 |
 | 4. Database Durability | 13/13 | Complete    | 2026-11-14 |
-| 5. Identity, Guardrails, and Offline Development | 8/11 | In Progress | - |
+| 5. Identity, Guardrails, and Offline Development | 9/11 | In Progress | - |
 | 6. Bounds, Payload Contract, and Health | 0/TBD | Not started | - |
 | 7. Round 2 Shell Completion | 0/TBD | Not started | - |
 | 8. Verification Depth and Diagnostics | 0/TBD | Not started | - |
