@@ -78,8 +78,9 @@ public class WorkspaceDbContext(DbContextOptions<WorkspaceDbContext> options) : 
 }
 
 /// <summary>
-/// Opens (and on first use creates) the workspace database. One instance lives in the
-/// host's DI container; contexts are cheap and created per operation.
+/// Opens (and on first use creates) the workspace database, bringing its schema current through
+/// <see cref="WorkspaceSchema"/>. One instance lives in the host's DI container; contexts are cheap
+/// and created per operation.
 /// </summary>
 public sealed class WorkspaceDb
 {
@@ -90,98 +91,11 @@ public sealed class WorkspaceDb
         ConnectionString = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
         {
             DataSource = databasePath,
-            Cache = Microsoft.Data.Sqlite.SqliteCacheMode.Shared,
         }.ToString();
 
-        using var db = CreateContext();
-        db.Database.EnsureCreated();
-        EnsureAddedColumns(db);
-        EnsureAdditiveTables();
-    }
-
-    private void EnsureAddedColumns(WorkspaceDbContext db)
-    {
-        var conn = db.Database.GetDbConnection();
-        conn.Open();
-        foreach (var (table, column) in new[] { ("Scans", "ManifestJson"), ("Scans", "CheckpointJson") })
-        {
-            using var check = conn.CreateCommand();
-            check.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name='{column}';";
-            if (Convert.ToInt64(check.ExecuteScalar()) == 0)
-            {
-                using var add = conn.CreateCommand();
-                add.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} TEXT;";
-                add.ExecuteNonQuery();
-            }
-        }
-        conn.Close();
-    }
-
-    // EnsureCreated skips new tables on an existing database; CREATE TABLE IF NOT EXISTS keeps
-    // the additive bootstrap idempotent for both fresh and upgraded workspace files.
-    private void EnsureAdditiveTables()
-    {
-        using var db = CreateContext();
-        var conn = db.Database.GetDbConnection();
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            CREATE TABLE IF NOT EXISTS "NodePositions" (
-                "NodeId" TEXT NOT NULL PRIMARY KEY,
-                "ContainerId" TEXT NOT NULL,
-                "X" REAL NOT NULL,
-                "Y" REAL NOT NULL,
-                "SavedAt" TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS "ChangeFeed" (
-                "Id" INTEGER NOT NULL CONSTRAINT "PK_ChangeFeed" PRIMARY KEY AUTOINCREMENT,
-                "ScanId" TEXT NULL,
-                "ChangeKey" TEXT NOT NULL,
-                "ChangeTime" TEXT NOT NULL,
-                "TargetResourceId" TEXT NOT NULL,
-                "TargetResourceType" TEXT NULL,
-                "ChangeType" TEXT NOT NULL,
-                "CorrelationId" TEXT NULL,
-                "ChangedBy" TEXT NULL,
-                "ChangedByType" TEXT NULL,
-                "ClientType" TEXT NULL,
-                "Operation" TEXT NULL,
-                "ChangesCount" INTEGER NOT NULL,
-                "ChangedPropertiesJson" TEXT NULL
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ChangeFeed_TargetResourceId_ChangeKey" ON "ChangeFeed" ("TargetResourceId", "ChangeKey");
-            CREATE INDEX IF NOT EXISTS "IX_ChangeFeed_ChangeTime" ON "ChangeFeed" ("ChangeTime");
-            CREATE INDEX IF NOT EXISTS "IX_ChangeFeed_ScanId" ON "ChangeFeed" ("ScanId");
-            CREATE TABLE IF NOT EXISTS "DecomWindows" (
-                "WindowId" TEXT NOT NULL PRIMARY KEY,
-                "ScanId" TEXT NOT NULL,
-                "SubscriptionId" TEXT NOT NULL,
-                "PlanHash" TEXT NOT NULL,
-                "ExecutionHash" TEXT NOT NULL,
-                "ScopesJson" TEXT NOT NULL,
-                "State" TEXT NOT NULL,
-                "RowsJson" TEXT NULL,
-                "UpdatedAtUtc" TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS "IX_DecomWindows_SubscriptionId_WindowId" ON "DecomWindows" ("SubscriptionId", "WindowId");
-            CREATE TABLE IF NOT EXISTS "GovernanceFindings" (
-                "ScanId" TEXT NOT NULL,
-                "Source" TEXT NOT NULL,
-                "RecordId" TEXT NOT NULL,
-                "ResourceId" TEXT NOT NULL,
-                "SubscriptionId" TEXT NOT NULL,
-                "Severity" TEXT NOT NULL,
-                "Category" TEXT NOT NULL,
-                "Title" TEXT NOT NULL,
-                "Detail" TEXT NULL,
-                "PolicyAssignmentId" TEXT NULL,
-                "PolicyDefinitionId" TEXT NULL,
-                CONSTRAINT "PK_GovernanceFindings" PRIMARY KEY ("ScanId", "Source", "RecordId")
-            );
-            CREATE INDEX IF NOT EXISTS "IX_GovernanceFindings_ScanId_ResourceId" ON "GovernanceFindings" ("ScanId", "ResourceId");
-            """;
-        cmd.ExecuteNonQuery();
-        conn.Close();
+        // The thread-pool hop keeps a UI synchronization context from deadlocking the blocking wait.
+        Task.Run(() => WorkspaceSchema.UpgradeAsync(databasePath, new WorkspaceUpgradeOptions(), CancellationToken.None))
+            .GetAwaiter().GetResult();
     }
 
     public WorkspaceDbContext CreateContext()
