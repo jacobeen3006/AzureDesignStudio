@@ -54,6 +54,70 @@ public class ServerHostTests(AdsServerFactory factory) : IClassFixture<AdsServer
     }
 
     [Fact]
+    public async Task TempSqliteDisposeRemovesTheDatabaseFileAndItsSideFiles()
+    {
+        string dbFile;
+        using (var own = new AdsServerFactory())
+        {
+            dbFile = own.DbFile;
+            using var channel = own.CreateGrpcChannel(Guid.NewGuid());
+            var saved = await new Design.DesignClient(channel).SaveAsync(
+                new SaveDesignRequest { Name = "lifecycle", Data = "{}" });
+            Assert.Equal(200, saved.StatusCode);
+
+            Assert.True(File.Exists(dbFile));
+            Assert.Equal(Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                Path.GetDirectoryName(dbFile));
+        }
+
+        // The glob covers the database and its -wal, -shm and -journal files, and matches
+        // only this factory's own unique name.
+        Assert.Empty(Directory.GetFiles(Path.GetTempPath(), Path.GetFileName(dbFile) + "*"));
+    }
+
+    [Fact]
+    public async Task TempSqliteTwoHostsDoNotShareDataAndEachGetsItsOwnFile()
+    {
+        using var first = new AdsServerFactory();
+        using var second = new AdsServerFactory();
+        var user = Guid.NewGuid();
+
+        using var firstChannel = first.CreateGrpcChannel(user);
+        Assert.Equal(200, (await new Design.DesignClient(firstChannel).SaveAsync(
+            new SaveDesignRequest { Name = "shared name", Data = "{}" })).StatusCode);
+
+        using var secondChannel = second.CreateGrpcChannel(user);
+        var list = await new Design.DesignClient(secondChannel).GetSavedAsync(new Empty());
+        Assert.Equal(200, list.StatusCode);
+        Assert.Empty(list.Names);
+
+        Assert.NotEqual(first.DbFile, second.DbFile);
+        Assert.True(File.Exists(first.DbFile));
+        Assert.True(File.Exists(second.DbFile));
+    }
+
+    [Fact]
+    public async Task TempSqliteInMemoryHostsDoNotShareAStoreEither()
+    {
+        using var first = new AdsServerFactory { DatabaseProviderName = "InMemory" };
+        using var second = new AdsServerFactory { DatabaseProviderName = "InMemory" };
+        var user = Guid.NewGuid();
+
+        using var firstChannel = first.CreateGrpcChannel(user);
+        Assert.Equal(200, (await new Design.DesignClient(firstChannel).SaveAsync(
+            new SaveDesignRequest { Name = "shared name", Data = "{}" })).StatusCode);
+
+        using var secondChannel = second.CreateGrpcChannel(user);
+        var list = await new Design.DesignClient(secondChannel).GetSavedAsync(new Empty());
+        Assert.Equal(200, list.StatusCode);
+        Assert.Empty(list.Names);
+
+        Assert.NotEqual(first.InMemoryName, second.InMemoryName);
+        Assert.False(File.Exists(first.DbFile));
+        Assert.False(File.Exists(second.DbFile));
+    }
+
+    [Fact]
     public async Task FailureAnonymousCallerIsUnauthenticated()
     {
         using var channel = factory.CreateGrpcChannel();
