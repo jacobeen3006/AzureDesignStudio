@@ -1,5 +1,6 @@
 using AzureDesignStudio.Services.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace AzureDesignStudio.Server.Persistence;
 
@@ -28,11 +29,15 @@ internal static class DatabaseBootstrapper
         // what brings a database created by an earlier release up to date. The DDL is T-SQL,
         // which SQLite rejects, so the guard is the SQL Server check, not the generic relational
         // one. Phase 4 replaces this method with migrations.
-        if (db.Database.IsSqlServer())
+        if (NeedsLegacyUpgrade(db.Database))
             db.Database.ExecuteSqlRaw(LegacySqlServerUpgrade);
     }
 
-    private const string LegacySqlServerUpgrade = """
+    /// <summary>True when the legacy T-SQL upgrade applies: the SQL Server provider and no other.
+    /// A separate method so a test can assert the gate without a live server.</summary>
+    internal static bool NeedsLegacyUpgrade(DatabaseFacade database) => database.IsSqlServer();
+
+    internal const string LegacySqlServerUpgrade = """
         IF OBJECT_ID(N'AdsPlanApprovals', N'U') IS NULL
         CREATE TABLE AdsPlanApprovals (
             PlanHash nvarchar(71) NOT NULL PRIMARY KEY,

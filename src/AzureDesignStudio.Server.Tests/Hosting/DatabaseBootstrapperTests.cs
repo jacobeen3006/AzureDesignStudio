@@ -116,6 +116,35 @@ public sealed class DatabaseBootstrapperTests : IDisposable
     }
 
     [Fact]
+    public void LegacyUpgradeGateIsOpenForSqlServerOnly()
+    {
+        // The design-time factory builds a SQL Server context without connecting.
+        using var sqlServer = new DesignDbContextFactory().CreateDbContext([]);
+        Assert.True(DatabaseBootstrapper.NeedsLegacyUpgrade(sqlServer.Database));
+
+        using var sqlite = new DesignDbContext(
+            new DbContextOptionsBuilder<DesignDbContext>().UseSqlite("Data Source=" + _dbFile).Options);
+        Assert.False(DatabaseBootstrapper.NeedsLegacyUpgrade(sqlite.Database));
+
+        using var inMemory = new DesignDbContext(
+            new DbContextOptionsBuilder<DesignDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        Assert.False(DatabaseBootstrapper.NeedsLegacyUpgrade(inMemory.Database));
+    }
+
+    [Fact]
+    public void LegacyUpgradeStatementKeepsItsGuardedDdl()
+    {
+        var sql = DatabaseBootstrapper.LegacySqlServerUpgrade;
+
+        Assert.Contains("OBJECT_ID(N'AdsPlanApprovals'", sql);
+        Assert.Contains("COL_LENGTH(N'AdsPlanApplyEvents', N'TargetScope')", sql);
+        foreach (var table in new[] { "AdsPlanApprovals", "AdsPlanApplyEvents", "AdsGuardrailPolicies", "AdsDecomApprovals", "AdsDecomWindowEvents" })
+            Assert.Contains($"CREATE TABLE {table}", sql);
+        // Every CREATE TABLE must sit behind an existence guard.
+        Assert.Equal(5, System.Text.RegularExpressions.Regex.Matches(sql, @"IF OBJECT_ID\(N'\w+', N'U'\) IS NULL\s+CREATE TABLE").Count);
+    }
+
+    [Fact]
     public void InitializeTwiceKeepsTheExistingRows()
     {
         using var services = BuildServices(SqliteConfiguration());
