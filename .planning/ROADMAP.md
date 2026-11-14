@@ -135,7 +135,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Startup `quick_check` surfaces a deliberately corrupted workspace instead of opening it, and a user can take a `VACUUM INTO` backup and restore it with data verified.
   5. MCP opens a WAL workspace read-only (or reports the explicit `ReadWrite + query_only` fallback it used) and passes a cold-workspace test; the baseline adopts existing DDL, reports or dedupes rows violating new unique indexes, and documents `__EFMigrationsLock` recovery.
 
-**Plans**: 12/13 plans executed
+**Plans**: 13/13 plans executed
 **Wave 1**
 - [x] 04-01-PLAN.md — Tooling and fixtures: dotnet-ef 10.0.13 root manifest, EF Design package, L1-L4 legacy workspace fixtures, loader and schema describer
 
@@ -163,7 +163,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 04-12-PLAN.md — Operator runbook, AGENTS.md updates and a drift-guard test
 
 **Wave 8** *(blocked on Wave 7 completion)*
-- [ ] 04-13-PLAN.md — Phase gate and human verification (Mac Catalyst launch, restore drill, runbook read) — non-autonomous
+- [x] 04-13-PLAN.md — Phase gate and human verification (Mac Catalyst launch, restore drill, runbook read) — non-autonomous
 
 **Implementation note**: `src/AzureDesignStudio.Workspace/WorkspaceDbContext.cs` and the `WorkspaceDb` options/pragma factory; `src/AzureDesignStudio.Mcp/AdsWorkspace.cs`. Baseline-as-guarded-SQL: migration 1 is the existing guarded DDL via `migrationBuilder.Sql` for both providers so legacy databases receive a history row without re-creation; migrations 2+ are generated diffs. `dotnet-ef` 10.0.13, no `Cache=Shared`, `VACUUM INTO` backup, SQL Server parity in its own container job, checked-in legacy fixtures built from today's bootstrap DDL. Back up before migrating; never re-create a user database.
 
@@ -285,7 +285,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 | 1. Land and Stabilize | 8/8 | Complete    | 2026-10-21 |
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
 | 3. Server Foundation and Integration Harness | 6/6 | Complete    | 2026-11-14 |
-| 4. Database Durability | 12/13 | In Progress | - |
+| 4. Database Durability | 13/13 | In Progress | - |
 | 5. Identity, Guardrails, and Offline Development | 0/TBD | Not started | - |
 | 6. Bounds, Payload Contract, and Health | 0/TBD | Not started | - |
 | 7. Round 2 Shell Completion | 0/TBD | Not started | - |
