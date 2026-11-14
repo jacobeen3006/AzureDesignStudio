@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Identity, Guardrails, and Offline Development
 status: executing
-stopped_at: Completed 05-06-PLAN.md
-last_updated: "2026-11-14T15:52:24.455Z"
+stopped_at: Completed 05-07-PLAN.md
+last_updated: "2026-11-14T15:59:28.169Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 05 execution started
-state_head: 5c4b9546db4cec4daca0191769ccec654c80f661
+state_head: fa11daf094861d7fb767a2e19367373f950d5554
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 45
-  completed_plans: 38
+  completed_plans: 39
   percent: 27
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 ## Current Position
 
 Phase: 05 (Identity, Guardrails, and Offline Development) — EXECUTING
-Plan: 7 of 11
+Plan: 8 of 11
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 05 execution started
 
@@ -84,6 +84,7 @@ Progress: [███░░░░░░░] 27%
 | Phase 05 P04 | 45min | 3 tasks | 14 files |
 | Phase 05 P05 | 25 min | 2 tasks | 6 files |
 | Phase 05 P06 | 35min | 3 tasks | 8 files |
+| Phase 05 P07 | 35 min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -139,6 +140,7 @@ Progress: [███░░░░░░░] 27%
 - [Phase 05]: 05-05: development crypto key-ring folder is created lazily on first use (0700 on Unix, DPAPI keys on Windows); an existing folder is never chmod-ed
 - [Phase 05]: 05-05: Crypto:Provider=Development is refused in Production before anything registers; dev1: prefix isolates development ciphertext from Key Vault blobs
 - [Phase 05]: 05-06: a gate token issued without a scope is Stale for any scoped consume and invisible to the scope-aware peek (fail closed); guardrail audit event is added inside UpsertGuardrailRowAsync so the retry path re-adds exactly one
+- [Phase 05]: 05-07: tenant settings Set replaces both values; GetGuardrailPolicy keeps replace semantics while only enforcement (LoadGuardrailPolicy) honors the per-tenant mode; unrecognised stored mode is judged as merge; interpretation of 'Option 1 and option 2' (both modes selectable, replace default) still to confirm
 
 ### Pending Todos
 
@@ -162,6 +164,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T15:52:24.346Z
-Stopped at: Completed 05-06-PLAN.md
+Last session: 2026-11-14T15:59:28.060Z
+Stopped at: Completed 05-07-PLAN.md
 Resume file: None
