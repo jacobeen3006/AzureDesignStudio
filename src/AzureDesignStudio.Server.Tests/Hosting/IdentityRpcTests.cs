@@ -1,5 +1,6 @@
 using AzureDesignStudio.SharedModels.Protos;
 using Google.Protobuf.WellKnownTypes;
+using Grpc.Net.Client;
 using Xunit;
 
 namespace AzureDesignStudio.Server.Tests.Hosting;
@@ -44,4 +45,40 @@ public sealed class IdentityRpcTests(AdsServerFactory factory) : IClassFixture<A
     public async Task ATokenWithANonGuidTenantAnswers401InTheResponse() =>
         Assert.Equal(401, await GetSavedStatus(new TestClaims(
             NoTid: true, Extra: [("tid", "not-a-guid")])));
+
+    // --- every Design RPC (Task 2 grows this table to the Deploy RPCs) ---
+
+    /// <summary>Each RPC by name, called with an empty request; the answer is the response's StatusCode.</summary>
+    private static readonly Dictionary<string, Func<GrpcChannel, Task<int>>> Rpcs = new()
+    {
+        ["Design.Save"] = async c => (await new Design.DesignClient(c).SaveAsync(new SaveDesignRequest())).StatusCode,
+        ["Design.GetSaved"] = async c => (await new Design.DesignClient(c).GetSavedAsync(new Empty())).StatusCode,
+        ["Design.Load"] = async c => (await new Design.DesignClient(c).LoadAsync(new LoadDesignRequest())).StatusCode,
+        ["Design.Delete"] = async c => (await new Design.DesignClient(c).DeleteAsync(new DeleteDesignRequest())).StatusCode,
+    };
+
+    public static TheoryData<string> RpcNames => new(Rpcs.Keys);
+
+    private static readonly TestClaims NoTenant = new(NoTid: true);
+
+    /// <summary>A short <c>oid</c> that is not a GUID, in place of the default object id claim.</summary>
+    private static readonly TestClaims NonGuidShortOid = new(NoOid: true, Extra: [("oid", "not-a-guid")]);
+
+    [Theory]
+    [MemberData(nameof(RpcNames))]
+    public async Task EveryRpcAnswers401InTheResponseForATokenWithoutTid(string rpc)
+    {
+        using var channel = factory.CreateGrpcChannel(Guid.NewGuid(), claims: NoTenant);
+
+        Assert.Equal(401, await Rpcs[rpc](channel));
+    }
+
+    [Theory]
+    [MemberData(nameof(RpcNames))]
+    public async Task EveryRpcAnswers401InTheResponseForANonGuidShortOid(string rpc)
+    {
+        using var channel = factory.CreateGrpcChannel(Guid.NewGuid(), claims: NonGuidShortOid);
+
+        Assert.Equal(401, await Rpcs[rpc](channel));
+    }
 }

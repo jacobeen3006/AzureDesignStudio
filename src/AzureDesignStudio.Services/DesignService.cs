@@ -21,20 +21,19 @@ namespace AzureDesignStudio.Services
         public override async Task<SaveDesignResponse> Save(SaveDesignRequest request, ServerCallContext context)
         {
             var response = new SaveDesignResponse();
-            // Get user id
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            // The caller comes first, before request validation. A bad identity answers in-band.
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                logger.LogWarning("Access denied. userIdClaim is empty.");
+                logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
                 return response;
             }
-            var userId = new Guid(userIdClaim);
+            var userId = caller.UserId;
 
             // Validate input
             if (!ServiceTools.IsValidName(request.Name))
             {
-                logger.LogWarning("{RequestName} is invalid, from user: {UserIdClaim}", request.Name, userIdClaim);
+                logger.LogWarning("{RequestName} is invalid, from user: {UserId}", request.Name, userId);
                 response.StatusCode = StatusCodes.Status400BadRequest;
                 return response;
             }
@@ -48,7 +47,7 @@ namespace AzureDesignStudio.Services
                 var count = designContext.AdsDesigns.Where(d => d.UserId == userId).Count();
                 if (count >= MaxDesignsPerUser)
                 {
-                    logger.LogInformation("Hit quota limit. User: {UserIdClaim}", userIdClaim);
+                    logger.LogInformation("Hit quota limit. User: {UserId}", userId);
                     response.StatusCode = StatusCodes.Status507InsufficientStorage;
                     return response;
                 }
@@ -113,30 +112,27 @@ namespace AzureDesignStudio.Services
         public override async Task<LoadDesignResponse> Load(LoadDesignRequest request, ServerCallContext context)
         {
             var response = new LoadDesignResponse();
-            // Get user id
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrEmpty(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                logger.LogWarning("Access denied. userIdClaim is empty.");
+                logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
                 return response;
             }
+            var userId = caller.UserId;
 
             if (!ServiceTools.IsValidName(request.Name))
             {
-                logger.LogWarning("{RequestName} is invalid, from user: {UserIdClaim}", request.Name, userIdClaim);
+                logger.LogWarning("{RequestName} is invalid, from user: {UserId}", request.Name, userId);
                 response.StatusCode = StatusCodes.Status400BadRequest;
                 return response;
             }
-
-            var userId = new Guid(userIdClaim);
 
             // Protobuf string setters reject null, so a missing design must not be assigned.
             var data = (await designContext.AdsDesigns.AsNoTracking()
                 .FirstOrDefaultAsync(d => d.UserId == userId && d.Name == request.Name))?.DesignData;
             if (string.IsNullOrEmpty(data))
             {
-                logger.LogWarning("{RequestName} is not found, from user: {UserIdClaim}", request.Name, userIdClaim);
+                logger.LogWarning("{RequestName} is not found, from user: {UserId}", request.Name, userId);
                 response.StatusCode = StatusCodes.Status404NotFound;
             }
             else
@@ -151,26 +147,25 @@ namespace AzureDesignStudio.Services
         public override async Task<DeleteDesignResponse> Delete(DeleteDesignRequest request, ServerCallContext context)
         {
             var response = new DeleteDesignResponse();
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrEmpty(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                logger.LogWarning("Access denied. userIdClaim is empty.");
+                logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
                 return response;
             }
+            var userId = caller.UserId;
 
             if (!ServiceTools.IsValidName(request.Name))
             {
-                logger.LogWarning("{RequestName} is invalid, from user: {UserIdClaim}", request.Name, userIdClaim);
+                logger.LogWarning("{RequestName} is invalid, from user: {UserId}", request.Name, userId);
                 response.StatusCode = StatusCodes.Status400BadRequest;
                 return response;
             }
 
-            var userId = new Guid(userIdClaim);
             var design = await designContext.AdsDesigns.FirstOrDefaultAsync(d => d.UserId == userId && d.Name == request.Name);
             if (design == null)
             {
-                logger.LogWarning("{RequestName} is not found, from user: {UserIdClaim}", request.Name, userIdClaim);
+                logger.LogWarning("{RequestName} is not found, from user: {UserId}", request.Name, userId);
                 response.StatusCode = StatusCodes.Status404NotFound;
                 return response;
             }

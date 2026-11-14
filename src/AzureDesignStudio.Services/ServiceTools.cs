@@ -19,6 +19,9 @@ namespace AzureDesignStudio.Services
         /// stored value is the boolean true: no claim, header or request field can declare it.</summary>
         public const string SingleUserHostKey = "ads.host.singleuser";
 
+        /// <summary>The message of an in-band 401 for a token without a usable oid and tid.</summary>
+        public const string IdentityInvalidMessage = "IDENTITY_INVALID: the token carries no usable oid and tid.";
+
         /// <summary>The caller of this call, or an anonymous principal when the host set none.</summary>
         public static ClaimsPrincipal GetUser(ServerCallContext context) =>
             context.UserState.TryGetValue(UserStateKey, out var user) && user is ClaimsPrincipal principal
