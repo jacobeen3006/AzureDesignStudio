@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Identity, Guardrails, and Offline Development
 status: executing
-stopped_at: Completed 05-04-PLAN.md
-last_updated: "2026-11-14T15:40:51.355Z"
+stopped_at: Completed 05-05-PLAN.md
+last_updated: "2026-11-14T15:45:16.783Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 05 execution started
-state_head: "0b23215d33f9454789bfcd318f668e39ce55415f"
+state_head: d5052e5b42a3ce90c68021ee43b5bcd366ddd31f
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 45
-  completed_plans: 36
+  completed_plans: 37
   percent: 27
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 ## Current Position
 
 Phase: 05 (Identity, Guardrails, and Offline Development) — EXECUTING
-Plan: 5 of 11
+Plan: 6 of 11
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 05 execution started
 
@@ -82,6 +82,7 @@ Progress: [███░░░░░░░] 27%
 | Phase 05 P02 | 35min | 3 tasks | 10 files |
 | Phase 05 P03 | 20min | 2 tasks | 3 files |
 | Phase 05 P04 | 45min | 3 tasks | 14 files |
+| Phase 05 P05 | 25 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -134,6 +135,8 @@ Progress: [███░░░░░░░] 27%
 - [Phase 05]: 05-03: Cost.GetRetailPrices is the only anonymous gRPC method (literal list in the test); FallbackPolicy requires an authenticated user; mapping helper unit-tested because Hosted [Authorize] attributes mask it on the real host
 - [Phase 05]: 05-04: guardrail policy rows keyed by caller.ScopeId; the NULL-tenant Id=1 row is the inherited default (replace semantics), never written by an RPC; an own row with an empty body is the empty policy
 - [Phase 05]: 05-04: TenantGuardrails SQL Server Up is five guarded commands (column, filtered unique index, two tables, events index) with no default constraint; proved in the mssql 2022 container (9 passed, 0 skipped)
+- [Phase 05]: 05-05: development crypto key-ring folder is created lazily on first use (0700 on Unix, DPAPI keys on Windows); an existing folder is never chmod-ed
+- [Phase 05]: 05-05: Crypto:Provider=Development is refused in Production before anything registers; dev1: prefix isolates development ciphertext from Key Vault blobs
 
 ### Pending Todos
 
@@ -157,6 +160,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T15:40:51.253Z
-Stopped at: Completed 05-04-PLAN.md
+Last session: 2026-11-14T15:45:16.679Z
+Stopped at: Completed 05-05-PLAN.md
 Resume file: None

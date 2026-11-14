@@ -179,7 +179,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. A caller without `Guardrail.Admin` receives 403 for guardrail read/mutation, two tenants cannot read or overwrite each other's policies or approvals, and approval requires `Deploy.Approver` with self-approval refused as a separate rule.
   5. A DEBUG developer registers and exercises a subscription with no Key Vault and no Azure credentials, while Production refuses development keys and still requires Key Vault.
 
-**Plans**: 4/11 plans executed
+**Plans**: 5/11 plans executed
 **Wave 1**
 - [x] 05-01-PLAN.md — Typed caller identity foundation (AdsIdentity, AdsCaller, `ServiceTools.TryGetCaller` traced through `Design.GetSaved`), in-process single-user marker, extended test helpers
 
@@ -189,7 +189,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [x] 05-04-PLAN.md — Tenant-scoped guardrail policy storage and enforcement (`TenantGuardrails` migration on both providers), SQL Server proof
-- [ ] 05-05-PLAN.md — Development crypto provider on Data Protection, Production refusal, launch profiles
+- [x] 05-05-PLAN.md — Development crypto provider on Data Protection, Production refusal, launch profiles
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 05-06-PLAN.md — Guardrail role gate, policy-change audit event, what-if previews and tokens bound to scope and requester
@@ -315,7 +315,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
 | 3. Server Foundation and Integration Harness | 6/6 | Complete    | 2026-11-14 |
 | 4. Database Durability | 13/13 | Complete    | 2026-11-14 |
-| 5. Identity, Guardrails, and Offline Development | 4/11 | In Progress | - |
+| 5. Identity, Guardrails, and Offline Development | 5/11 | In Progress | - |
 | 6. Bounds, Payload Contract, and Health | 0/TBD | Not started | - |
 | 7. Round 2 Shell Completion | 0/TBD | Not started | - |
 | 8. Verification Depth and Diagnostics | 0/TBD | Not started | - |
