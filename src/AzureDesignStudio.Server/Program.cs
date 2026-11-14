@@ -66,7 +66,7 @@ DatabaseProvider.AddDesignDbContext(builder.Services, databaseKind);
 // The provider is read from configuration (Crypto:Provider, default KeyVault); the real service
 // contacts the vault lazily on first use, so the host boots without one. This runs at top
 // level, so tests that need another value must supply it with UseSetting.
-CryptoProvider.Register(builder.Services, builder.Configuration);
+CryptoProvider.Register(builder.Services, builder.Configuration, builder.Environment);
 
 builder.Services.AddSingleton<ITelemetryInitializer, AdsTelemetryInitializer>();
 builder.Services.AddApplicationInsightsTelemetry();
