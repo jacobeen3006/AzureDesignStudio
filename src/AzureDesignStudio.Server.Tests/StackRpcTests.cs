@@ -85,7 +85,7 @@ public class StackRpcTests
         };
     }
 
-    private Grpc.Core.ServerCallContext Me => TestServerCallContext.ForUser(_user, "Ada");
+    private Grpc.Core.ServerCallContext Me => TestServerCallContext.ForSingleUserHost(_user, "Ada");
 
     private DeployService Service => new(_db, NullLogger<DeployService>.Instance, new FakeCryptoService(), _gate, _arm,
         new AmbientCredential());

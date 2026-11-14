@@ -17,6 +17,9 @@ namespace AzureDesignStudio.Server.Tests.Hosting;
 
 public class ServerHostTests(AdsServerFactory factory) : IClassFixture<AdsServerFactory>
 {
+    /// <summary>Reading the guardrail policy needs the app role; these calls only prove a service answers.</summary>
+    private static readonly TestClaims GuardrailAdmin = new(Roles: [AzureDesignStudio.Services.Auth.AdsIdentity.GuardrailAdminRole]);
+
     [Fact]
     public async Task BootsWithTheCheckedInConfigurationAndRoundTripsADesign()
     {
@@ -192,7 +195,7 @@ public class ServerHostTests(AdsServerFactory factory) : IClassFixture<AdsServer
         using var ownFactory = new AdsServerFactory();
         _ = ownFactory.Services; // starts the host; the bootstrapper creates the schema
 
-        using var channel = ownFactory.CreateGrpcChannel(Guid.NewGuid());
+        using var channel = ownFactory.CreateGrpcChannel(Guid.NewGuid(), claims: GuardrailAdmin);
         var design = new Design.DesignClient(channel);
 
         using (var scope = ownFactory.Services.CreateScope())
@@ -259,7 +262,7 @@ public class ServerHostTests(AdsServerFactory factory) : IClassFixture<AdsServer
             .ToArray();
         Assert.Equal(["Cost", "Deploy", "Design"], services);
 
-        using var authenticated = factory.CreateGrpcChannel(Guid.NewGuid());
+        using var authenticated = factory.CreateGrpcChannel(Guid.NewGuid(), claims: GuardrailAdmin);
         Assert.Equal(200, (await new Design.DesignClient(authenticated).GetSavedAsync(new Empty())).StatusCode);
         Assert.Equal(200, (await new Deploy.DeployClient(authenticated).GetGuardrailPolicyAsync(new Empty())).StatusCode);
 

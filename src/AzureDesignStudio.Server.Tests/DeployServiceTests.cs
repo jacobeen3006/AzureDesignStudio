@@ -18,6 +18,9 @@ public class DeployServiceTests
     private readonly Guid _user = Guid.NewGuid();
     private readonly Guid _subscription = Guid.NewGuid();
 
+    /// <summary>The app role that may read and change the guardrail policy (D-01).</summary>
+    private static readonly string[] Admin = [AzureDesignStudio.Services.Auth.AdsIdentity.GuardrailAdminRole];
+
     private DeployService Service => new(_db, NullLogger<DeployService>.Instance, _crypto,
         new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl), new ScriptedHttp(_ => null));
 
@@ -166,8 +169,8 @@ public class DeployServiceTests
     {
         const string policy = """{"scopes":["/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/prod"],"tags":[],"types":[]}""";
 
-        var set = await Service.SetGuardrailPolicy(new GuardrailPolicyRequest { Json = policy }, TestServerCallContext.ForUser(_user, "Ada"));
-        var get = await Service.GetGuardrailPolicy(new Empty(), TestServerCallContext.ForUser(Guid.NewGuid()));
+        var set = await Service.SetGuardrailPolicy(new GuardrailPolicyRequest { Json = policy }, TestServerCallContext.ForUser(_user, "Ada", roles: Admin));
+        var get = await Service.GetGuardrailPolicy(new Empty(), TestServerCallContext.ForUser(Guid.NewGuid(), roles: Admin));
 
         Assert.Equal(200, set.StatusCode);
         Assert.Equal(200, get.StatusCode);
@@ -179,7 +182,7 @@ public class DeployServiceTests
     [Fact]
     public async Task SettingThePolicyAgainReplacesTheSingleRow()
     {
-        var me = TestServerCallContext.ForUser(_user);
+        var me = TestServerCallContext.ForUser(_user, roles: Admin);
         await Service.SetGuardrailPolicy(new GuardrailPolicyRequest { Json = """{"types":["Microsoft.KeyVault/vaults"]}""" }, me);
 
         await Service.SetGuardrailPolicy(new GuardrailPolicyRequest { Json = """{"types":["Microsoft.Sql/servers"]}""" }, me);
@@ -191,7 +194,7 @@ public class DeployServiceTests
     public async Task MalformedPolicyIsRejectedAndTheStoredOneKept()
     {
         // An emptied list means "protect nothing", so bad input must never overwrite it.
-        var me = TestServerCallContext.ForUser(_user);
+        var me = TestServerCallContext.ForUser(_user, roles: Admin);
         await Service.SetGuardrailPolicy(new GuardrailPolicyRequest { Json = """{"types":["Microsoft.KeyVault/vaults"]}""" }, me);
 
         var response = await Service.SetGuardrailPolicy(new GuardrailPolicyRequest { Json = "{ not json" }, me);

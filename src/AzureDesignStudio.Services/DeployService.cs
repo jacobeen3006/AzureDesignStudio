@@ -1723,6 +1723,11 @@ namespace AzureDesignStudio.Services
                 : "the plan touches do-not-touch resources: " + string.Join("; ", findings.Select(f => $"{f.ResourceId} ({f.Reason})"));
         }
 
+        /// <summary>Answer to a caller who may not read or change the guardrail policy (D-01, D-04).
+        /// App roles are not retroactive, hence the re-sign-in hint.</summary>
+        private const string GuardrailAdminRequiredMessage =
+            "GUARDRAIL_ADMIN_REQUIRED: the Guardrail.Admin app role is required to read or change the guardrail policy. If the role was just assigned, sign out and back in to get a new token.";
+
         /// <summary>
         /// Reads the server-side do-not-touch list (v2 13.1). 200 with empty json = no policy stored.
         /// </summary>
@@ -1734,6 +1739,13 @@ namespace AzureDesignStudio.Services
                 _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
                 response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
+                return response;
+            }
+
+            if (!caller.CanAdministerGuardrails)
+            {
+                response.StatusCode = StatusCodes.Status403Forbidden;
+                response.ErrorMessage = GuardrailAdminRequiredMessage;
                 return response;
             }
 
@@ -1760,6 +1772,13 @@ namespace AzureDesignStudio.Services
                 _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
                 response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
+                return response;
+            }
+
+            if (!caller.CanAdministerGuardrails)
+            {
+                response.StatusCode = StatusCodes.Status403Forbidden;
+                response.ErrorMessage = GuardrailAdminRequiredMessage;
                 return response;
             }
 
