@@ -300,6 +300,49 @@ public class AdsIdentityTests
         Assert.EndsWith($" <{User:D}>", principal);
     }
 
+    [Theory]
+    [InlineData("Ada\r\nFAKE LOG LINE", "Ada FAKE LOG LINE")]
+    [InlineData("Ada\u0000\u0007Lovelace", "AdaLovelace")]
+    [InlineData("Ada\u202Egnidner\u200B", "Adagnidner")]
+    [InlineData("Ada\u2028Lovelace", "AdaLovelace")]
+    [InlineData("  Ada \t  Lovelace  ", "Ada Lovelace")]
+    public void ThePrincipalNameLosesControlAndFormatCharacters(string raw, string expected) =>
+        Assert.Equal($"{expected} <{User:D}>", Caller(Tenant, name: raw).Principal);
+
+    [Fact]
+    public void ADisplayNameCanNeverForgeTheIdSuffix()
+    {
+        var victim = Guid.NewGuid();
+        var principal = Caller(Tenant, name: $"Alice <{victim:D}>").Principal;
+
+        Assert.Equal($"Alice {victim:D} <{User:D}>", principal);
+        // The only angle brackets are the real suffix, and it is the caller's own id.
+        Assert.Equal(1, principal.Count(c => c == '<'));
+        Assert.Equal(1, principal.Count(c => c == '>'));
+        Assert.EndsWith($" <{User:D}>", principal);
+        Assert.Equal(User.ToString("D"), Caller(Tenant, name: "<>").Principal);
+    }
+
+    [Fact]
+    public void ACutDisplayNameNeverSplitsASurrogatePairAndStaysUnderTheWidth()
+    {
+        var principal = Caller(Tenant, name: string.Concat(Enumerable.Repeat("\U0001F600", 5000))).Principal;
+        var body = principal[..^($" <{User:D}>".Length)];
+
+        Assert.True(principal.Length <= 320);
+        Assert.True(body.Length > 0);
+        Assert.False(char.IsHighSurrogate(body[^1]), "a cut must not leave a lone high surrogate");
+        Assert.EndsWith($" <{User:D}>", principal);
+    }
+
+    [Fact]
+    public void ASingleGraphemeLongerThanTheWidthFallsBackToTheIdAlone() =>
+        Assert.Equal(User.ToString("D"), Caller(Tenant, name: "e" + new string('\u0301', 5000)).Principal);
+
+    [Fact]
+    public void AnUnpairedSurrogateInTheNameIsDropped() =>
+        Assert.Equal($"AdaLovelace <{User:D}>", Caller(Tenant, name: "Ada\uD800Lovelace").Principal);
+
     // --- through the service accessor ---
 
     [Fact]

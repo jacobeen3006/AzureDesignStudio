@@ -16,7 +16,11 @@ Every Design and Deploy call derives its caller from the validated token, in one
   `tid`) or its long URI spelling (`http://schemas.microsoft.com/identity/claims/objectidentifier`,
   `http://schemas.microsoft.com/identity/claims/tenantid`), must be a non-empty GUID, and must agree when both
   spellings are present. The subject claim (`sub`) is never used: it differs per application.
-- Roles come from the `roles` claim.
+- Roles come from the `roles` claim (or the long `ClaimTypes.Role` spelling the inbound claim mapping produces).
+- The name written beside the id in audit rows, approvals and logs (`name <oid>`) is the token's `name` claim after
+  sanitizing: control, format and separator characters are dropped, `<` and `>` become spaces, whitespace is
+  collapsed and the text is cut on a character boundary. The `<oid>` suffix is always the caller's own id. The
+  name is still self-chosen text; the id is the evidence.
 - A token without a usable `oid` and `tid` is refused in-band with status **401** and the message
   `IDENTITY_INVALID: the token carries no usable oid and tid.` The gRPC call itself succeeds; the response
   carries the code. Remedy: sign in again; if it persists the token was not issued for a work, school or personal
