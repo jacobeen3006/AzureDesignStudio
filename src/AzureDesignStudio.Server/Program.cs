@@ -233,3 +233,6 @@ app.MapRazorPages();
 app.MapFallbackToFile("index.html");
 
 app.Run();
+
+// Exposes the entry point as the type argument of WebApplicationFactory<Program> in the server tests.
+public partial class Program { }
