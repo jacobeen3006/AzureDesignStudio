@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Server Foundation and Integration Harness
-status: executing
-stopped_at: Completed 03-05-PLAN.md
-last_updated: "2026-11-14T10:32:55.842Z"
+status: verifying
+stopped_at: Completed 03-06-PLAN.md
+last_updated: "2026-11-14T10:35:37.371Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 03 execution started
-state_head: 9743062005e56bc0d61b52adfbecdfa61df8471f
+state_head: e85f85120132f6ff09e99dca0a3c775ab246e2b7
 progress:
   total_phases: 11
   completed_phases: 1
   total_plans: 21
-  completed_plans: 18
+  completed_plans: 19
   percent: 9
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 
 Phase: 03 (Server Foundation and Integration Harness) — EXECUTING
 Plan: 6 of 6
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-11-14 — Phase 03 execution started
 
 Progress: [█░░░░░░░░░] 9%
@@ -62,6 +62,7 @@ Progress: [█░░░░░░░░░] 9%
 | Phase 03 P03 | 20min | 3 tasks | 7 files |
 | Phase 03 P04 | 15min | 3 tasks | 4 files |
 | Phase 03 P05 | 10min | 3 tasks | 1 files |
+| Phase 03 P06 | 10min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -83,6 +84,7 @@ Progress: [█░░░░░░░░░] 9%
 - [Phase 03]: Crypto:Provider accepts only KeyVault until Phase 5 (CRED-01/02)
 - [Phase 03]: 03-04: DesignDbContextFactory targets SQL Server on LocalDB with integrated security so the design-time model carries ADS_CHECK_JSON; never opened, no Design package added (Phase 4)
 - [Phase 03]: 03-05: no production change needed; handler faults map to StatusCode.Unknown and real CryptoService answers 503 in-band without a vault
+- [Phase 03]: 03-06: source guards match call shape and line-start directives; test-auth text banned from the production Server tree
 
 ### Pending Todos
 
@@ -106,6 +108,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T10:32:55.778Z
-Stopped at: Completed 03-05-PLAN.md
+Last session: 2026-11-14T10:35:37.307Z
+Stopped at: Completed 03-06-PLAN.md
 Resume file: None
