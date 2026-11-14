@@ -23,8 +23,11 @@ public class SourceGuardTests
     private static readonly Regex EnsureCreatedCall =
         new(@"\.\s*EnsureCreated(Async)?\s*\(", RegexOptions.Compiled);
 
+    // DeployDbStartup.Migrate(...) is the Desktop's call into the one schema owner that lives in
+    // DeployDbStartup.cs; it is not an EF migration call, so the lookbehind leaves it alone while
+    // db.Database.Migrate() anywhere else still matches.
     private static readonly Regex MigrateCall =
-        new(@"\.\s*Migrate(Async)?\s*\(", RegexOptions.Compiled);
+        new(@"(?<!DeployDbStartup)\.\s*Migrate(Async)?\s*\(", RegexOptions.Compiled);
 
     /// <summary>The only files allowed to run schema migrations. The Workspace and Desktop files
     /// arrive in later plans, so the guard checks a subset and never requires them to exist.</summary>
@@ -102,6 +105,34 @@ public class SourceGuardTests
             + Environment.NewLine + string.Join(Environment.NewLine, offenders));
 
         Assert.DoesNotContain(callers, c => c.StartsWith("src/AzureDesignStudio.Mcp/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void NoOtherProjectCallsTheModelCreationMethod()
+    {
+        var root = RepositoryRoot();
+        string[] projects =
+        [
+            "src/AzureDesignStudio.Workspace",
+            "src/AzureDesignStudio.Desktop",
+            "src/AzureDesignStudio.Mcp",
+        ];
+        var hits = new List<string>();
+        foreach (var relative in projects.SelectMany(project => SourceFiles(root, project))
+                     .Where(r => !r.Split('/').Contains("Migrations")))
+        {
+            var lines = File.ReadAllLines(Path.Combine(root, relative));
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (EnsureCreatedCall.IsMatch(lines[i]))
+                    hits.Add($"{relative}:{i + 1}: {lines[i].Trim()}");
+            }
+        }
+
+        Assert.True(hits.Count == 0,
+            "Schema comes from migrations at the three startup sites (" + string.Join(", ", MigrationSites)
+            + "); the server bootstrapper's dev/test branch is the only remaining model-creation call. Found in:"
+            + Environment.NewLine + string.Join(Environment.NewLine, hits));
     }
 
     [Fact]
