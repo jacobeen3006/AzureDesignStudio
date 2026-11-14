@@ -12,8 +12,8 @@ using Xunit;
 namespace AzureDesignStudio.Server.Tests.Hosting;
 
 /// <summary>
-/// <see cref="DatabaseBootstrapper.Initialize"/> wired the way Program.cs wires it (AddDbContext
-/// with <see cref="DatabaseProvider.Configure"/>), on a real SQLite file in the temp directory.
+/// <see cref="DatabaseBootstrapper.Initialize"/> wired the way Program.cs wires it
+/// (<see cref="DatabaseProvider.AddDesignDbContext"/>), on a real SQLite file in the temp directory.
 /// </summary>
 public sealed class DatabaseBootstrapperTests : IDisposable
 {
@@ -83,8 +83,7 @@ public sealed class DatabaseBootstrapperTests : IDisposable
                 builder.AddProvider(logs);
         });
         services.AddSingleton(configuration);
-        services.AddDbContext<DesignDbContext>((serviceProvider, options) =>
-            DatabaseProvider.Configure(options, serviceProvider.GetRequiredService<IConfiguration>()));
+        DatabaseProvider.AddDesignDbContext(services, DatabaseProvider.Resolve(configuration));
         return services.BuildServiceProvider();
     }
 
@@ -116,33 +115,34 @@ public sealed class DatabaseBootstrapperTests : IDisposable
     }
 
     [Fact]
-    public void LegacyUpgradeGateIsOpenForSqlServerOnly()
+    public void DecideMigratesAnExistingDatabase() =>
+        Assert.Equal(BootstrapAction.Migrate,
+            DatabaseBootstrapper.Decide(migrateEnabled: true, allowCreate: false, databaseExists: true, pendingMigrationCount: 1));
+
+    [Fact]
+    public void DecideRefusesAMissingDatabaseUnlessCreationIsAllowed()
     {
-        // The design-time factory builds a SQL Server context without connecting.
-        using var sqlServer = new DesignDbContextFactory().CreateDbContext([]);
-        Assert.True(DatabaseBootstrapper.NeedsLegacyUpgrade(sqlServer.Database));
-
-        using var sqlite = new DesignDbContext(
-            new DbContextOptionsBuilder<DesignDbContext>().UseSqlite("Data Source=" + _dbFile).Options);
-        Assert.False(DatabaseBootstrapper.NeedsLegacyUpgrade(sqlite.Database));
-
-        using var inMemory = new DesignDbContext(
-            new DbContextOptionsBuilder<DesignDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
-        Assert.False(DatabaseBootstrapper.NeedsLegacyUpgrade(inMemory.Database));
+        // A typo in the connection string must not yield a silent empty database.
+        Assert.Equal(BootstrapAction.RefuseMissingDatabase,
+            DatabaseBootstrapper.Decide(true, false, databaseExists: false, pendingMigrationCount: 1));
+        Assert.Equal(BootstrapAction.Migrate,
+            DatabaseBootstrapper.Decide(true, true, databaseExists: false, pendingMigrationCount: 1));
     }
 
     [Fact]
-    public void LegacyUpgradeStatementKeepsItsGuardedDdl()
+    public void DecideRefusesPendingMigrationsWhenMigrateIsOff()
     {
-        var sql = DatabaseBootstrapper.LegacySqlServerUpgrade;
-
-        Assert.Contains("OBJECT_ID(N'AdsPlanApprovals'", sql);
-        Assert.Contains("COL_LENGTH(N'AdsPlanApplyEvents', N'TargetScope')", sql);
-        foreach (var table in new[] { "AdsPlanApprovals", "AdsPlanApplyEvents", "AdsGuardrailPolicies", "AdsDecomApprovals", "AdsDecomWindowEvents" })
-            Assert.Contains($"CREATE TABLE {table}", sql);
-        // Every CREATE TABLE must sit behind an existence guard.
-        Assert.Equal(5, System.Text.RegularExpressions.Regex.Matches(sql, @"IF OBJECT_ID\(N'\w+', N'U'\) IS NULL\s+CREATE TABLE").Count);
+        Assert.Equal(BootstrapAction.RefusePendingMigrations,
+            DatabaseBootstrapper.Decide(migrateEnabled: false, allowCreate: false, databaseExists: true, pendingMigrationCount: 2));
+        // Nothing to apply, nothing to refuse.
+        Assert.Equal(BootstrapAction.Migrate,
+            DatabaseBootstrapper.Decide(migrateEnabled: false, allowCreate: false, databaseExists: true, pendingMigrationCount: 0));
     }
+
+    [Fact]
+    public void DecideDoesNotCreateADatabaseThatWouldApplyDisabledMigrations() =>
+        Assert.Equal(BootstrapAction.RefusePendingMigrations,
+            DatabaseBootstrapper.Decide(migrateEnabled: false, allowCreate: true, databaseExists: false, pendingMigrationCount: 1));
 
     [Fact]
     public void InitializeTwiceKeepsTheExistingRows()

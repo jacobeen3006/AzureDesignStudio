@@ -1,15 +1,34 @@
 using AzureDesignStudio.Services.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace AzureDesignStudio.Server.Persistence;
 
+/// <summary>What the bootstrapper does with a SQL Server database at startup.</summary>
+internal enum BootstrapAction
+{
+    /// <summary>Apply the pending migrations (a no-op when there are none).</summary>
+    Migrate,
+
+    /// <summary>The database does not exist and the operator did not allow creating it.</summary>
+    RefuseMissingDatabase,
+
+    /// <summary>Migrations are pending and the operator switched migrating off.</summary>
+    RefusePendingMigrations,
+}
+
 /// <summary>
-/// Brings the server database schema up once at startup. The only caller of
-/// <c>EnsureCreated</c> in Server and Services; nothing calls it on a request path.
+/// Brings the server database schema up once at startup. SQL Server is migrated with the EF
+/// migrations in this assembly. <c>Sqlite</c> and <c>InMemory</c>, the documented development and
+/// test providers, have no migrations and keep a model-creation call: the only one in Server and
+/// Services, and nothing calls it on a request path.
 /// </summary>
 internal static class DatabaseBootstrapper
 {
+    public const string MigrateKey = "Database:Migrate";
+    public const string AllowCreateKey = "Database:AllowCreate";
+
     public static void Initialize(IServiceProvider services)
     {
         using var scope = services.CreateScope();
@@ -22,89 +41,71 @@ internal static class DatabaseBootstrapper
         else if (db.Database.IsSqlite())
             logger.LogWarning("Database:Provider is Sqlite: the server database is a single local file. Use it for testing and development only.");
 
-        db.Database.EnsureCreated();
+        if (db.Database.IsSqlServer())
+        {
+            MigrateSqlServer(db, scope.ServiceProvider.GetRequiredService<IConfiguration>(), logger);
+            return;
+        }
 
-        // EnsureCreated creates a brand-new database with the full schema, and does nothing at
-        // all for one that already exists - it never adds a missing table. The guarded DDL is
-        // what brings a database created by an earlier release up to date. The DDL is T-SQL,
-        // which SQLite rejects, so the guard is the SQL Server check, not the generic relational
-        // one. Phase 4 replaces this method with migrations.
-        if (NeedsLegacyUpgrade(db.Database))
-            db.Database.ExecuteSqlRaw(LegacySqlServerUpgrade);
+        db.Database.EnsureCreated();
     }
 
-    /// <summary>True when the legacy T-SQL upgrade applies: the SQL Server provider and no other.
-    /// A separate method so a test can assert the gate without a live server.</summary>
-    internal static bool NeedsLegacyUpgrade(DatabaseFacade database) => database.IsSqlServer();
+    /// <summary>
+    /// The startup decision as a pure function. A missing database without <paramref name="allowCreate"/>
+    /// is refused first (a typo in the connection string must not yield a silent empty database); then
+    /// pending migrations with <paramref name="migrateEnabled"/> off are refused, a missing database
+    /// counting as having every migration pending. Anything else migrates.
+    /// </summary>
+    internal static BootstrapAction Decide(bool migrateEnabled, bool allowCreate, bool databaseExists, int pendingMigrationCount)
+    {
+        if (!databaseExists && !allowCreate)
+            return BootstrapAction.RefuseMissingDatabase;
+        if (!migrateEnabled && pendingMigrationCount > 0)
+            return BootstrapAction.RefusePendingMigrations;
+        return BootstrapAction.Migrate;
+    }
 
-    internal const string LegacySqlServerUpgrade = """
-        IF OBJECT_ID(N'AdsPlanApprovals', N'U') IS NULL
-        CREATE TABLE AdsPlanApprovals (
-            PlanHash nvarchar(71) NOT NULL PRIMARY KEY,
-            PlanJson nvarchar(max) NOT NULL,
-            Status nvarchar(20) NOT NULL,
-            ApprovedBy nvarchar(320) NOT NULL,
-            ApprovedByUserId nvarchar(64) NOT NULL,
-            ApprovedAtUtc datetime2 NOT NULL DEFAULT GETUTCDATE(),
-            RevertPlanJson nvarchar(max) NULL);
-        IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NULL
-        CREATE TABLE AdsPlanApplyEvents (
-            Id int IDENTITY(1,1) NOT NULL PRIMARY KEY,
-            ApplyId uniqueidentifier NOT NULL,
-            PlanHash nvarchar(71) NOT NULL,
-            PlanJson nvarchar(max) NOT NULL,
-            SubscriptionId nvarchar(64) NOT NULL,
-            ResourceGroupName nvarchar(90) NOT NULL,
-            TargetScope nvarchar(300) NULL,
-            DeploymentName nvarchar(64) NOT NULL,
-            ApprovedBy nvarchar(320) NOT NULL,
-            ApprovedByUserId nvarchar(64) NOT NULL,
-            ApprovedAtUtc datetime2 NOT NULL,
-            PreviewEvidence nvarchar(64) NULL,
-            RevertPlanHash nvarchar(71) NULL,
-            RevertPlanJson nvarchar(max) NULL,
-            EventType nvarchar(16) NOT NULL,
-            Detail nvarchar(1024) NULL,
-            TimestampUtc datetime2 NOT NULL);
-        IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND INDEXPROPERTY(OBJECT_ID(N'AdsPlanApplyEvents'), N'IX_AdsPlanApplyEvents_ApplyId', 'IndexID') IS NULL
-        CREATE INDEX IX_AdsPlanApplyEvents_ApplyId ON AdsPlanApplyEvents (ApplyId);
-        IF OBJECT_ID(N'AdsPlanApprovals', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApprovals', N'RevertPlanJson') IS NULL
-        ALTER TABLE AdsPlanApprovals ADD RevertPlanJson nvarchar(max) NULL;
-        IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApplyEvents', N'RevertPlanHash') IS NULL
-        ALTER TABLE AdsPlanApplyEvents ADD RevertPlanHash nvarchar(71) NULL;
-        IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApplyEvents', N'RevertPlanJson') IS NULL
-        ALTER TABLE AdsPlanApplyEvents ADD RevertPlanJson nvarchar(max) NULL;
-        IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApplyEvents', N'TargetScope') IS NULL
-        ALTER TABLE AdsPlanApplyEvents ADD TargetScope nvarchar(300) NULL;
-        IF OBJECT_ID(N'AdsGuardrailPolicies', N'U') IS NULL
-        CREATE TABLE AdsGuardrailPolicies (
-            Id int NOT NULL PRIMARY KEY,
-            Json nvarchar(max) NOT NULL,
-            UpdatedBy nvarchar(320) NOT NULL,
-            UpdatedByUserId nvarchar(64) NOT NULL,
-            UpdatedAtUtc datetime2 NOT NULL);
-        IF OBJECT_ID(N'AdsDecomApprovals', N'U') IS NULL
-        CREATE TABLE AdsDecomApprovals (
-            ExecutionHash nvarchar(71) NOT NULL PRIMARY KEY,
-            WindowId nvarchar(64) NOT NULL,
-            PlanHash nvarchar(71) NOT NULL,
-            SubscriptionId nvarchar(64) NOT NULL,
-            ApprovedBy nvarchar(320) NOT NULL,
-            ApprovedByUserId nvarchar(64) NOT NULL,
-            ApprovedAtUtc datetime2 NOT NULL);
-        IF OBJECT_ID(N'AdsDecomWindowEvents', N'U') IS NULL
-        CREATE TABLE AdsDecomWindowEvents (
-            Id uniqueidentifier NOT NULL PRIMARY KEY,
-            ApplyId uniqueidentifier NOT NULL,
-            Event nvarchar(16) NOT NULL,
-            WindowId nvarchar(64) NOT NULL,
-            PlanHash nvarchar(71) NOT NULL,
-            ExecutionHash nvarchar(71) NOT NULL,
-            SubscriptionId nvarchar(64) NOT NULL,
-            Principal nvarchar(320) NOT NULL,
-            Detail nvarchar(1024) NULL,
-            AtUtc datetime2 NOT NULL);
-        IF OBJECT_ID(N'AdsDecomWindowEvents', N'U') IS NOT NULL AND INDEXPROPERTY(OBJECT_ID(N'AdsDecomWindowEvents'), N'IX_AdsDecomWindowEvents_ApplyId', 'IndexID') IS NULL
-        CREATE INDEX IX_AdsDecomWindowEvents_ApplyId ON AdsDecomWindowEvents (ApplyId);
-        """;
+    private static void MigrateSqlServer(DesignDbContext db, IConfiguration configuration, ILogger logger)
+    {
+        var migrateEnabled = ReadFlag(configuration, MigrateKey, defaultValue: true);
+        var allowCreate = ReadFlag(configuration, AllowCreateKey, defaultValue: false);
+
+        var exists = db.GetService<IRelationalDatabaseCreator>().Exists();
+        var pending = exists
+            ? db.Database.GetPendingMigrations().Count()
+            : db.Database.GetMigrations().Count();
+
+        switch (Decide(migrateEnabled, allowCreate, exists, pending))
+        {
+            case BootstrapAction.RefuseMissingDatabase:
+                throw new InvalidOperationException(
+                    "The SQL Server database in the connection string does not exist, and the server will not create it. " +
+                    $"{AllowCreateKey}=true lets the server create it; it is meant for the first deployment only, " +
+                    "so check the connection string for a typo before setting it. See docs/database-operations.md.");
+
+            case BootstrapAction.RefusePendingMigrations:
+                throw new InvalidOperationException(
+                    $"The SQL Server database has {pending} pending migration(s) and {MigrateKey} is false, so the server will not start. " +
+                    "Apply them with: dotnet ef database update --context SqlServerDesignDbContext --project src/AzureDesignStudio.Server " +
+                    $"(or set {MigrateKey}=true after taking a backup).");
+
+            default:
+                var applied = db.Database.GetPendingMigrations().ToList();
+                db.Database.Migrate();
+                if (applied.Count > 0)
+                    logger.LogInformation("Applied {Count} database migration(s): {Migrations}", applied.Count, string.Join(", ", applied));
+                break;
+        }
+    }
+
+    /// <summary>A boolean setting; a value that is not true or false stops the host instead of guessing.</summary>
+    private static bool ReadFlag(IConfiguration configuration, string key, bool defaultValue)
+    {
+        var value = configuration[key];
+        if (string.IsNullOrWhiteSpace(value))
+            return defaultValue;
+        if (bool.TryParse(value.Trim(), out var flag))
+            return flag;
+        throw new InvalidOperationException($"{key} is \"{value}\", which is not true or false.");
+    }
 }
