@@ -23,11 +23,15 @@ last_mapped_at: 2026-10-21
 - Management locks: `Microsoft.Authorization/locks?api-version=2020-05-01` (`src/AzureDesignStudio.Discovery/Security/ResourceLockClient.cs`)
 - Name availability: `checkNameAvailability` per provider for storage, SQL, Key Vault, container registry, AI Search, SignalR (location-scoped), Web/Function apps and APIM, with per-family api-versions (`src/AzureDesignStudio.Discovery/Naming/NameAvailabilityClient.cs`)
 - Management groups: `providers/Microsoft.Management/managementGroups?api-version=2023-04-01`; subscriptions: `/subscriptions?api-version={ArmEndpointSet.ApiVersion}` (`src/AzureDesignStudio.Discovery/Arm/TenantInventory.cs`)
+- Policy preflight (Wave B2): `POST /subscriptions/{sub}[/resourceGroups/{rg}]/providers/Microsoft.PolicyInsights/checkPolicyRestrictions?api-version=2024-10-01`, one per created/modified resource (at most 50, 3 at a time), body `resourceDetails { resourceContent (scrubbed of secrets), apiVersion, scope (child resources only: the parent id) }` + `includeAuditEffect: true`, no `pendingFields`; needs `Microsoft.PolicyInsights/checkPolicyRestrictions/read` (`src/AzureDesignStudio.Discovery/Preflight/PolicyPreflight.cs`)
+- Quota preflight (Wave B4), per location with demand: `GET /subscriptions/{sub}/providers/Microsoft.Compute/skus?api-version=2021-07-01&$filter=location eq '{loc}'`, `GET /subscriptions/{sub}/providers/Microsoft.Compute/locations/{loc}/usages?api-version=2026-04-01`, `GET /subscriptions/{sub}/providers/Microsoft.Network/locations/{loc}/usages?api-version=2026-01-01`; needs `Microsoft.Compute/skus/read`, `Microsoft.Compute/locations/usages/read`, `Microsoft.Network/locations/usages/read` (`src/AzureDesignStudio.Discovery/Preflight/QuotaPreflight.cs`)
+- Both preflights run inside the `WhatIf` RPC after a successful what-if, together and within a 30 s budget, on the request's "arm" HttpClient (`AddPolicyPreflightAsync` / `AddQuotaPreflightAsync` in `src/AzureDesignStudio.Services/DeployService.cs`); advisory, every failure is a note
 
 **Azure Resource Graph (ARG):**
 - Every tenant scan, change feed and topology collector: `POST {endpoint}/providers/Microsoft.ResourceGraph/resources?api-version=2024-04-01` (`src/AzureDesignStudio.Discovery/ResourceGraph/ResourceGraphClient.cs`)
 - Pagination via `$skipToken` (1 000 rows/page), quota backoff from `x-ms-user-quota-remaining`/`x-ms-user-quota-resets-after`, concurrency gate of 4 (`ResourceGraphOptions` in `src/AzureDesignStudio.Discovery/ResourceGraph/ResourceGraphModels.cs`)
 - `resourcechanges` table for change history with caller attribution (`src/AzureDesignStudio.Discovery/ChangeFeed/ChangeFeedCollector.cs`)
+- Governance sources (Wave B3), optional per scan, one worker per source and subscription group (checkpointed as `"{source}:{groupKey}"`; the Defender worker runs two queries, assessments then pricings, and the group counts as complete only when both finish untruncated) on the same endpoint and `$skipToken` paging: `advisorresources` (`microsoft.advisor/recommendations`), `policyresources` (`microsoft.policyinsights/policystates`, NonCompliant), `securityresources` (`microsoft.security/assessments`, Unhealthy; `microsoft.security/pricings` for Defender plan tiers) (`src/AzureDesignStudio.Discovery/Governance/GovernanceQueries.cs`, run by `ScanEngine`); stored in the workspace `GovernanceFindings` table
 - China cloud reports `ArgSupported=false` and must refuse graph-backed scans (`src/AzureDesignStudio.Discovery/Arm/CloudProfile.cs`)
 
 **Azure Retail Prices API:**
@@ -62,7 +66,7 @@ last_mapped_at: 2026-10-21
 **MCP (Model Context Protocol) stdio server:**
 - Entry point `src/AzureDesignStudio.Mcp/Program.cs` — `AddMcpServer().WithStdioServerTransport().WithTools<AdsMcpTools>()`; stdout is the protocol channel, all logging rebound to stderr
 - Database resolution order: `--db <path>` → `ADS_WORKSPACE_DB` env var → `%LOCALAPPDATA%\Azure Design Studio\AzureDesignStudio.Desktop\Data\workspace.db`
-- 13 read-only tools in `src/AzureDesignStudio.Mcp/AdsMcpTools.cs`: `ads_scans_list`, `ads_scan_get`, `ads_scan_inventory`, `ads_scan_diff`, `ads_changes_since`, `ads_cost_summary`, `ads_designs_list`, `ads_design_get`, `ads_exposure`, `ads_reach`, `ads_unmanaged`, `ads_decom_plan`, `ads_decom_windows`
+- 15 read-only tools in `src/AzureDesignStudio.Mcp/AdsMcpTools.cs`: `ads_scans_list`, `ads_scan_get`, `ads_scan_inventory`, `ads_scan_diff`, `ads_changes_since`, `ads_cost_summary`, `ads_designs_list`, `ads_design_get`, `ads_design_lint`, `ads_exposure`, `ads_reach`, `ads_governance`, `ads_unmanaged`, `ads_decom_plan`, `ads_decom_windows`
 - Read-only by construction: `SqliteOpenMode.ReadOnly` + shared cache (`src/AzureDesignStudio.Mcp/AdsWorkspace.cs`); no tool calls ARM
 - Tool logic is delegated to the pure engine in `src/AzureDesignStudio.Discovery/Mcp/AdsToolEngine.cs`
 
@@ -79,7 +83,7 @@ last_mapped_at: 2026-10-21
   - Client: `DesignDbContext` in `src/AzureDesignStudio.Server/Models/DesignDbContext.cs` (`AdsDesigns`, `AzureSubscriptions`, `AdsPlanApprovals`, `AdsPlanApplyEvents`, `AdsGuardrailPolicies`, `AdsDecomApprovals`, `AdsDecomWindowEvents`)
   - Schema bootstrap is `EnsureCreated()` plus raw `CREATE TABLE/ALTER TABLE` guards in `src/AzureDesignStudio.Server/Program.cs`
 - Desktop workspace — SQLite file `workspace.db` under `FileSystem.Current.AppDataDirectory` (`src/AzureDesignStudio.Desktop/MauiProgram.cs`, `src/AzureDesignStudio.Workspace/WorkspaceDbContext.cs`)
-  - Tables: `Designs`, `Scans`, `ResourceSnapshots`, `CostCache`, `ExecutionPlans`, `AuditRecords`, `NodePositions`, `ChangeFeed`, `DecomWindows`
+  - Tables: `Designs`, `Scans`, `ResourceSnapshots`, `CostCache`, `ExecutionPlans`, `AuditRecords`, `NodePositions`, `ChangeFeed`, `DecomWindows`, `GovernanceFindings`
   - Bootstrap: `EnsureCreated()` + additive `ALTER TABLE`/`CREATE TABLE IF NOT EXISTS` in `WorkspaceDb` (`src/AzureDesignStudio.Workspace/WorkspaceDbContext.cs`)
 - Tests — SQLite provider (`src/AzureDesignStudio.Core.Tests/AzureDesignStudio.Core.Tests.csproj`)
 

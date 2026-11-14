@@ -8,7 +8,7 @@
       ],
       "TypeKey": "virtual-network",
       "ImagePath": "assets/azure/virtual-network.svg",
-      "Id": "a9888928-cf93-4031-8751-6cf80592a677",
+      "Id": "771db69e-5ed4-4c94-97fe-72da2cc21f51",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -28,9 +28,10 @@
     {
       "AddressPrefix": "10.0.1.0/26",
       "Delegation": "",
+      "PrivateSubnet": false,
       "TypeKey": "subnet",
       "ImagePath": "assets/azure/subnet.svg",
-      "Id": "a2614204-3b12-4d41-a647-a325882ca500",
+      "Id": "92bd7af5-d4a9-47ee-a674-3f87b6f20ae2",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -42,7 +43,7 @@
         "Width": 141,
         "Height": 141
       },
-      "GroupId": "a9888928-cf93-4031-8751-6cf80592a677",
+      "GroupId": "771db69e-5ed4-4c94-97fe-72da2cc21f51",
       "Name": "AzureFirewallSubnet",
       "Location": "[parameters(\u0027location\u0027)]",
       "UseResourceGroupLocation": true
@@ -50,9 +51,10 @@
     {
       "AddressPrefix": "10.0.2.0/26",
       "Delegation": "",
+      "PrivateSubnet": false,
       "TypeKey": "subnet",
       "ImagePath": "assets/azure/subnet.svg",
-      "Id": "216564e9-eb85-45f1-8b9b-d5e8d649643a",
+      "Id": "9ea9edee-4779-4ac0-88fd-fa5281069b68",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -64,7 +66,7 @@
         "Width": 141,
         "Height": 141
       },
-      "GroupId": "a9888928-cf93-4031-8751-6cf80592a677",
+      "GroupId": "771db69e-5ed4-4c94-97fe-72da2cc21f51",
       "Name": "AzureBastionSubnet",
       "Location": "[parameters(\u0027location\u0027)]",
       "UseResourceGroupLocation": true
@@ -72,9 +74,10 @@
     {
       "AddressPrefix": "10.0.3.0/27",
       "Delegation": "",
+      "PrivateSubnet": false,
       "TypeKey": "subnet",
       "ImagePath": "assets/azure/subnet.svg",
-      "Id": "cc8a228e-2ab6-4722-bc05-07f7c999fde0",
+      "Id": "772867b1-fe97-4869-a897-7fc74ba70a00",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -86,7 +89,7 @@
         "Width": 351,
         "Height": 110
       },
-      "GroupId": "a9888928-cf93-4031-8751-6cf80592a677",
+      "GroupId": "771db69e-5ed4-4c94-97fe-72da2cc21f51",
       "Name": "GatewaySubnet",
       "Location": "[parameters(\u0027location\u0027)]",
       "UseResourceGroupLocation": true
@@ -99,7 +102,7 @@
       ],
       "TypeKey": "virtual-network",
       "ImagePath": "assets/azure/virtual-network.svg",
-      "Id": "5e181b70-dbc9-4b5a-8f54-37a4d5453167",
+      "Id": "a43bad3d-90c8-432f-8063-9d9719ee07d9",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -119,9 +122,10 @@
     {
       "AddressPrefix": "10.1.1.0/24",
       "Delegation": "",
+      "PrivateSubnet": false,
       "TypeKey": "subnet",
       "ImagePath": "assets/azure/subnet.svg",
-      "Id": "c63d18fb-a177-4582-8948-8b12fcbb8dba",
+      "Id": "83c65435-1b26-4d76-9c2e-30478d399f48",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -133,7 +137,7 @@
         "Width": 141,
         "Height": 141
       },
-      "GroupId": "5e181b70-dbc9-4b5a-8f54-37a4d5453167",
+      "GroupId": "a43bad3d-90c8-432f-8063-9d9719ee07d9",
       "Name": "snet-workload",
       "Location": "[parameters(\u0027location\u0027)]",
       "UseResourceGroupLocation": true
@@ -146,7 +150,7 @@
       ],
       "TypeKey": "virtual-network",
       "ImagePath": "assets/azure/virtual-network.svg",
-      "Id": "dd2fbde6-375b-4cd4-9261-99e7fdbb027f",
+      "Id": "ead2423a-c2fa-422c-a302-9d8c52b21e36",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -166,9 +170,10 @@
     {
       "AddressPrefix": "10.2.1.0/24",
       "Delegation": "",
+      "PrivateSubnet": false,
       "TypeKey": "subnet",
       "ImagePath": "assets/azure/subnet.svg",
-      "Id": "7c13b3cb-4c90-414a-98f5-8ffea8bf15c1",
+      "Id": "6c64d84e-9a33-4392-8b37-2485f6755c89",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -180,7 +185,7 @@
         "Width": 141,
         "Height": 141
       },
-      "GroupId": "dd2fbde6-375b-4cd4-9261-99e7fdbb027f",
+      "GroupId": "ead2423a-c2fa-422c-a302-9d8c52b21e36",
       "Name": "snet-workload",
       "Location": "[parameters(\u0027location\u0027)]",
       "UseResourceGroupLocation": true
@@ -212,7 +217,7 @@
       },
       "TypeKey": "azure-firewall",
       "ImagePath": "assets/azure/azure-firewall.svg",
-      "Id": "926af1a1-c51d-46fe-a269-3e5ab8d8ee67",
+      "Id": "c5d2e68d-6e3a-43e5-9919-b13798674cee",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -224,7 +229,7 @@
         "Width": 81,
         "Height": 81
       },
-      "GroupId": "a2614204-3b12-4d41-a647-a325882ca500",
+      "GroupId": "92bd7af5-d4a9-47ee-a674-3f87b6f20ae2",
       "Name": "afw-hub",
       "Location": "[parameters(\u0027location\u0027)]",
       "UseResourceGroupLocation": true
@@ -232,7 +237,7 @@
     {
       "TypeKey": "azure-bastions",
       "ImagePath": "assets/azure/azure-bastions.svg",
-      "Id": "bf5946ec-7b3e-4206-8884-e51d94ab2daa",
+      "Id": "4905bca5-1405-4a87-a25b-fc8c6d303d72",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -244,7 +249,7 @@
         "Width": 81,
         "Height": 81
       },
-      "GroupId": "216564e9-eb85-45f1-8b9b-d5e8d649643a",
+      "GroupId": "9ea9edee-4779-4ac0-88fd-fa5281069b68",
       "Name": "bas-hub",
       "Location": "[parameters(\u0027location\u0027)]",
       "UseResourceGroupLocation": true
@@ -256,7 +261,7 @@
       "Tier": "Regional",
       "TypeKey": "public-ip",
       "ImagePath": "assets/azure/public-ip.svg",
-      "Id": "dccd1ba2-d0a1-4854-811c-c673987c14c8",
+      "Id": "42b2e6d8-c043-40ce-9b24-9286d57506ab",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -280,7 +285,7 @@
       "Tier": "Regional",
       "TypeKey": "public-ip",
       "ImagePath": "assets/azure/public-ip.svg",
-      "Id": "56f66b41-0220-4c1b-a8ca-ed94dea2b020",
+      "Id": "bfe8c1ee-9a0b-4ff2-a664-580e654f5ad1",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -298,12 +303,14 @@
       "UseResourceGroupLocation": true
     },
     {
-      "VmSize": "Standard_D2s_v6",
+      "SkuName": "Standard_D2s_v6",
+      "Capacity": 2,
+      "Overprovision": true,
       "OsImage": "ubuntu-22.04",
       "AdminUsername": "azureuser",
-      "TypeKey": "virtual-machine",
-      "ImagePath": "assets/azure/virtual-machine.svg",
-      "Id": "d2f86746-3e47-4dbe-b576-e0c6de342534",
+      "TypeKey": "virtual-machine-scale-set",
+      "ImagePath": "assets/azure/virtual-machine-scale-set.svg",
+      "Id": "bdb5b171-caa8-4892-b337-c1f1b0a62596",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -315,18 +322,20 @@
         "Width": 81,
         "Height": 81
       },
-      "GroupId": "c63d18fb-a177-4582-8948-8b12fcbb8dba",
-      "Name": "vm-spoke-1",
+      "GroupId": "83c65435-1b26-4d76-9c2e-30478d399f48",
+      "Name": "vmss-spoke-1",
       "Location": "[parameters(\u0027location\u0027)]",
       "UseResourceGroupLocation": true
     },
     {
-      "VmSize": "Standard_D2s_v6",
+      "SkuName": "Standard_D2s_v6",
+      "Capacity": 2,
+      "Overprovision": true,
       "OsImage": "ubuntu-22.04",
       "AdminUsername": "azureuser",
-      "TypeKey": "virtual-machine",
-      "ImagePath": "assets/azure/virtual-machine.svg",
-      "Id": "f19bb34a-cc46-44be-885f-fa3312095dea",
+      "TypeKey": "virtual-machine-scale-set",
+      "ImagePath": "assets/azure/virtual-machine-scale-set.svg",
+      "Id": "4dbe4d67-6ae8-4802-bbfd-af402d48af72",
       "ArmId": "",
       "Locked": false,
       "Position": {
@@ -338,35 +347,35 @@
         "Width": 81,
         "Height": 81
       },
-      "GroupId": "7c13b3cb-4c90-414a-98f5-8ffea8bf15c1",
-      "Name": "vm-spoke-2",
+      "GroupId": "6c64d84e-9a33-4392-8b37-2485f6755c89",
+      "Name": "vmss-spoke-2",
       "Location": "[parameters(\u0027location\u0027)]",
       "UseResourceGroupLocation": true
     }
   ],
   "Links": [
     {
-      "SourcePortParentId": "dccd1ba2-d0a1-4854-811c-c673987c14c8",
+      "SourcePortParentId": "42b2e6d8-c043-40ce-9b24-9286d57506ab",
       "SourcePortAlignment": 4,
-      "TargetPortParentId": "926af1a1-c51d-46fe-a269-3e5ab8d8ee67",
+      "TargetPortParentId": "c5d2e68d-6e3a-43e5-9919-b13798674cee",
       "TargetPortAlignment": 0
     },
     {
-      "SourcePortParentId": "56f66b41-0220-4c1b-a8ca-ed94dea2b020",
+      "SourcePortParentId": "bfe8c1ee-9a0b-4ff2-a664-580e654f5ad1",
       "SourcePortAlignment": 4,
-      "TargetPortParentId": "bf5946ec-7b3e-4206-8884-e51d94ab2daa",
+      "TargetPortParentId": "4905bca5-1405-4a87-a25b-fc8c6d303d72",
       "TargetPortAlignment": 0
     },
     {
-      "SourcePortParentId": "5e181b70-dbc9-4b5a-8f54-37a4d5453167",
+      "SourcePortParentId": "a43bad3d-90c8-432f-8063-9d9719ee07d9",
       "SourcePortAlignment": 2,
-      "TargetPortParentId": "a9888928-cf93-4031-8751-6cf80592a677",
+      "TargetPortParentId": "771db69e-5ed4-4c94-97fe-72da2cc21f51",
       "TargetPortAlignment": 6
     },
     {
-      "SourcePortParentId": "a9888928-cf93-4031-8751-6cf80592a677",
+      "SourcePortParentId": "771db69e-5ed4-4c94-97fe-72da2cc21f51",
       "SourcePortAlignment": 2,
-      "TargetPortParentId": "dd2fbde6-375b-4cd4-9261-99e7fdbb027f",
+      "TargetPortParentId": "ead2423a-c2fa-422c-a302-9d8c52b21e36",
       "TargetPortAlignment": 6
     }
   ]

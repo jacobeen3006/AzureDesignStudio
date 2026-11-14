@@ -2,8 +2,10 @@ using System.ComponentModel;
 using System.Text.Json;
 using AzureDesignStudio.Core.Common;
 using AzureDesignStudio.Core.DTO;
+using AzureDesignStudio.Core.Validation;
 using AzureDesignStudio.Discovery.Inventory;
 using AzureDesignStudio.Discovery.Mcp;
+using AzureDesignStudio.Discovery.Scan;
 using AzureDesignStudio.Discovery.Unmanaged;
 using AzureDesignStudio.Workspace;
 using Microsoft.Extensions.Logging;
@@ -13,9 +15,9 @@ using ModelContextProtocol.Server;
 namespace AzureDesignStudio.Mcp;
 
 /// <summary>
-/// The 13 read-only tools of the local MCP server (v2 [93]): workspace truth (scans,
-/// inventory, diffs, changes, cost cache, designs, exposure, reachability, unmanaged,
-/// decommission planning, windows) over the desktop workspace database. No tool here
+/// The 15 read-only tools of the local MCP server (v2 [93]): workspace truth (scans,
+/// inventory, diffs, changes, cost cache, designs, design lint, exposure, reachability, governance,
+/// unmanaged, decommission planning, windows) over the desktop workspace database. No tool here
 /// mutates the workspace or calls ARM; the decommission tool is PLAN-ONLY - the purge
 /// never runs from here.
 /// </summary>
@@ -186,6 +188,25 @@ public sealed class AdsMcpTools(AdsWorkspace workspace, ILogger<AdsMcpTools> log
         return new DesignGetView(design.Id, design.Name, design.Data, text, caveat, design.Pending, design.SavedAt);
     }
 
+    [McpServerTool(Name = "ads_design_lint", ReadOnly = true)]
+    [Description("Checks one saved design offline: validation issues (errors block deployment) and Well-Architected advice (rule id, pillar, severity, resource name, message, Microsoft Learn link). Deterministic; reads only the local workspace; never contacts Azure.")]
+    public async Task<DesignLintView> AdsDesignLint([Description("The stored design id (exact).")] string designId)
+    {
+        var design = await workspace.GetDesignAsync(designId);
+        if (design is null)
+            throw new McpException($"design not found: {designId}");
+
+        try
+        {
+            var report = DesignCheck.Run(design.Data);
+            return new DesignLintView(design.Id, design.Name, report.Issues, report.Findings, DesignLinter.Rules.Count);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new McpException(ex.Message);
+        }
+    }
+
     [McpServerTool(Name = "ads_exposure", ReadOnly = true)]
     [Description("Internet-exposure findings over a scan's inventory (open NSG inbound rules, public IPs, public PaaS endpoints, unapproved private endpoints). Read-only.")]
     public async Task<ExposureReport> AdsExposure([Description("The stored scan id (exact).")] string scanId)
@@ -207,6 +228,37 @@ public sealed class AdsMcpTools(AdsWorkspace workspace, ILogger<AdsMcpTools> log
         return malformed == 0
             ? answer
             : answer with { Caveats = [.. answer.Caveats, .. MalformedCaveats(malformed)] };
+    }
+
+    [McpServerTool(Name = "ads_governance", ReadOnly = true)]
+    [Description("Governance findings stored with one scan: Advisor recommendations, non-compliant Azure Policy states and unhealthy Defender for Cloud assessments, per resource, with the collection state of each source. Reads only the local workspace; never contacts Azure.")]
+    public async Task<GovernanceReport> AdsGovernance(
+        [Description("The stored scan id (exact).")] string scanId,
+        [Description("Only this source: advisor | policy | defender (case-insensitive); omit for all three.")] string? source = null,
+        [Description("Only findings about this resource (whole ARM id, case-insensitive).")] string? resourceId = null,
+        [Description("How many findings to return, most severe first; 200 default, 1000 max.")] int limit = 200)
+    {
+        var scan = await RequireScanAsync(scanId);
+        var stored = await workspace.ListGovernanceAsync(scan.Id);
+
+        GovernanceReport report;
+        try
+        {
+            report = AdsToolEngine.Governance(ScanManifest.Read(scan.ManifestJson), stored.Findings, stored.Malformed,
+                source, resourceId, limit);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new McpException(ex.Message);
+        }
+
+        return stored.TableMissing
+            ? report with
+            {
+                Caveats = [.. report.Caveats,
+                    "The workspace has no governance findings table yet (the desktop app adds it on its first run after an update), so no findings could be read."],
+            }
+            : report;
     }
 
     [McpServerTool(Name = "ads_unmanaged", ReadOnly = true)]
@@ -439,6 +491,10 @@ public sealed record DesignView(
 public sealed record DesignGetView(
     string Id, string Name, string ContentJson, string? AdsDesignText,
     string? TextCaveat, bool Pending, DateTimeOffset SavedAt);
+
+/// <summary>Validation issues and Well-Architected findings of one saved design (ads_design_lint).</summary>
+public sealed record DesignLintView(
+    string Id, string Name, IReadOnlyList<ValidationIssue> Issues, IReadOnlyList<LintFinding> Findings, int RuleCount);
 
 /// <summary>The unmanaged audit plus the policy source and caveats (ads_unmanaged).</summary>
 public sealed record UnmanagedView(UnmanagedReport Report, string PolicySource, IReadOnlyList<string> Caveats);

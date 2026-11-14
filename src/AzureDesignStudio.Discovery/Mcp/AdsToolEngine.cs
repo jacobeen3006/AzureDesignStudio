@@ -2,7 +2,9 @@ using AzureDesignStudio.Discovery.Analysis;
 using AzureDesignStudio.Discovery.Decommission;
 using AzureDesignStudio.Discovery.Drift;
 using AzureDesignStudio.Discovery.Exposure;
+using AzureDesignStudio.Discovery.Governance;
 using AzureDesignStudio.Discovery.Inventory;
+using AzureDesignStudio.Discovery.Scan;
 using AzureDesignStudio.Discovery.Unmanaged;
 
 namespace AzureDesignStudio.Discovery.Mcp;
@@ -161,6 +163,102 @@ public static class AdsToolEngine
             purgeNotBefore,
             plan.Caveats.Concat(NotEvaluatedCaveats).ToList());
     }
+
+    /// <summary>The state of a source on a scan whose manifest predates governance collection.</summary>
+    public const string NotCollected = "not collected";
+
+    /// <summary>The state of a source the scan's manifest does not answer for (no readable manifest, or no entry).</summary>
+    public const string Unknown = "unknown";
+
+    /// <summary>
+    /// Governance findings stored with one scan (Wave B3), read together with the state of each
+    /// source from the scan's <paramref name="manifest"/>, so that a source that was not collected
+    /// in full never reads as "no findings". <paramref name="source"/> (advisor, policy or defender,
+    /// any case) and <paramref name="resourceId"/> (the whole ARM id, any case) filter the rows;
+    /// blank means off, and an unknown source name throws <see cref="ArgumentException"/>.
+    /// <paramref name="limit"/> is clamped to 1..1000. <paramref name="malformed"/> is how many
+    /// stored rows the host could not read; the caveats say so.
+    /// </summary>
+    public static GovernanceReport Governance(ScanManifest? manifest, IReadOnlyList<GovernanceFinding> rows, int malformed,
+        string? source, string? resourceId, int limit)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        string? only = null;
+        if (!string.IsNullOrWhiteSpace(source))
+            only = GovernanceSources.All.FirstOrDefault(s => s.Equals(source.Trim(), StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentException(
+                    $"unknown governance source '{source}': use advisor, policy or defender", nameof(source));
+        var id = string.IsNullOrWhiteSpace(resourceId) ? null : resourceId.Trim();
+        var lim = Math.Clamp(limit, 1, 1000);
+
+        var stored = rows.Where(r => r is not null).ToList();
+        var matching = stored
+            .Where(r => only is null || KeyOf(r.Source) == only)
+            .Where(r => id is null || string.Equals(r.ResourceId, id, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(r => r.Severity)
+            .ThenBy(r => r.ResourceId, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Source)
+            .ThenBy(r => r.Title, StringComparer.Ordinal)
+            // Ties broken ordinally; a record id is unique per source within a scan, so the order is total.
+            .ThenBy(r => r.ResourceId, StringComparer.Ordinal)
+            .ThenBy(r => r.RecordId, StringComparer.Ordinal)
+            .ToList();
+
+        var sources = GovernanceSources.All
+            .Select(key =>
+            {
+                var (state, detail) = StateOf(manifest, key);
+                return new GovernanceSourceView(key, state, detail, stored.Count(r => KeyOf(r.Source) == key));
+            })
+            .ToList();
+
+        var caveats = new List<string>(GovernanceCaveats.All);
+        foreach (var s in sources)
+            if (s.State != SourceState.Collected && (only is null || s.Source == only))
+                caveats.Add($"{s.Source} is {s.State} for this scan, so a missing {s.Source} finding is not proof of none.");
+        if (malformed > 0)
+            caveats.Add($"{malformed} malformed governance row(s) skipped (unknown source or severity).");
+
+        return new GovernanceReport(
+            sources,
+            new GovernanceSourceCounts(
+                matching.Count(r => r.Source == GovernanceSource.Advisor),
+                matching.Count(r => r.Source == GovernanceSource.Policy),
+                matching.Count(r => r.Source == GovernanceSource.Defender)),
+            new GovernanceSeverityCounts(
+                matching.Count(r => r.Severity == GovernanceSeverity.High),
+                matching.Count(r => r.Severity == GovernanceSeverity.Medium),
+                matching.Count(r => r.Severity == GovernanceSeverity.Low)),
+            matching.Take(lim).Select(ToView).ToList(),
+            matching.Count,
+            matching.Count > lim,
+            caveats);
+    }
+
+    private static (string State, string? Detail) StateOf(ScanManifest? manifest, string source)
+    {
+        if (manifest is null)
+            return (Unknown, "The scan has no readable manifest (it is still running, was interrupted, or predates manifests), so how far this source got is unknown.");
+        if (manifest.Sources is null)
+            return (NotCollected, "The scan predates governance collection.");
+        return manifest.Sources.TryGetValue(source, out var state)
+            ? (state.State, state.Detail)
+            : (Unknown, "The scan manifest does not mention this source.");
+    }
+
+    /// <summary>The stored source name (<see cref="GovernanceSources"/>) of a finding's source.</summary>
+    private static string KeyOf(GovernanceSource source) => source switch
+    {
+        GovernanceSource.Advisor => GovernanceSources.Advisor,
+        GovernanceSource.Policy => GovernanceSources.Policy,
+        GovernanceSource.Defender => GovernanceSources.Defender,
+        _ => source.ToString().ToLowerInvariant(),
+    };
+
+    private static GovernanceRowView ToView(GovernanceFinding f) =>
+        new(KeyOf(f.Source), f.Severity.ToString(), f.ResourceId, f.SubscriptionId, f.Category, f.Title, f.Detail,
+            f.PolicyAssignmentId, f.PolicyDefinitionId, f.RecordId);
 
     private static InventoryItemView ToView(InventoryItem i) =>
         new(i.Id, i.Name, i.Type, i.Location, i.ResourceGroup, i.SubscriptionId, i.Tags);

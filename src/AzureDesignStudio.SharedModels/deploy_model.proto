@@ -14,6 +14,9 @@ service Deploy {
 	rpc GetDeploymentOperations(DeploymentOperationsRequest) returns(DeploymentOperationsResponse);
 	rpc PrepareRetry(PrepareRetryRequest) returns(PrepareRetryResponse);
 	rpc CreateStack(CreateStackRequest) returns(CreateStackResponse);
+	// Deployment-stacks what-if (api 2025-07-01): the preview that gates CreateStack. Its token is a
+	// stack token - a plain WhatIf token is refused by CreateStack and the other way round.
+	rpc StackWhatIf(StackWhatIfRequest) returns(StackWhatIfResponse);
 	// v2 plan 12.3 closer: read-only stack probe for the review screen (managed-vs-planned
 	// review [61]) and the desktop Stacks tab. exists=false with 200 is an honest "no such
 	// stack"; refusals carry codes only, never ARM bodies. When the request carries a
@@ -23,6 +26,11 @@ service Deploy {
 	// reads it at review and apply, so a client can never deploy around it by omitting it.
 	rpc SetGuardrailPolicy(GuardrailPolicyRequest) returns(GuardrailPolicyResponse);
 	rpc GetGuardrailPolicy(google.protobuf.Empty) returns(GuardrailPolicyResponse);
+	// Phase 5 (D-02, D-05): two audited per-tenant settings - allow-self-approval (default off) and
+	// the guardrail policy mode (replace by default, or merge). Guardrail.Admin only; the tenant is
+	// the caller's scope, never a request field. A Set replaces both settings (read, edit, write back).
+	rpc GetTenantSettings(google.protobuf.Empty) returns(TenantSettingsResponse);
+	rpc SetTenantSettings(TenantSettingsRequest) returns(TenantSettingsResponse);
 	// v2 plan 13.5: decommission window execution. Approval names the execution hash that
 	// binds the exact lock set; the app only lands and releases window-owned locks. Purge is
 	// NEVER executed here - it stays script-side behind its epoch guard.
@@ -102,11 +110,46 @@ message WhatIfResponse {
 	// the block verdict. A blocked review carries NO token - it cannot be approved or applied.
 	repeated GuardrailFlag guardrail_flags = 11;
 	bool guardrail_blocked = 12;
+	// Azure Policy preflight (Wave B2): advisory only - it never withholds the token or changes
+	// status_code. policy_notes carries the engine's notes followed by its caveats.
+	repeated PolicyFlag policy_flags = 13;
+	repeated string policy_notes = 14;
+	// Quota preflight (Wave B4): advisory only, like the policy preflight - it never withholds the
+	// token or changes status_code. quota_notes carries the engine's notes followed by its caveats.
+	repeated QuotaFlag quota_flags = 15;
+	repeated string quota_notes = 16;
 }
 
 message GuardrailFlag {
 	string resource_id = 1;
 	string reason = 2;
+}
+
+// One Azure Policy evaluation for one previewed resource. verdict is Deny, Audit or Other.
+message PolicyFlag {
+	string resource_id = 1;
+	string verdict = 2;
+	string effect = 3;
+	string policy_assignment_id = 4;
+	string policy_definition_id = 5;
+	string policy_definition_reference_id = 6;
+	string reason = 7;
+}
+
+// One quota in one location for the previewed batch: a VM family's vCPUs, the regional total
+// "cores", a public IP quota, or a VM size that cannot be deployed there. status is the
+// QuotaStatus name (Ok, NearLimit, Exceeds, Unknown, SkuUnavailable); requested counts only the
+// increase; vm_size and detail are empty when the engine gave none.
+message QuotaFlag {
+	string location = 1;
+	string quota_name = 2;
+	string display_name = 3;
+	int64 current = 4;
+	int64 limit = 5;
+	int64 requested = 6;
+	string status = 7;
+	string vm_size = 8;
+	string detail = 9;
 }
 
 message GuardrailPolicyRequest {
@@ -119,6 +162,23 @@ message GuardrailPolicyResponse {
 	string json = 3;
 	string updated_by = 4;
 	string updated_at = 5;
+	// True when the json is the inherited default policy because the scope has no row of its own.
+	// updated_by and updated_at are then empty: the default's author and time are never disclosed.
+	bool inherited = 6;
+}
+
+message TenantSettingsRequest {
+	bool allow_self_approval = 1;
+	string guardrail_policy_mode = 2;
+}
+
+message TenantSettingsResponse {
+	int32 status_code = 1;
+	string error_message = 2;
+	bool allow_self_approval = 3;
+	string guardrail_policy_mode = 4;
+	string updated_by = 5;
+	string updated_at = 6;
 }
 
 message PlanApprovalRequest {
@@ -202,6 +262,40 @@ message CreateStackRequest {
 	// denySettings.mode: "none" (default when empty), "denyDelete" or "denyWriteAndDelete".
 	string deny_mode = 14;
 	bool deny_apply_to_child_scopes = 15;
+}
+
+// Same fields as CreateStackRequest minus what_if_token and plan_hash (field numbers kept aligned).
+message StackWhatIfRequest {
+	string subscription_id = 1;
+	string resource_group_name = 2;
+	string stack_name = 3;
+	string arm_template = 4;
+	string parameters = 5;
+	string resources_action = 8;
+	string resource_groups_action = 9;
+	string management_groups_action = 10;
+	bool bypass_out_of_sync = 13;
+	string deny_mode = 14;
+	bool deny_apply_to_child_scopes = 15;
+}
+
+// plan_hash is the scope+template+parameters identity the approval binds (as WhatIf returns it);
+// what_if_token is bound to the exact stack body. An empty token with a status of 200 means the
+// preview could not be trusted (indeterminacy_reason) or a guardrail blocks it: nothing is deployable.
+message StackWhatIfResponse {
+	int32 status_code = 1;
+	string error_message = 2;
+	string what_if_token = 3;
+	string plan_hash = 4;
+	string changes_json = 5;
+	int32 creates = 6;
+	int32 modifies = 7;
+	int32 detaches = 8;
+	int32 deletes = 9;
+	repeated string caveats = 10;
+	string indeterminacy_reason = 11;
+	bool guardrail_blocked = 12;
+	repeated GuardrailFlag guardrail_flags = 13;
 }
 
 message GetStackRequest {

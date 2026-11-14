@@ -19,6 +19,15 @@ namespace AzureDesignStudio.Services.Models
                     .ToTable(t => t.HasCheckConstraint("ADS_CHECK_JSON", "ISJSON(DesignData)=1"));
             modelBuilder.Entity<PlanApplyEventModel>().HasIndex(e => e.ApplyId);
             modelBuilder.Entity<DecomWindowEventModel>().HasIndex(e => e.ApplyId);
+            // One policy row per scope. A nullable unique index admits any number of NULL rows on
+            // SQLite and is filtered to non-NULL values on SQL Server; the NULL-tenant default row
+            // is the single row with Id 1 (seeded by the operator), never written by an RPC.
+            modelBuilder.Entity<GuardrailPolicyModel>().HasIndex(e => e.TenantId).IsUnique();
+            modelBuilder.Entity<SecurityEventModel>().HasIndex(e => e.TenantId);
+            // Approvals are keyed by (scope, hash): two scopes approve the same hash without touching each
+            // other's row. The key order matters for FindAsync([scopeId, hash]).
+            modelBuilder.Entity<PlanApprovalModel>().HasKey(e => new { e.TenantId, e.PlanHash });
+            modelBuilder.Entity<DecomApprovalModel>().HasKey(e => new { e.TenantId, e.ExecutionHash });
         }
 
         public DbSet<DesignModel> AdsDesigns { get; set; } = null!;
@@ -28,6 +37,8 @@ namespace AzureDesignStudio.Services.Models
         public DbSet<GuardrailPolicyModel> AdsGuardrailPolicies { get; set; } = null!;
         public DbSet<DecomApprovalModel> AdsDecomApprovals { get; set; } = null!;
         public DbSet<DecomWindowEventModel> AdsDecomWindowEvents { get; set; } = null!;
+        public DbSet<TenantSettingsModel> AdsTenantSettings { get; set; } = null!;
+        public DbSet<SecurityEventModel> AdsSecurityEvents { get; set; } = null!;
     }
 
     public record DesignModel
@@ -54,8 +65,13 @@ namespace AzureDesignStudio.Services.Models
 
     public record PlanApprovalModel
     {
+        /// <summary>The caller's scope key (tenant id, or the user's object id for a personal account),
+        /// the first half of the key. Not the Azure tenant of a linked service principal. Approvals
+        /// pending when the column was added carry the empty GUID, which no caller has, so they match
+        /// nothing and must be approved again.</summary>
+        public Guid TenantId { get; set; }
+
         /// <summary>DeployPlanArtifact hash ("sha256:" + 64 hex) the approval is bound to.</summary>
-        [Key]
         [StringLength(71, MinimumLength = 71)]
         public string PlanHash { get; set; } = null!;
 
@@ -73,6 +89,11 @@ namespace AzureDesignStudio.Services.Models
         [StringLength(64, MinimumLength = 36)]
         public string ApprovedByUserId { get; set; } = null!;
 
+        /// <summary>User whose what-if produced the previewed change (the gate entry's requester);
+        /// null for an approval that predates the column.</summary>
+        [StringLength(64)]
+        public string? RequestedByUserId { get; set; }
+
         public DateTime ApprovedAtUtc { get; set; }
 
         /// <summary>Pre-deploy snapshot + undo entries derived from the live preview (v2 11.4);
@@ -80,9 +101,10 @@ namespace AzureDesignStudio.Services.Models
         public string? RevertPlanJson { get; set; }
     }
 
-    /// <summary>Server-side do-not-touch list (v2 13.1/[36-final]): one row (Id=1), the policy every
-    /// review and apply is judged against. Written only through SetGuardrailPolicy by an
-    /// authenticated principal; deploys never consult a client-supplied copy.</summary>
+    /// <summary>Server-side do-not-touch list (v2 13.1/[36-final]): one row per scope, the policy
+    /// every review and apply of that scope is judged against. The row with a NULL tenant (Id 1) is
+    /// the inherited default that governs a scope with no row of its own. Written only through
+    /// SetGuardrailPolicy by an authenticated principal; deploys never consult a client-supplied copy.</summary>
     public record GuardrailPolicyModel
     {
         // The single row is written with an explicit Id. By convention an int key is an
@@ -91,6 +113,10 @@ namespace AzureDesignStudio.Services.Models
         [Key]
         [System.ComponentModel.DataAnnotations.Schema.DatabaseGenerated(System.ComponentModel.DataAnnotations.Schema.DatabaseGeneratedOption.None)]
         public int Id { get; set; }
+
+        /// <summary>The scope this policy belongs to (tenant id, or the user's object id for a personal
+        /// account). NULL marks the operator-seeded default row; no RPC writes it.</summary>
+        public Guid? TenantId { get; set; }
 
         /// <summary>GuardrailPolicy.FromJson shape (scopes/tags/types). Validated on write.</summary>
         [Required]
@@ -110,8 +136,11 @@ namespace AzureDesignStudio.Services.Models
     /// deployment. Consumed by ExecuteDecomWindow; one execute per approval.</summary>
     public record DecomApprovalModel
     {
+        /// <summary>The caller's scope key; the first half of the key. The empty GUID marks an approval
+        /// that predates the column and matches no caller.</summary>
+        public Guid TenantId { get; set; }
+
         /// <summary>DecomExecution.ExecutionHash ("sha256:" + 64 hex) the approval is bound to.</summary>
-        [Key]
         [StringLength(71, MinimumLength = 71)]
         public string ExecutionHash { get; set; } = null!;
 

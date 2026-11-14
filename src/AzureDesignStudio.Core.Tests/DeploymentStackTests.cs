@@ -63,6 +63,15 @@ public class DeploymentStackTests
         Assert.Equal(baseBody.Json, renamed.Json);
     }
 
+    [Fact]
+    public void Build_PlanHash_IsIndependentOfTheApiVersion()
+    {
+        // The hash covers the body and the stack name, not the api-version, so approvals made
+        // before the move to 2025-07-01 stay valid.
+        var body = DeploymentStack.Build("stack-a", Template, DefaultPolicy);
+        Assert.Equal("sha256:2aaaab11772e8cf2e82925fccd13f13d25401372138fbce770398988344bf2be", body.PlanHash);
+    }
+
     private static void AssertDistinct(params string[] values)
     {
         Assert.Equal(values.Length, values.Distinct().Count());
@@ -140,13 +149,13 @@ public class DeploymentStackTests
     [Fact]
     public void Build_EmitsArmStackShape()
     {
-        // "Deployment Stacks - Create Or Update At Resource Group", api-version 2024-03-01:
+        // "Deployment Stacks - Create Or Update At Resource Group", api-version 2025-07-01 (unchanged from 2024-03-01):
         // { properties: { actionOnUnmanage: { resources, resourceGroups, managementGroups },
         //                 denySettings: { mode, ... }, template, parameters } }
         // with no name, type or apiVersion in the body and no location for a group-scoped stack.
         var body = DeploymentStack.Build("stack-a", Template, DefaultPolicy);
         Assert.True(body.Success, Codes(body));
-        Assert.Equal("2024-03-01", DeploymentStack.ApiVersion);
+        Assert.Equal("2025-07-01", DeploymentStack.ApiVersion);
 
         using var doc = JsonDocument.Parse(body.Json);
         var root = doc.RootElement;
@@ -278,7 +287,7 @@ public class DeploymentStackTests
 
         Assert.Equal("PUT", handler.Methods[0]);
         Assert.Equal(
-            "https://management.azure.com/subscriptions/sub-1/resourcegroups/rg1/providers/Microsoft.Resources/deploymentStacks/ads-stack?api-version=2024-03-01",
+            "https://management.azure.com/subscriptions/sub-1/resourcegroups/rg1/providers/Microsoft.Resources/deploymentStacks/ads-stack?api-version=2025-07-01",
             handler.Uris[0]);
         Assert.Equal(body.Json, handler.Bodies[0]); // the engine's exact bytes reach ARM
         Assert.Equal(3, handler.Uris.Count);
@@ -561,7 +570,7 @@ public class DeploymentStackTests
         var elements = await Client(handler).ListAtSubscriptionAsync("sub-1");
 
         Assert.Equal(
-            "https://management.azure.com/subscriptions/sub-1/providers/Microsoft.Resources/deploymentStacks?api-version=2024-03-01",
+            "https://management.azure.com/subscriptions/sub-1/providers/Microsoft.Resources/deploymentStacks?api-version=2025-07-01",
             handler.Uris[0]);
         Assert.Single(handler.Uris);
         Assert.Single(elements);

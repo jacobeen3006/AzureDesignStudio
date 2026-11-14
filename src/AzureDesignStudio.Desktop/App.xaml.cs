@@ -14,12 +14,16 @@ public partial class App : Application
 
     protected override Window CreateWindow(IActivationState? activationState)
     {
+        // A failed workspace upgrade shows its native page; no service is touched on that path.
+        if (MauiProgram.StartupFailure is not null)
+            return new Window(new StartupFailurePage(MauiProgram.StartupFailure)) { Title = "Azure Design Studio" };
+
         // Stencils ship inside the app package; load them before the first render,
         // mirroring the WASM host which awaits AdsContext.InitializeAsync before RunAsync.
         var adsContext = MauiProgram.Services.GetRequiredService<AdsContext>();
         adsContext.StencilLoader = () => Task.FromResult<IReadOnlyList<StencilModel>>(
             System.Text.Json.JsonSerializer.Deserialize<IReadOnlyList<StencilModel>>(
-                System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "ads-stencils.json")),
+                System.IO.File.ReadAllText(AppContent.StencilsFile),
                 // ads-stencils.json is camelCase; match GetFromJsonAsync's web defaults used by WASM.
                 System.Text.Json.JsonSerializerOptions.Web)!);
         try

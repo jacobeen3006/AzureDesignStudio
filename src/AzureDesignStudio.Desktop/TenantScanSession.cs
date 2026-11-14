@@ -1,4 +1,5 @@
 using AzureDesignStudio.Discovery.Arm;
+using AzureDesignStudio.Discovery.Governance;
 using AzureDesignStudio.Discovery.Preflight;
 using AzureDesignStudio.Discovery.Scan;
 using AzureDesignStudio.Workspace;
@@ -51,8 +52,32 @@ public sealed class TenantScanSession(
             .ToList();
     }
 
-    /// <summary>Starts (or resumes) a scan in the background; false when one is already running.</summary>
-    public async Task<bool> StartScanAsync(IReadOnlyList<string> subscriptionIds, bool resume = false)
+    /// <summary>
+    /// The governance findings stored with one scan (Wave B3). A row whose source or severity is
+    /// not a known name is skipped and counted in <c>Malformed</c>
+    /// (<see cref="GovernanceNormalizer.FromStored"/>, the mapping MCP uses too). Zero findings is
+    /// not "none found": the scan manifest's source states say whether each source was collected.
+    /// </summary>
+    public async Task<(IReadOnlyList<GovernanceFinding> Findings, int Malformed)> GetGovernanceAsync(string scanId)
+    {
+        var rows = await Scans.GetGovernanceAsync(scanId);
+        var findings = new List<GovernanceFinding>(rows.Count);
+        var malformed = 0;
+        foreach (var r in rows)
+        {
+            if (GovernanceNormalizer.FromStored(r.Source, r.RecordId, r.ResourceId, r.SubscriptionId, r.Severity,
+                    r.Category, r.Title, r.Detail, r.PolicyAssignmentId, r.PolicyDefinitionId) is { } finding)
+                findings.Add(finding);
+            else
+                malformed++;
+        }
+        return (findings, malformed);
+    }
+
+    /// <summary>Starts (or resumes) a scan in the background; false when one is already running.
+    /// <paramref name="collectGovernance"/> also collects Advisor, Policy and Defender findings
+    /// (<see cref="GovernanceSources.All"/>); a resumed scan keeps the sources it started with.</summary>
+    public async Task<bool> StartScanAsync(IReadOnlyList<string> subscriptionIds, bool resume = false, bool collectGovernance = false)
     {
         if (Running || subscriptionIds.Count == 0) return false;
         Running = true;
@@ -65,7 +90,8 @@ public sealed class TenantScanSession(
         var request = new ScanRequest(
             subscriptionIds.Count == 1 ? $"subscriptions/{subscriptionIds[0]}" : $"{subscriptionIds.Count} subscriptions",
             subscriptionIds.Count == 1 ? "Subscription" : "SubscriptionSet",
-            subscriptionIds);
+            subscriptionIds,
+            collectGovernance ? GovernanceSources.All : null);
 
         ScanCheckpoint? resumePoint = null;
         if (resume)

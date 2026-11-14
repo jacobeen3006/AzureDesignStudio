@@ -50,7 +50,22 @@ namespace AzureDesignStudio.Core.Network
             set => _natGateway.Properties.IdleTimeoutInMinutes = value;
         }
 
-        public override bool IsValid => Regex.IsMatch(Name, @"^[a-zA-Z0-9][a-zA-Z0-9-_.]{0,78}[a-zA-Z0-9_]$");
+        private IEnumerable<PublicIpModel> LinkedPublicIps => LinkedNodes.OfType<PublicIpModel>();
+
+        /// <summary>ARM refuses a NAT gateway with neither a public IP address nor a prefix.</summary>
+        public override bool IsValid =>
+            Regex.IsMatch(Name, @"^[a-zA-Z0-9][a-zA-Z0-9-_.]{0,78}[a-zA-Z0-9_]$") && LinkedPublicIps.Any();
+
+        protected override void PopulateArmAttributes()
+        {
+            base.PopulateArmAttributes();
+
+            var addresses = LinkedPublicIps.ToList();
+            _natGateway.Properties.PublicIpAddresses = addresses
+                .Select(a => (object)new Dictionary<string, string> { ["id"] = a.ResourceId })
+                .ToList();
+            _natGateway.DependsOn = addresses.Select(a => a.ResourceId).ToList();
+        }
 
         public override (bool result, string message) IsDrappable(GroupModel overlappedGroup)
         {

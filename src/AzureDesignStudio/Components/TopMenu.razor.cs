@@ -82,6 +82,14 @@ namespace AzureDesignStudio.Components
                         await openScan(Services!);
                     }
                     break;
+                case "workspace":
+                    if (features.OpenWorkspaceData is { } openWorkspaceData)
+                    {
+                        // Opened by the host too; close ours first so they do not overlap.
+                        await ResetDrawerRef(string.Empty);
+                        await openWorkspaceData(Services!);
+                    }
+                    break;
                 default:
                     {
                         await ResetDrawerRef(string.Empty);
@@ -250,9 +258,9 @@ namespace AzureDesignStudio.Components
             if (!await ResetDrawerRef("validate"))
                 return;
 
-            var issues = AzureDesignStudio.Core.Validation.DesignValidator
-                .Validate(adsContext.Diagram.Nodes.Concat(adsContext.Diagram.Groups));
-            var options = System.Text.Json.JsonSerializer.Serialize(issues, AzureDesignStudio.Core.Validation.ValidationJson.Options);
+            var report = AzureDesignStudio.Core.Validation.ValidationReport
+                .For(adsContext.Diagram.Nodes.Concat(adsContext.Diagram.Groups));
+            var options = System.Text.Json.JsonSerializer.Serialize(report, AzureDesignStudio.Core.Validation.ValidationJson.Options);
 
             drawerRef = await OpenDrawer<ValidationDrawerTemplate>("Validate the design", options, width: 480);
             var opened = drawerRef;

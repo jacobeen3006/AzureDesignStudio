@@ -75,6 +75,21 @@ namespace AzureDesignStudio.Core.Network
             set => _delegation = value;
         }
         private string _delegation = string.Empty;
+
+        /// <summary>True when the subnet has no default outbound access (no implicit public IP).
+        /// Off by default so a design saved before this option behaves as it always did.</summary>
+        [MapToDto]
+        [DisplayName("Private subnet (no default outbound access)")]
+        public bool PrivateSubnet { get; set; }
+
+        /// <summary>Azure accepts <c>defaultOutboundAccess</c> only on a subnet with no
+        /// delegation (including the App Service one added for a plan placed here) and not on
+        /// a reserved-name subnet.</summary>
+        public bool SupportsPrivateSubnet =>
+            string.IsNullOrEmpty(Delegation)
+            && !Children.OfType<AppServicePlanModel>().Any()
+            && !DedicatedSubnets.IsReserved(Name);
+
         private static void PopulateServiceEndpoints(NodeModel node, IList<ServiceEndpointPropertiesFormat> serviceEndpoints)
         {
             foreach (var port in node.Ports)
@@ -185,6 +200,18 @@ namespace AzureDesignStudio.Core.Network
                 _subnet.Properties.NetworkSecurityGroup = null;
             }
 
+            if (NatGateway is { } nat)
+            {
+                _subnet.Properties.NatGateway = new() { Id = nat.ResourceId };
+                _subnet.DependsOn.Add(nat.ResourceId);
+            }
+            else
+            {
+                _subnet.Properties.NatGateway = null;
+            }
+
+            _subnet.Properties.DefaultOutboundAccess = SupportsPrivateSubnet ? !PrivateSubnet : null;
+
             // Don't include them in the serialization if they are empty. 
             if (_subnet.Properties.ServiceEndpoints.Count == 0)
                 _subnet.Properties.ServiceEndpoints = null;
@@ -193,6 +220,16 @@ namespace AzureDesignStudio.Core.Network
         }
 
         private NetworkSecurityGroups? _apimNsg;
+
+        /// <summary>The NAT gateway serving this subnet: the first one linked to a node placed in
+        /// the subnet, or in a group inside it (a VM in an availability set). Subnets have no
+        /// ports of their own, so the link is drawn to a machine.</summary>
+        public NatGatewayModel? NatGateway =>
+            Children.SelectMany(c => c is GroupModel g ? g.Children : [c])
+                .OfType<AzureNodeBase>()
+                .SelectMany(n => n.LinkedNodes)
+                .OfType<NatGatewayModel>()
+                .FirstOrDefault();
 
         public override IList<ResourceBase> GetArmResources()
         {

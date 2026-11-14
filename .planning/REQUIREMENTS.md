@@ -9,17 +9,17 @@ Requirements for the pilot-ready milestone. Each maps to exactly one roadmap pha
 
 ### Identity & Authorization (IDA)
 
-- [ ] **IDA-01**: A caller with a missing or malformed `oid`/`tid` claim receives a typed 401 response, never a 500.
-- [ ] **IDA-02**: A caller whose token carries the legacy `.../objectidentifier` URI claim can still read their existing designs, subscriptions, and quota.
-- [ ] **IDA-03**: Every gRPC method is deny-by-default; only an explicit anonymous list is callable without authentication, proven by a reflection-based integration test.
-- [ ] **IDA-04**: Only a caller holding the `Guardrail.Admin` app role can read or mutate guardrail policy; every other authenticated caller receives 403.
-- [ ] **IDA-05**: Guardrail policies and plan approvals are tenant-scoped; two tenants cannot read or overwrite each other's records.
-- [ ] **IDA-06**: Only a caller holding `Deploy.Approver` can approve a plan, and self-approval is checked as a separate rule.
+- [x] **IDA-01**: A caller with a missing or malformed `oid`/`tid` claim receives a typed 401 response, never a 500.
+- [x] **IDA-02**: A caller whose token carries the legacy `.../objectidentifier` URI claim can still read their existing designs, subscriptions, and quota.
+- [x] **IDA-03**: Every gRPC method is deny-by-default; only an explicit anonymous list is callable without authentication, proven by a reflection-based integration test.
+- [x] **IDA-04**: Only a caller holding the `Guardrail.Admin` app role can read or mutate guardrail policy; every other authenticated caller receives 403.
+- [x] **IDA-05**: Guardrail policies and plan approvals are tenant-scoped; two tenants cannot read or overwrite each other's records.
+- [x] **IDA-06**: Only a caller holding `Deploy.Approver` can approve a plan, and self-approval is checked as a separate rule.
 
 ### Credentials (CRED)
 
-- [ ] **CRED-01**: A developer can register and exercise a subscription in DEBUG with no Key Vault and no Azure credentials.
-- [ ] **CRED-02**: Production refuses development crypto keys and still requires Key Vault.
+- [x] **CRED-01**: A developer can register and exercise a subscription in DEBUG with no Key Vault and no Azure credentials.
+- [x] **CRED-02**: Production refuses development crypto keys and still requires Key Vault.
 - [ ] **CRED-03**: No subscription client secret is stored in a form the server can recover and replay; the audit record names the credential type used.
 - [ ] **CRED-04**: Existing subscriptions migrate to the new credential model behind a dual-run flag with a documented rollback.
 - [ ] **CRED-05**: Desktop user-scoped ARM reads and writes use the desktop token broker rather than a server-stored secret.
@@ -36,14 +36,14 @@ Requirements for the pilot-ready milestone. Each maps to exactly one roadmap pha
 
 ### Data Durability (DATA)
 
-- [ ] **DATA-01**: An existing `workspace.db` upgrades through EF migrations with designs, scans, and plans intact and row counts unchanged.
-- [ ] **DATA-02**: The server database upgrades through EF migrations, and rollback is documented and rehearsed.
-- [ ] **DATA-03**: SQLite runs WAL with `busy_timeout` and `foreign_keys`; a concurrent scan write and MCP read does not fail with `SQLITE_BUSY` or `SQLITE_LOCKED`.
-- [ ] **DATA-04**: Startup `quick_check` surfaces workspace corruption instead of silently continuing.
-- [ ] **DATA-05**: A user can create and restore a WAL-safe backup (`VACUUM INTO`), and the restore is verified.
-- [ ] **DATA-06**: MCP opens a WAL workspace read-only with an explicit, reported fallback mode and passes a cold-workspace test.
+- [x] **DATA-01**: An existing `workspace.db` upgrades through EF migrations with designs, scans, and plans intact and row counts unchanged.
+- [x] **DATA-02**: The server database upgrades through EF migrations, and rollback is documented and rehearsed.
+- [x] **DATA-03**: SQLite runs WAL with `busy_timeout` and `foreign_keys`; a concurrent scan write and MCP read does not fail with `SQLITE_BUSY` or `SQLITE_LOCKED`.
+- [x] **DATA-04**: Startup `quick_check` surfaces workspace corruption instead of silently continuing.
+- [x] **DATA-05**: A user can create and restore a WAL-safe backup (`VACUUM INTO`), and the restore is verified.
+- [x] **DATA-06**: MCP opens a WAL workspace read-only with an explicit, reported fallback mode and passes a cold-workspace test.
 - [ ] **DATA-07**: A packaged app finds or imports an existing unpackaged workspace, and MCP discovery probes both install roots.
-- [ ] **DATA-08**: The migration baseline adopts existing DDL, reports or dedupes rows that violate new unique indexes, and documents `__EFMigrationsLock` recovery.
+- [x] **DATA-08**: The migration baseline adopts existing DDL, reports or dedupes rows that violate new unique indexes, and documents `__EFMigrationsLock` recovery.
 
 ### Build & CI (BUILD)
 
@@ -55,7 +55,7 @@ Requirements for the pilot-ready milestone. Each maps to exactly one roadmap pha
 
 ### Tests (TEST)
 
-- [ ] **TEST-01**: A server integration suite boots the real host and runs in CI without Azure credentials.
+- [x] **TEST-01**: A server integration suite boots the real host and runs in CI without Azure credentials.
 - [ ] **TEST-02**: Server tests prove user and tenant isolation, the 10-design quota, malformed names, what-if token single-use, approval ownership, and decommission kind-gating.
 - [ ] **TEST-03**: Component tests cover palette filter and keyboard navigation, owner-scoped registry removal, inspector selection, and status-bar counts.
 - [ ] **TEST-04**: A committed E2E smoke suite covers boot, stencil drop, port link, undo/redo, save→reload, offline save, scan browse, error toast, and zero console exceptions.
@@ -135,14 +135,14 @@ Updated 2026-10-21 during roadmap creation. Every v1 requirement maps to exactly
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| IDA-01 | Phase 5 | Pending |
-| IDA-02 | Phase 5 | Pending |
-| IDA-03 | Phase 5 | Pending |
-| IDA-04 | Phase 5 | Pending |
-| IDA-05 | Phase 5 | Pending |
-| IDA-06 | Phase 5 | Pending |
-| CRED-01 | Phase 5 | Pending |
-| CRED-02 | Phase 5 | Pending |
+| IDA-01 | Phase 5 | Complete |
+| IDA-02 | Phase 5 | Complete |
+| IDA-03 | Phase 5 | Complete |
+| IDA-04 | Phase 5 | Complete |
+| IDA-05 | Phase 5 | Complete |
+| IDA-06 | Phase 5 | Complete |
+| CRED-01 | Phase 5 | Complete |
+| CRED-02 | Phase 5 | Complete |
 | CRED-03 | Phase 9 | Pending |
 | CRED-04 | Phase 9 | Pending |
 | CRED-05 | Phase 9 | Pending |
@@ -153,20 +153,20 @@ Updated 2026-10-21 during roadmap creation. Every v1 requirement maps to exactly
 | BOUND-05 | Phase 6 | Pending |
 | BOUND-06 | Phase 6 | Pending |
 | BOUND-07 | Phase 6 | Pending |
-| DATA-01 | Phase 4 | Pending |
-| DATA-02 | Phase 4 | Pending |
-| DATA-03 | Phase 4 | Pending |
-| DATA-04 | Phase 4 | Pending |
-| DATA-05 | Phase 4 | Pending |
-| DATA-06 | Phase 4 | Pending |
+| DATA-01 | Phase 4 | Complete |
+| DATA-02 | Phase 4 | Complete |
+| DATA-03 | Phase 4 | Complete |
+| DATA-04 | Phase 4 | Complete |
+| DATA-05 | Phase 4 | Complete |
+| DATA-06 | Phase 4 | Complete |
 | DATA-07 | Phase 11 | Pending |
-| DATA-08 | Phase 4 | Pending |
+| DATA-08 | Phase 4 | Complete |
 | BUILD-01 | Phase 2 | Complete |
 | BUILD-02 | Phase 2 | Pending |
 | BUILD-03 | Phase 2 | Pending |
 | BUILD-04 | Phase 2 | Complete |
 | BUILD-05 | Phase 2 | Pending |
-| TEST-01 | Phase 3 | Pending |
+| TEST-01 | Phase 3 | Complete |
 | TEST-02 | Phase 8 | Pending |
 | TEST-03 | Phase 8 | Pending |
 | TEST-04 | Phase 8 | Pending |

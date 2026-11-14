@@ -250,9 +250,9 @@ No bug tracker entries are recorded in-tree (no `.github/ISSUE_TEMPLATE`, no `do
 
 ### Unbounded workspace growth — no retention for scans, snapshots, change feed, audit
 
-- **Files:** `src/AzureDesignStudio.Workspace/WorkspaceDbContext.cs` (`ScanRecord`, `ResourceSnapshotRecord`, `ChangeFeedRecord`, `AuditRecord`, `CostCacheEntry`), `src/AzureDesignStudio.Workspace/TopologyPositions.cs:40` (`PruneAsync` — the only prune in the codebase, and it covers node positions only)
+- **Files:** `src/AzureDesignStudio.Workspace/WorkspaceDbContext.cs` (`ScanRecord`, `ResourceSnapshotRecord`, `GovernanceFindingRecord`, `ChangeFeedRecord`, `AuditRecord`, `CostCacheEntry`), `src/AzureDesignStudio.Workspace/TopologyPositions.cs:40` (`PruneAsync` — the only prune in the codebase, and it covers node positions only)
 - **Why fragile:** Every tenant scan appends one `ScanRecord` plus one `ResourceSnapshotRecord` per resource. A 5,000-resource tenant scanned weekly produces ~250k rows in a year, in the same file the UI writes to. There is no vacuum, no expiry, and no size guard.
-- **Safe modification:** If you add a new scanned collection, add it to a retention routine in the same change.
+- **Safe modification:** If you add a new scanned collection, add it to a retention routine in the same change. `GovernanceFindings` has no foreign key to `Scans`; a scan prune must delete its rows by `ScanId` explicitly.
 - **Severity:** Medium
 
 ### Hand-written schema bootstrap instead of migrations

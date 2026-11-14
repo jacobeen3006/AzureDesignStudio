@@ -8,6 +8,7 @@ using AzureDesignStudio.Services.Models;
 using AzureDesignStudio.SharedModels.Protos;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -51,11 +52,13 @@ public class InProcessTests
     private static readonly Guid User = Guid.NewGuid();
 
     private static ClaimsPrincipal SignedIn(Guid oid) =>
-        new(new ClaimsIdentity([new Claim("oid", oid.ToString()), new Claim("name", "Ada")], "test"));
+        new(new ClaimsIdentity(
+            [new Claim("oid", oid.ToString()), new Claim("tid", TestTenants.Contoso.ToString()), new Claim("name", "Ada")],
+            "test"));
 
     /// <summary>The desktop host's wiring, minus MAUI: services in DI, the invoker in front.</summary>
     private static (ServiceProvider Services, InProcessCallInvoker Invoker) Host(
-        ClaimsPrincipal? caller = null, IAmbientAzureCredential? ambient = null, ScriptedHttp? http = null)
+        ClaimsPrincipal? caller = null, IAmbientAzureCredential? ambient = null, IHttpClientFactory? http = null)
     {
         var databaseName = Guid.NewGuid().ToString();
         var services = new ServiceCollection();
@@ -138,6 +141,31 @@ public class InProcessTests
     }
 
     [Fact]
+    public void InProcessCallsCarryTheSingleUserMarker()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("oid", User.ToString()), new Claim("tid", TestTenants.Contoso.ToString())], "test"));
+        var context = new InProcessServerCallContext("/test", principal);
+
+        Assert.Equal(true, context.UserState[ServiceTools.SingleUserHostKey]);
+        Assert.True(ServiceTools.TryGetCaller(context, out var caller, out _));
+        Assert.True(caller.IsSingleUserHost);
+        Assert.True(caller.CanAdministerGuardrails);
+        Assert.True(caller.CanApprove);
+    }
+
+    [Fact]
+    public void AServerStyleContextIsNotASingleUserHost()
+    {
+        // The server's interceptor puts the principal and nothing else in UserState.
+        var context = TestServerCallContext.ForUser(User);
+
+        Assert.False(context.UserState.ContainsKey(ServiceTools.SingleUserHostKey));
+        Assert.True(ServiceTools.TryGetCaller(context, out var caller, out _));
+        Assert.False(caller.IsSingleUserHost);
+    }
+
+    [Fact]
     public async Task ServerStreamingCallDeliversItsMessages()
     {
         var (_, invoker) = Host(SignedIn(User));
@@ -199,6 +227,115 @@ public class InProcessTests
         Assert.Equal(200, set.StatusCode);
         Assert.Contains("Microsoft.KeyVault/vaults", get.Json);
         Assert.Equal("Ada <" + User + ">", get.UpdatedBy);
+    }
+
+    [Fact]
+    public async Task TheSingleUserCallerSetsBothTenantSettingsAndReadsThemBack()
+    {
+        // The in-process invoker marks its caller as the single-user host, which implies the
+        // administrator rights (D-04): no Guardrail.Admin role is needed on the desktop.
+        var (_, invoker) = Host(SignedIn(User));
+        var client = new Deploy.DeployClient(invoker);
+
+        var before = await client.GetTenantSettingsAsync(new Empty());
+        var set = await client.SetTenantSettingsAsync(new TenantSettingsRequest { AllowSelfApproval = true, GuardrailPolicyMode = "merge" });
+        var after = await client.GetTenantSettingsAsync(new Empty());
+
+        Assert.Equal(200, before.StatusCode);
+        Assert.False(before.AllowSelfApproval);
+        Assert.Equal("replace", before.GuardrailPolicyMode);
+        Assert.Equal(200, set.StatusCode);
+        Assert.True(after.AllowSelfApproval);
+        Assert.Equal("merge", after.GuardrailPolicyMode);
+        Assert.Equal("Ada <" + User + ">", after.UpdatedBy);
+    }
+
+    [Fact]
+    public async Task TheSingleUserCallerApprovesItsOwnPlanAndGetsPastTheRequesterCheck()
+    {
+        // The Desktop host has no second person: the single-user marker implies Deploy.Approver and
+        // self-approval (D-04), so the caller who ran the what-if approves it and then deploys it.
+        var subscription = Guid.NewGuid();
+        var group = $"/subscriptions/{subscription}/resourceGroups/rg";
+        var storage = $"{group}/providers/Microsoft.Storage/storageAccounts/sa1";
+        var arm = new RouteTableHttp();
+        arm.Answer(HttpMethod.Get, $"/subscriptions/{subscription}", System.Net.HttpStatusCode.OK,
+                "{\"id\":\"/subscriptions/" + subscription + "\",\"subscriptionId\":\"" + subscription + "\",\"displayName\":\"t\",\"state\":\"Enabled\"}")
+            .Answer(HttpMethod.Get, group, System.Net.HttpStatusCode.OK,
+                "{\"id\":\"" + group + "\",\"name\":\"rg\",\"location\":\"westeurope\",\"properties\":{\"provisioningState\":\"Succeeded\"}}")
+            .Answer(HttpMethod.Post, $"{group}/providers/Microsoft.Resources/deployments/{Discovery.Iac.WhatIf.WhatIfClient.DeploymentName}/whatIf",
+                System.Net.HttpStatusCode.OK,
+                "{\"status\":\"Succeeded\",\"properties\":{\"changes\":[{\"resourceId\":\"" + storage
+                + "\",\"changeType\":\"Create\",\"after\":{\"id\":\"" + storage
+                + "\",\"name\":\"sa1\",\"type\":\"Microsoft.Storage/storageAccounts\",\"apiVersion\":\"2023-01-01\","
+                + "\"location\":\"westeurope\",\"sku\":{\"name\":\"Standard_LRS\"},\"kind\":\"StorageV2\"}}]}}");
+        var (services, invoker) = Host(SignedIn(User), new AmbientUser([], new FixedCredential()), arm);
+        var client = new Deploy.DeployClient(invoker);
+        const string template =
+            """{"$schema":"https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#","contentVersion":"1.0.0.0","resources":[{"type":"Microsoft.Storage/storageAccounts","apiVersion":"2023-01-01","name":"sa1","location":"westeurope","sku":{"name":"Standard_LRS"},"kind":"StorageV2"}]}""";
+        var whatIf = await client.WhatIfAsync(new DeploymentRequest
+        {
+            SubscriptionId = subscription.ToString(), ResourceGroupName = "rg", ArmTemplate = template, Parameters = "{}",
+        });
+        Assert.True(whatIf.StatusCode == 200, whatIf.ErrorMessage);
+
+        var approval = await client.ApprovePlanAsync(new PlanApprovalRequest { PlanHash = whatIf.PlanHash });
+
+        Assert.True(approval.StatusCode == 200, approval.ErrorMessage);
+        using (var scope = services.CreateScope())
+        {
+            var row = await scope.ServiceProvider.GetRequiredService<DesignDbContext>().AdsPlanApprovals.SingleAsync();
+            Assert.Equal(User.ToString("D"), row.RequestedByUserId);
+            Assert.Equal(row.RequestedByUserId, row.ApprovedByUserId);
+        }
+
+        // No review token is sent, so the call stops at the token - after the approval comparison.
+        using var call = client.CreateDeployment(new DeploymentRequest
+        {
+            SubscriptionId = subscription.ToString(), ResourceGroupName = "rg", ArmTemplate = template, Parameters = "{}",
+            PlanHash = whatIf.PlanHash,
+        });
+        var messages = new List<DeploymentResponse>();
+        while (await call.ResponseStream.MoveNext(CancellationToken.None))
+            messages.Add(call.ResponseStream.Current);
+
+        var first = Assert.Single(messages);
+        Assert.Equal(400, first.StatusCode);
+        Assert.DoesNotContain("MISMATCH", first.ErrorMessage);
+        Assert.DoesNotContain("PLAN_NOT_APPROVED", first.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task TheModeSetThroughTheGeneratedClientGovernsTheNextEvaluation()
+    {
+        // The default policy is operator-seeded data, so seed it through the host's own context;
+        // the single-user caller then adds an own policy and switches the scope to merge.
+        var (services, invoker) = Host(SignedIn(User));
+        var client = new Deploy.DeployClient(invoker);
+        await client.SetGuardrailPolicyAsync(new GuardrailPolicyRequest { Json = """{"types":["Microsoft.KeyVault/vaults"]}""" });
+        using (var scope = services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<DesignDbContext>();
+            db.AdsGuardrailPolicies.Add(new GuardrailPolicyModel
+            {
+                Id = 1, TenantId = null, Json = """{"types":["Microsoft.Network/virtualNetworks"]}""",
+                UpdatedBy = "operator", UpdatedByUserId = Guid.Empty.ToString("D"), UpdatedAtUtc = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        async Task<string[]> Effective()
+        {
+            using var scope = services.CreateScope();
+            var service = (DeployService)scope.ServiceProvider.GetRequiredService<Deploy.DeployBase>();
+            var (policy, error) = await service.LoadGuardrailPolicy(TestTenants.Contoso, CancellationToken.None);
+            Assert.Null(error);
+            return [.. policy!.ProtectedTypes];
+        }
+
+        Assert.Equal(["Microsoft.KeyVault/vaults"], await Effective());
+        await client.SetTenantSettingsAsync(new TenantSettingsRequest { GuardrailPolicyMode = "merge" });
+        Assert.Equal(["Microsoft.Network/virtualNetworks", "Microsoft.KeyVault/vaults"], await Effective());
     }
 
     // --- deploying as the signed-in user, or as a linked service principal ---

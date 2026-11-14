@@ -9,7 +9,7 @@ namespace AzureDesignStudio.AzureResources.Network
     /// <summary>
     /// Microsoft.Network/virtualNetworks
     /// </summary>
-    [AzureResource("Microsoft.Network/virtualNetworks", "2022-07-01")]
+    [AzureResource("Microsoft.Network/virtualNetworks", "2024-05-01")]
     [GeneratedCode("ArmTypeGenerator", "0.2.1.52938")]
     public partial class VirtualNetworks : ResourceBase
     {
@@ -29,7 +29,7 @@ namespace AzureDesignStudio.AzureResources.Network
         /// The resource api version
         /// </summary>
         [JsonPropertyName("apiVersion")]
-        public override string ApiVersion => "2022-07-01";
+        public override string ApiVersion => "2024-05-01";
 
         /// <summary>
         /// The extended location of the virtual network.

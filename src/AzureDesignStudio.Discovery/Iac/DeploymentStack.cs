@@ -94,7 +94,7 @@ public static class DeploymentStack
     /// "Deployment Stacks - Create Or Update At Resource Group" documents for it; the earlier
     /// 2021-04-01 with a <c>properties.policy</c> wrapper was never a deployment-stacks
     /// version, and ARM would have refused every request.</summary>
-    public const string ApiVersion = "2024-03-01";
+    public const string ApiVersion = "2025-07-01";
 
     private static readonly Regex StackNamePattern = new(@"^[-\w\._\(\)]{1,90}$", RegexOptions.Compiled);
 

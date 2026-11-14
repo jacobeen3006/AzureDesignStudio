@@ -143,6 +143,21 @@ public class DesignGrpcServiceTests
     }
 
     [Fact]
+    public async Task ADesktopClientDoesNotQueueOrRetryA401InAResponse()
+    {
+        // The server answers an unusable identity in-band (status 401 in the message), not with
+        // Unauthenticated: that is an answer, not "offline", so nothing is queued for a retry loop.
+        _server.Refuse["net"] = 401;
+        var service = Desktop;
+
+        Assert.Equal(401, await service.SaveDesign("net", "{}"));
+
+        Assert.Empty(_store.Pending);
+        Assert.False(service.LastCallWasOffline);
+        Assert.Equal(["net"], _server.SaveCalls);
+    }
+
+    [Fact]
     public async Task WebClientSurvivesAPlainNetworkFailure()
     {
         _server.Failure = new HttpRequestException("connection refused");
@@ -347,6 +362,41 @@ public class DeployGrpcServiceTests
         public override AsyncUnaryCall<PlanApprovalResponse> ApprovePlanAsync(PlanApprovalRequest request, CallOptions options) =>
             FakeCalls.Unary(() => Guard(() => new PlanApprovalResponse { StatusCode = Status }));
 
+        public List<Empty> TenantSettingsReads { get; } = [];
+        public List<TenantSettingsRequest> TenantSettingsWrites { get; } = [];
+        public string? SettingsError { get; set; }
+
+        public override AsyncUnaryCall<TenantSettingsResponse> GetTenantSettingsAsync(Empty request, CallOptions options) =>
+            FakeCalls.Unary(() => Guard(() =>
+            {
+                TenantSettingsReads.Add(request);
+                return new TenantSettingsResponse
+                {
+                    StatusCode = Status, ErrorMessage = SettingsError ?? "", AllowSelfApproval = Status == 200,
+                    GuardrailPolicyMode = Status == 200 ? "merge" : "", UpdatedBy = Status == 200 ? "Ada" : "",
+                };
+            }));
+
+        public override AsyncUnaryCall<TenantSettingsResponse> SetTenantSettingsAsync(TenantSettingsRequest request, CallOptions options) =>
+            FakeCalls.Unary(() => Guard(() =>
+            {
+                TenantSettingsWrites.Add(request);
+                return new TenantSettingsResponse
+                {
+                    StatusCode = Status, ErrorMessage = SettingsError ?? "",
+                    AllowSelfApproval = request.AllowSelfApproval, GuardrailPolicyMode = request.GuardrailPolicyMode,
+                };
+            }));
+
+        public List<StackWhatIfRequest> StackWhatIfs { get; } = [];
+
+        public override AsyncUnaryCall<StackWhatIfResponse> StackWhatIfAsync(StackWhatIfRequest request, CallOptions options) =>
+            FakeCalls.Unary(() => Guard(() =>
+            {
+                StackWhatIfs.Add(request);
+                return new StackWhatIfResponse { StatusCode = Status, WhatIfToken = "stack-token" };
+            }));
+
         public override AsyncServerStreamingCall<DeploymentResponse> CreateDeployment(DeploymentRequest request, CallOptions options) =>
             Failure is null
                 ? new AsyncServerStreamingCall<DeploymentResponse>(new Reader(Stream, StreamFault),
@@ -440,6 +490,99 @@ public class DeployGrpcServiceTests
 
         Assert.Equal(503, await Service.LinkAzureSubscription(new SubscriptionInfo()));
         Assert.Null(await Service.ApprovePlanAsync("sha256:abc"));
+    }
+
+    // --- tenant settings (D-02, D-05): thin wrappers, the server alone decides who may call ---
+
+    [Fact]
+    public async Task GetTenantSettingsSendsAnEmptyRequestAndReturnsTheServersAnswerAsItIs()
+    {
+        var response = await Service.GetTenantSettingsAsync();
+
+        Assert.Single(_server.TenantSettingsReads);
+        Assert.Equal(new Empty(), _server.TenantSettingsReads[0]);
+        Assert.Equal(200, response!.StatusCode);
+        Assert.True(response.AllowSelfApproval);
+        Assert.Equal("merge", response.GuardrailPolicyMode);
+        Assert.Equal("Ada", response.UpdatedBy);
+    }
+
+    [Fact]
+    public async Task SetTenantSettingsSendsBothValuesInOneRequest()
+    {
+        var response = await Service.SetTenantSettingsAsync(true, "merge");
+
+        var sent = Assert.Single(_server.TenantSettingsWrites);
+        Assert.True(sent.AllowSelfApproval);
+        Assert.Equal("merge", sent.GuardrailPolicyMode);
+        Assert.Equal(200, response!.StatusCode);
+        Assert.True(response.AllowSelfApproval);
+        Assert.Equal("merge", response.GuardrailPolicyMode);
+    }
+
+    [Fact]
+    public async Task AForbiddenAnswerPassesThroughWithItsCodedTextOnBothWrappers()
+    {
+        _server.Status = 403;
+        _server.SettingsError = "TENANT_SETTINGS_ADMIN_REQUIRED: the Guardrail.Admin app role is required.";
+
+        var get = await Service.GetTenantSettingsAsync();
+        var set = await Service.SetTenantSettingsAsync(true, "replace");
+
+        Assert.Equal(403, get!.StatusCode);
+        Assert.StartsWith("TENANT_SETTINGS_ADMIN_REQUIRED", get.ErrorMessage);
+        Assert.Equal(403, set!.StatusCode);
+        Assert.StartsWith("TENANT_SETTINGS_ADMIN_REQUIRED", set.ErrorMessage);
+    }
+
+    [Theory]
+    [InlineData(400, "TENANT_SETTINGS_INVALID: guardrail_policy_mode must be 'replace' or 'merge'.")]
+    [InlineData(401, "IDENTITY_INVALID")]
+    public async Task EveryOtherServerStatusComesBackUntouched(int status, string error)
+    {
+        _server.Status = status;
+        _server.SettingsError = error;
+
+        var set = await Service.SetTenantSettingsAsync(false, "union");
+
+        Assert.Equal(status, set!.StatusCode);
+        Assert.Equal(error, set.ErrorMessage);
+    }
+
+    [Theory]
+    [InlineData(StatusCode.Unavailable)]
+    [InlineData(StatusCode.Unauthenticated)]
+    public async Task ATransportBreakAnswersNullOnBothWrappersAndNeverThrows(StatusCode code)
+    {
+        _server.Failure = FakeCalls.Rpc(code);
+
+        Assert.Null(await Service.GetTenantSettingsAsync());
+        Assert.Null(await Service.SetTenantSettingsAsync(true, "merge"));
+    }
+
+    [Fact]
+    public async Task AnInvalidOperationOrHttpFailureAlsoAnswersNull()
+    {
+        _server.Failure = new InvalidOperationException("no channel");
+        Assert.Null(await Service.GetTenantSettingsAsync());
+        Assert.Null(await Service.SetTenantSettingsAsync(true, "merge"));
+
+        _server.Failure = new HttpRequestException("down");
+        Assert.Null(await Service.GetTenantSettingsAsync());
+        Assert.Null(await Service.SetTenantSettingsAsync(false, "replace"));
+    }
+
+    [Fact]
+    public async Task StackWhatIfSendsTheStackFieldsAndAnswersNullWhenTheCallBreaks()
+    {
+        var response = await Service.StackWhatIfAsync("s1", "rg", "stack1", "{}", "{}", bypassOutOfSync: true);
+
+        Assert.Equal("stack-token", response!.WhatIfToken);
+        var sent = Assert.Single(_server.StackWhatIfs);
+        Assert.Equal(("s1", "rg", "stack1", "detach", true), (sent.SubscriptionId, sent.ResourceGroupName, sent.StackName, sent.ResourcesAction, sent.BypassOutOfSync));
+
+        _server.Failure = FakeCalls.Rpc(StatusCode.Unavailable);
+        Assert.Null(await Service.StackWhatIfAsync("s1", "rg", "stack1", "{}", "{}"));
     }
 
     // --- deployment stream ---

@@ -20,6 +20,27 @@ public static class MauiProgram
 {
     public static IServiceProvider Services { get; private set; } = null!;
 
+    /// <summary>Set when the workspace (or deploy database) could not be upgraded: the app then
+    /// shows <see cref="StartupFailurePage"/> instead of the main window and no other service runs.</summary>
+    public static Exception? StartupFailure { get; private set; }
+
+    /// <summary>The folder that holds workspace.db, deploy.db and the backups (the platform app-data
+    /// folder, or the <c>ADS_DATA_DIR</c> override).</summary>
+    public static string DataDirectory { get; private set; } = string.Empty;
+
+    private static readonly string CrashLogPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ads_desktop_crash.log");
+
+    private static void LogCrash(string label, Exception e)
+    {
+        try
+        {
+            System.IO.File.AppendAllText(CrashLogPath, $"[{DateTime.Now:O}] {label}\n{e}\n\n");
+        }
+        catch (Exception write) when (write is System.IO.IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
     public static MauiApp CreateMauiApp()
     {
         var builder = MauiApp.CreateBuilder();
@@ -29,6 +50,9 @@ public static class MauiProgram
         TaskScheduler.UnobservedTaskException += (s, e) =>
             System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ads_desktop_crash.log"),
                 $"[{DateTime.Now:O}] UNOBSERVED\n{e.Exception}\n\n");
+#if MACCATALYST
+        MacHost.ExtendToolPath();
+#endif
         builder
             .UseMauiApp<App>()
             .ConfigureFonts(fonts =>
@@ -36,30 +60,90 @@ public static class MauiProgram
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
             });
 
+#if MACCATALYST
+        // Bundled into Contents/Resources, not next to the executable (Contents/MonoBundle).
+        builder.Configuration.AddJsonFile(AppContent.SettingsFile, optional: true, reloadOnChange: false);
+#else
         builder.Configuration.AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
+#endif
         var resourceRoot = builder.Configuration["ResourceRoot"] ?? "/";
 
         var webViewOrigin = new Uri("https://0.0.0.1/");
         builder.Services.AddHttpClient("AzureDesignStudio.Root", (sp, client) => client.BaseAddress = webViewOrigin)
             .ConfigurePrimaryHttpMessageHandler(() => new PackageAssetHandler(webViewOrigin));
+        // Only an http(s) ResourceRoot is a remote root. On macOS "/" also parses as an absolute
+        // URI (file:///), which sent every icon request to the file scheme instead of the package.
         builder.Services.AddHttpClient("AzureDesignStudio.ResourceAccess", (sp, client) =>
-            client.BaseAddress = Uri.TryCreate(resourceRoot, UriKind.Absolute, out var abs) ? abs : webViewOrigin)
+            client.BaseAddress = Uri.TryCreate(resourceRoot, UriKind.Absolute, out var abs) && (abs.Scheme == Uri.UriSchemeHttps || abs.Scheme == Uri.UriSchemeHttp)
+                ? abs : webViewOrigin)
             .ConfigurePrimaryHttpMessageHandler(() => new PackageAssetHandler(webViewOrigin));
 
         // SQLite workspace (plan 6.3): designs, scans, snapshots, cost cache, plans and audit
         // records in one file - everything readable with the network down. The v1 per-file
         // design cache is imported once on startup.
-        var appData = FileSystem.Current.AppDataDirectory;
-        var workspaceDb = new WorkspaceDb(System.IO.Path.Combine(appData, "workspace.db"));
+        // ADS_DATA_DIR redirects every database and backup to another folder. It exists so the built
+        // app can be tested against copies of a workspace (or a corrupt file) without touching the
+        // real data; normal use needs nothing and the defaults below are unchanged.
+        var dataOverride = Environment.GetEnvironmentVariable("ADS_DATA_DIR");
+        string appData;
+        if (!string.IsNullOrWhiteSpace(dataOverride))
+        {
+            appData = System.IO.Path.GetFullPath(dataOverride);
+            System.IO.Directory.CreateDirectory(appData);
+        }
+        else
+        {
+            appData =
+#if MACCATALYST
+                MacHost.AppDataDirectory;
+#else
+                FileSystem.Current.AppDataDirectory;
+#endif
+        }
+        DataDirectory = appData;
+
+        var workspacePath = System.IO.Path.Combine(appData, "workspace.db");
+        var backupsDirectory = System.IO.Path.Combine(appData, "backups");
+        WorkspaceStartupResult startup;
+        try
+        {
+            startup = WorkspaceStartup.Open(new WorkspaceStartupOptions(workspacePath, backupsDirectory));
+        }
+        catch (Exception e) when (IsStartupFailure(e))
+        {
+            // An interrupted or failed upgrade must not open a half-working workspace: a native page
+            // names the error and the premigration backup. Nothing else is needed to show it. A file
+            // system or database error outside the upgrade (a staged restore that cannot be read, the
+            // data folder that cannot be created) gets the same page instead of a raw crash.
+            StartupFailure = e;
+            LogCrash("WORKSPACE STARTUP FAILED", e);
+            var failed = builder.Build();
+            Services = failed.Services;
+            return failed;
+        }
+
+        var workspaceDb = startup.Db;
         LegacyDesignImporter.ImportIfNeeded(workspaceDb, System.IO.Path.Combine(appData, "designs"));
         builder.Services.AddSingleton(workspaceDb);
+        builder.Services.AddSingleton(startup.Report);
+        var backupService = new WorkspaceBackupService(workspacePath, backupsDirectory,
+            onError: e =>
+            {
+                // The container exists by the time the scheduler ticks; the file is the fallback.
+                if (Services?.GetService<ILoggerFactory>() is { } loggers)
+                    loggers.CreateLogger("WorkspaceBackup").LogWarning(e, "A workspace backup step failed.");
+                else
+                    LogCrash("WORKSPACE BACKUP", e);
+            });
+        builder.Services.AddSingleton(backupService);
         builder.Services.AddSingleton<AzureDesignStudio.Core.Common.IDesignOfflineStore, SqliteDesignOfflineStore>();
 
         // Standalone: no server. The design, deploy and price services run in this process
         // (AzureDesignStudio.Services, the same classes the hosted server exposes), reached by
         // the shared client code through generated gRPC clients on an in-process invoker.
         // Deploy approvals, guardrails, linked subscriptions and audit events go to deploy.db.
-        builder.Services.AddDbContext<AzureDesignStudio.Services.Models.DesignDbContext>(options =>
+        // The services ask for DesignDbContext; the SQLite flavour owns deploy.db's migrations.
+        builder.Services.AddDbContext<AzureDesignStudio.Services.Models.DesignDbContext, AzureDesignStudio.Services.Models.SqliteDesignDbContext>(options =>
             options.UseSqlite($"Data Source={System.IO.Path.Combine(appData, "deploy.db")}"));
         builder.Services.AddSingleton(new AzureDesignStudio.Discovery.Iac.WhatIf.WhatIfTokenGate(
             AzureDesignStudio.Discovery.Iac.WhatIf.WhatIfTokenGate.DefaultTtl));
@@ -88,7 +172,8 @@ public static class MauiProgram
         builder.Services.AddScoped<CostService>();
 
         // Native MSAL (plan 4.2): work + personal accounts via the Windows broker
-        // (WAM) with device-code fallback; state mirrors the serialized cache.
+        // (WAM) or, on macOS, the system browser, with device-code fallback; state
+        // mirrors the serialized cache.
         builder.Services.AddSingleton<MsalAccountService>();
         builder.Services.AddSingleton<DesktopIdentity>();
 
@@ -139,9 +224,11 @@ public static class MauiProgram
         // DrawerService must be the current circuit's instance - the func gets the
         // scoped provider straight from the click site in TopMenu.
         AntDesign.DrawerRef<string>? scanDrawer = null;
+        AntDesign.DrawerRef<string>? workspaceDrawer = null;
         builder.Services.AddSingleton(new AdsHostFeatures
         {
             TenantScanLabel = "Tenant scan",
+            WorkspaceDataLabel = "Workspace data",
             DesignsAreLocal = true,
             OpenTenantScan = async circuitServices =>
             {
@@ -154,6 +241,16 @@ public static class MauiProgram
                     new AntDesign.DrawerOptions { Title = "Tenant scan", Width = "720" }, string.Empty);
                 drawerRef.OnClose = () => { scanDrawer = null; return Task.CompletedTask; };
                 scanDrawer = drawerRef;
+            },
+            OpenWorkspaceData = async circuitServices =>
+            {
+                var drawers = circuitServices.GetRequiredService<AntDesign.DrawerService>();
+                if (workspaceDrawer is not null)
+                    await workspaceDrawer.CloseAsync();
+                var drawerRef = await drawers.CreateAsync<Components.WorkspaceDataDrawerTemplate, string, string>(
+                    new AntDesign.DrawerOptions { Title = "Workspace data", Width = "720" }, string.Empty);
+                drawerRef.OnClose = () => { workspaceDrawer = null; return Task.CompletedTask; };
+                workspaceDrawer = drawerRef;
             },
             // v2 10.4 online half: the naming drawer's live availability rides the same ARM
             // plumbing; the browser host leaves these null and the affordance vanishes.
@@ -187,12 +284,44 @@ public static class MauiProgram
         var app = builder.Build();
         Services = app.Services;
 
-        // deploy.db: created with the full schema on first run. (A later schema change needs a
-        // migration - EnsureCreated never alters an existing file.)
-        using (var scope = app.Services.CreateScope())
-            scope.ServiceProvider.GetRequiredService<AzureDesignStudio.Services.Models.DesignDbContext>().Database.EnsureCreated();
+        // deploy.db is under EF migrations: a new file gets the baseline, a file an earlier build
+        // created from the model adopts it, and an existing file is backed up (privately, in
+        // backups/deploy) before any pending migration. A later schema change is a migration.
+        // A failed backup stops that upgrade; the same native page as the workspace shows why.
+        try
+        {
+            using var scope = app.Services.CreateScope();
+            DeployDbStartup.Migrate(
+                scope.ServiceProvider.GetRequiredService<AzureDesignStudio.Services.Models.DesignDbContext>(),
+                System.IO.Path.Combine(appData, "deploy.db"),
+                System.IO.Path.Combine(appData, "backups", "deploy"));
+        }
+        catch (Exception e) when (IsStartupFailure(e))
+        {
+            StartupFailure = e;
+            LogCrash("DEPLOY DATABASE STARTUP FAILED", e);
+        }
+
+        if (StartupFailure is null)
+        {
+            // Daily workspace backups for the life of the process; the loop reports its own tick
+            // failures through the service's error callback and ends quietly when cancelled.
+            var backupLoop = new CancellationTokenSource();
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => backupLoop.Cancel();
+            _ = Task.Run(() => backupService.RunLoopAsync(backupLoop.Token));
+        }
         return app;
     }
+
+    /// <summary>
+    /// The startup errors that get the failure page: a failed upgrade or backup (<see cref="WorkspaceUpgradeException"/>,
+    /// <see cref="InvalidOperationException"/>) and the file system or database errors a startup step can raise
+    /// (<see cref="IOException"/>, <see cref="UnauthorizedAccessException"/>, any <see cref="System.Data.Common.DbException"/>
+    /// such as <c>SqliteException</c>, and EF Core's <c>DbUpdateException</c>). Anything else is a bug and still crashes.
+    /// </summary>
+    internal static bool IsStartupFailure(Exception e) =>
+        e is WorkspaceUpgradeException or InvalidOperationException or IOException or UnauthorizedAccessException
+            or System.Data.Common.DbException or Microsoft.EntityFrameworkCore.DbUpdateException;
 
 }
 
@@ -228,12 +357,14 @@ internal sealed class FileLoggerProvider(string path) : ILoggerProvider
     }
 }
 
-// The WebView2 virtual host (https://0.0.0.1/) is only resolvable inside the WebView's
+// The WebView virtual host (0.0.0.1) is only resolvable inside the WebView's
 // JS network stack; .NET HttpClient would hit an unreachable IP. Serve same-origin
 // requests straight from the packaged wwwroot, everything else goes to the real network.
 internal sealed class PackageAssetHandler(Uri webViewOrigin) : HttpMessageHandler
 {
-    private readonly HttpClient _network = new(new HttpClientHandler());
+    // An invoker, not an HttpClient: the request already went through the calling HttpClient,
+    // and a second HttpClient refuses a request message that was sent once.
+    private readonly HttpMessageInvoker _network = new(new HttpClientHandler());
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -241,7 +372,7 @@ internal sealed class PackageAssetHandler(Uri webViewOrigin) : HttpMessageHandle
         if (uri.Host == webViewOrigin.Host && (uri.Scheme == "https" || uri.Scheme == "http"))
         {
             var path = uri.AbsolutePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
-            var file = Path.Combine(AppContext.BaseDirectory, "wwwroot", path);
+            var file = Path.Combine(AppContent.Root, "wwwroot", path);
             if (File.Exists(file))
             {
                 var response = new HttpResponseMessage(HttpStatusCode.OK)
@@ -275,3 +406,4 @@ internal sealed class PackageAssetHandler(Uri webViewOrigin) : HttpMessageHandle
         base.Dispose(disposing);
     }
 }
+this line is not C#;

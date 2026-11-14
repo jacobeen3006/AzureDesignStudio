@@ -1,14 +1,22 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-    <!-- See https://aka.ms/maui-publish-app-store#add-entitlements for more information about adding entitlements.-->
+    <!-- Distributed as a .dmg (Developer ID / ad-hoc), not through the Mac App Store, so no App
+         Sandbox: the app runs the Azure CLI (`az`) as a sign-in fallback, opens a loopback port
+         for the browser sign-in redirect, and keeps its secrets in the login Keychain - a
+         sandboxed build could do none of the three without a team-signed provisioning profile.
+         The cs.* keys are what the .NET runtime needs under the hardened runtime a notarized
+         build must use (the JIT writes executable memory). -->
     <dict>
-        <!-- App Sandbox must be enabled to distribute a MacCatalyst app through the Mac App Store. -->
         <key>com.apple.security.app-sandbox</key>
-        <true/>
-        <!-- When App Sandbox is enabled, this value is required to open outgoing network connections. -->
+        <false/>
         <key>com.apple.security.network.client</key>
+        <true/>
+        <key>com.apple.security.cs.allow-jit</key>
+        <true/>
+        <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+        <true/>
+        <key>com.apple.security.cs.disable-library-validation</key>
         <true/>
     </dict>
 </plist>
-

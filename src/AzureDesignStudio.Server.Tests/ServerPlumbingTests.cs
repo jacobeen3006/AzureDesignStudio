@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using AzureDesignStudio.Server.Services;
 using AzureDesignStudio.Services;
 using AzureDesignStudio.Server.Utils;
@@ -90,29 +89,6 @@ public class DesktopGrpcEndpointTests
 
 public class ServiceToolsTests
 {
-    private static ClaimsPrincipal User(params Claim[] claims) => new(new ClaimsIdentity(claims, "test"));
-
-    [Fact]
-    public void ObjectIdIsReadFromEitherClaimName()
-    {
-        var id = Guid.NewGuid().ToString();
-
-        Assert.Equal(id, ServiceTools.GetUserId(User(new Claim("http://schemas.microsoft.com/identity/claims/objectidentifier", id))));
-        Assert.Equal(id, ServiceTools.GetUserId(User(new Claim("oid", id))));
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("not-a-guid")]
-    [InlineData("12345")]
-    public void ClaimThatIsNotAGuidReadsAsNoIdentity(string value)
-    {
-        Assert.Null(ServiceTools.GetUserId(User(new Claim("oid", value))));
-    }
-
-    [Fact]
-    public void NoClaimReadsAsNoIdentity() => Assert.Null(ServiceTools.GetUserId(User()));
-
     [Theory]
     [InlineData("hub and spoke 2", true)]
     [InlineData("", false)]

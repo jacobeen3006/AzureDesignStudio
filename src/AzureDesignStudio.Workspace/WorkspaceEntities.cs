@@ -124,6 +124,31 @@ public class ChangeFeedRecord
 }
 
 /// <summary>
+/// Wave B3: one governance finding a scan collected - an open Advisor recommendation, a
+/// non-compliant policy state or an unhealthy Defender for Cloud assessment - keyed by the scan,
+/// the source and the finding's own record id. <see cref="ResourceId"/> is the ARM id of the
+/// resource it is about (compare it case-insensitively). Like <see cref="ChangeFeedRecord"/> it
+/// has no foreign key to the scan: the table is added to existing workspace files by guarded DDL.
+/// </summary>
+public class GovernanceFindingRecord
+{
+    public required string ScanId { get; set; }
+    /// <summary>Advisor, Policy or Defender.</summary>
+    public required string Source { get; set; }
+    /// <summary>The recommendation, policy state or assessment id.</summary>
+    public required string RecordId { get; set; }
+    public required string ResourceId { get; set; }
+    public required string SubscriptionId { get; set; }
+    /// <summary>Low, Medium or High.</summary>
+    public required string Severity { get; set; }
+    public required string Category { get; set; }
+    public required string Title { get; set; }
+    public string? Detail { get; set; }
+    public string? PolicyAssignmentId { get; set; }
+    public string? PolicyDefinitionId { get; set; }
+}
+
+/// <summary>
 /// v2 13.5: one decommission window's execution state, persisted so the release verb
 /// re-sends the stored scopes (selection drift-proof) and an offline reopen shows the
 /// last known state. State: executed (all locked|already-locked), partial (some failed),

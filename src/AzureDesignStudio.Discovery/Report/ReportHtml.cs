@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Net;
 using System.Text;
+using AzureDesignStudio.Discovery.Governance;
+using AzureDesignStudio.Discovery.Scan;
 
 namespace AzureDesignStudio.Discovery.Report;
 
@@ -37,6 +39,7 @@ public static class ReportHtml
         Exposure(sb, model);
         Unmanaged(sb, model);
         Drift(sb, model);
+        Governance(sb, model);
         Spend(sb, model);
         Topology(sb, model);
 
@@ -52,6 +55,9 @@ public static class ReportHtml
         Row(sb, "Unmanaged resources", m.UnmanagedCount);
         Row(sb, "Protected resources", m.ProtectedCount);
         Row(sb, "Drifted resources", m.DriftCount);
+        foreach (var source in GovernanceSources.All)
+            TextRow(sb, GovernanceStatus.Label(source) + " findings",
+                GovernanceStatus.Brief(m.GovernanceSources, source, CountOf(m, source)));
         if (m.SpendTotal is { } total)
             sb.Append("<tr><td>Actual spend</td><td class=\"num\">")
                 .Append(E(Num(total)))
@@ -101,6 +107,47 @@ public static class ReportHtml
         sb.Append("</table>");
     }
 
+    // Wave B3: one status per source first, so "collected, none found" never looks like a source
+    // that was not requested, failed, stopped early or predates governance collection.
+    private static void Governance(StringBuilder sb, ReportModel m)
+    {
+        sb.Append("<h2>Governance</h2><table><tr><th>Source</th><th>Status</th></tr>");
+        foreach (var source in GovernanceSources.All)
+            sb.Append("<tr><td>").Append(E(GovernanceStatus.Label(source))).Append("</td><td>")
+                .Append(E(GovernanceStatus.Line(m.GovernanceSources, source, CountOf(m, source)))).Append("</td></tr>");
+        sb.Append("</table>");
+        // Rows this build cannot read are not listed; say they exist rather than "no findings".
+        if (GovernanceStatus.MalformedNote(m.GovernanceMalformed) is { } malformed)
+            sb.Append("<p>").Append(E(malformed)).Append("</p>");
+
+        var findings = GovernanceStatus.Ordered(m.Governance ?? []);
+        if (findings.Count > 0)
+        {
+            sb.Append("<table><tr><th>Severity</th><th>Source</th><th>Resource</th><th>Category</th><th>Finding</th><th>Detail</th></tr>");
+            foreach (var f in findings)
+                sb.Append("<tr><td class=\"sev-").Append(f.Severity).Append("\">").Append(f.Severity).Append("</td><td>")
+                    .Append(E(GovernanceStatus.Label(GovernanceStatus.KeyOf(f.Source)))).Append("</td><td><code>")
+                    .Append(E(f.ResourceId)).Append("</code></td><td>").Append(E(f.Category)).Append("</td><td>")
+                    .Append(E(f.Title)).Append("</td><td>").Append(E(f.Detail ?? "")).Append("</td></tr>");
+            sb.Append("</table>");
+        }
+
+        if (m.GovernanceSources is not { } states)
+            return; // not collected: the status lines above say so, and there is nothing to qualify
+        var known = GovernanceSources.All.Select(source => states.TryGetValue(source, out var state) ? state.State : null).ToList();
+        if (known.All(state => state == SourceState.NotRequested))
+            return;
+        if (findings.Count == 0 && m.GovernanceMalformed <= 0 && known.Contains(SourceState.Collected))
+            sb.Append("<p>No governance findings were found in the collected sources.</p>");
+        sb.Append("<ul>");
+        foreach (var caveat in GovernanceCaveats.All)
+            sb.Append("<li><small>").Append(E(caveat)).Append("</small></li>");
+        sb.Append("</ul>");
+    }
+
+    private static int CountOf(ReportModel m, string source) =>
+        m.Governance?.Count(f => f is not null && GovernanceStatus.KeyOf(f.Source) == source) ?? 0;
+
     private static void Spend(StringBuilder sb, ReportModel m)
     {
         if (m.SpendByServiceFamily is not { Count: > 0 } buckets) return;
@@ -128,6 +175,9 @@ public static class ReportHtml
     private static void Row(StringBuilder sb, string label, int count) =>
         sb.Append("<tr><td>").Append(E(label)).Append("</td><td class=\"num\">")
             .Append(count.ToString(CultureInfo.InvariantCulture)).Append("</td></tr>");
+
+    private static void TextRow(StringBuilder sb, string label, string value) =>
+        sb.Append("<tr><td>").Append(E(label)).Append("</td><td class=\"num\">").Append(E(value)).Append("</td></tr>");
 
     private static string Num(decimal value) => value.ToString("0.00", CultureInfo.InvariantCulture);
 

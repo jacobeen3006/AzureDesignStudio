@@ -100,3 +100,75 @@ mismatch fails installation with `0x8007000B`.
 - They are listed alongside server designs and always win over the server
   copy until they sync (next successful save/list/load pushes them).
 - Deleting a design removes both copies.
+
+## 6. App roles, tenants and approvals
+
+The server decides who may change guardrails and who may approve a deployment plan from two **app roles** on
+the server API app registration, and it keeps every organization's data apart by tenant. This section sets the
+roles up; `docs/identity-and-guardrails.md` explains every rule and refusal in full.
+
+| Role (`value`) | Lets the user |
+|---|---|
+| `Guardrail.Admin` | read and change the tenant's guardrail policy and the two tenant settings (allow self-approval, guardrail policy mode) |
+| `Deploy.Approver` | approve a What-If plan and approve a decommission window |
+
+### Define the roles
+
+On the server API app registration (step 1), open **App roles** (or edit the **Manifest**) and add these two
+entries to `appRoles`. Generate a fresh GUID for each `id`; the ones below are placeholders.
+
+```json
+"appRoles": [
+  {
+    "allowedMemberTypes": [ "User" ],
+    "displayName": "Guardrail administrator",
+    "id": "<new guid for Guardrail.Admin>",
+    "description": "Reads and changes the tenant guardrail policy and tenant settings.",
+    "isEnabled": true,
+    "value": "Guardrail.Admin"
+  },
+  {
+    "allowedMemberTypes": [ "User" ],
+    "displayName": "Deploy approver",
+    "id": "<new guid for Deploy.Approver>",
+    "description": "Approves What-If plans and decommission windows.",
+    "isEnabled": true,
+    "value": "Deploy.Approver"
+  }
+]
+```
+
+`value` is exactly what the token carries in its `roles` claim, and it is **case-sensitive**: `Guardrail.Admin`
+and `Deploy.Approver`, nothing else. A role can be assigned to a user or, with Microsoft Entra ID P1 or P2, to
+a group (nested groups are not supported for app role assignment). A role that arrives through a group may
+fail to show up in the token, so check the token of a test user before relying on it.
+
+### Assign a role
+
+1. Entra admin center, **Enterprise applications**, open the **server app** (the enterprise application that
+   belongs to the registration from step 1).
+2. **Users and groups**, **Add user/group**, pick the user (or group) and the role, **Assign**.
+3. If the enterprise application has **Assignment required** switched on, users without any assignment
+   cannot sign in to the server at all; leave it off unless you want that.
+
+### Roles are not retroactive
+
+A token only carries the roles that were assigned **before it was issued**. After assigning or removing a role,
+the user signs out of Azure Design Studio and signs back in to get a new token; until then the server still
+refuses with `GUARDRAIL_ADMIN_REQUIRED` or `PLAN_APPROVER_ROLE_REQUIRED` and the message says so. The
+browser app's service worker no longer precaches `appsettings*.json`, so a configuration change is picked up
+from the network; a browser that already holds the old cache refreshes it when the next service worker version
+activates.
+
+### Other callers
+
+- **Work or school account:** the roles above are required, and the data is scoped to the tenant (`tid`).
+- **Personal Microsoft account:** there is no organization to assign roles in. A personal account administers
+  its **own** scope (scope key = its own object id) and counts as `Deploy.Approver` for it. Approving a plan
+  it requested itself is still governed by the tenant setting "allow self-approval" of that scope, which the
+  personal account turns on itself with the call recipe in the operator document.
+- **Desktop app:** it runs every service in-process as a single-user host and counts as administrator and
+  approver, and may approve its own plans. No role assignment is needed or used.
+
+See `docs/identity-and-guardrails.md` for the response codes, the tenant settings and how an administrator
+changes them.

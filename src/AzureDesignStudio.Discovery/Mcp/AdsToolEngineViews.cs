@@ -139,3 +139,52 @@ public sealed record ReachReport(
     IReadOnlyList<string> Principals,
     IReadOnlyList<string> Caveats,
     IReadOnlyList<ReachDiagnosticView> Diagnostics);
+
+/// <summary>
+/// How far one governance source got in the scan (Wave B3). <see cref="Source"/> is the stored
+/// source name (advisor, policy, defender). <see cref="State"/> is the manifest's state
+/// (collected, incomplete, unavailable, not-requested), <see cref="AdsToolEngine.NotCollected"/>
+/// for a scan that predates governance collection, or <see cref="AdsToolEngine.Unknown"/> when the
+/// scan has no readable manifest. Only "collected" means zero findings are zero findings.
+/// <see cref="StoredFindings"/> counts the readable findings of this source stored with the scan,
+/// whatever the filters.
+/// </summary>
+public sealed record GovernanceSourceView(string Source, string State, string? Detail, int StoredFindings);
+
+/// <summary>Findings per source over every finding the filters match (not only the returned page).</summary>
+public sealed record GovernanceSourceCounts(int Advisor, int Policy, int Defender);
+
+/// <summary>Findings per severity over every finding the filters match (not only the returned page).</summary>
+public sealed record GovernanceSeverityCounts(int High, int Medium, int Low);
+
+/// <summary>One stored governance finding; <see cref="Source"/> is the stored source name
+/// (advisor, policy, defender), <see cref="Severity"/> the enum name (High/Medium/Low) and
+/// <see cref="RecordId"/> the recommendation, policy state or assessment id.</summary>
+public sealed record GovernanceRowView(
+    string Source,
+    string Severity,
+    string ResourceId,
+    string SubscriptionId,
+    string Category,
+    string Title,
+    string? Detail,
+    string? PolicyAssignmentId,
+    string? PolicyDefinitionId,
+    string RecordId);
+
+/// <summary>
+/// Governance findings of one scan (Wave B3, ads_governance): the state of every source, the
+/// counts over every finding the filters match, and the first rows of them, most severe first.
+/// <see cref="Total"/> is the post-filter count, <see cref="Truncated"/> says more findings
+/// match than <see cref="Rows"/> holds. The caveats always carry
+/// <see cref="AzureDesignStudio.Discovery.Governance.GovernanceCaveats.All"/>, one line per source in scope that was not
+/// collected in full, and the malformed rows skipped.
+/// </summary>
+public sealed record GovernanceReport(
+    IReadOnlyList<GovernanceSourceView> Sources,
+    GovernanceSourceCounts CountsBySource,
+    GovernanceSeverityCounts CountsBySeverity,
+    IReadOnlyList<GovernanceRowView> Rows,
+    int Total,
+    bool Truncated,
+    IReadOnlyList<string> Caveats);

@@ -24,10 +24,10 @@ public sealed class DesktopAmbientCredential(AdsTokenBroker broker, TenantInvent
 }
 
 /// <summary>
-/// Keeps a linked service principal's client secret in the Windows Credential Manager. What
-/// the deploy service stores in its database is only the name of that entry, so the database
-/// file never holds a secret, and removing the entry revokes the link on this machine.
-/// (A macOS host will implement the same contract over the Keychain.)
+/// Keeps a linked service principal's client secret in the OS secret store (Windows Credential
+/// Manager, macOS Keychain). What the deploy service stores in its database is only the name of
+/// that entry, so the database file never holds a secret, and removing the entry revokes the
+/// link on this machine.
 /// </summary>
 public sealed class CredentialStoreSecretProtector : ICryptoService
 {
@@ -36,17 +36,17 @@ public sealed class CredentialStoreSecretProtector : ICryptoService
     public Task<string> Encrypt(string plainText)
     {
         var name = "LinkedServicePrincipal-" + Guid.NewGuid().ToString("N");
-        WindowsSecretStore.Save(name, "azure-design-studio", plainText);
+        SecretStore.Save(name, "azure-design-studio", plainText);
         return Task.FromResult(Prefix + name);
     }
 
     public Task<string> Decrypt(string encryptedText)
     {
         if (!encryptedText.StartsWith(Prefix, StringComparison.Ordinal))
-            throw new FormatException("The stored value is not a Credential Manager reference.");
+            throw new FormatException($"The stored value is not a {SecretStore.Name} reference.");
 
-        return Task.FromResult(WindowsSecretStore.TryGet(encryptedText[Prefix.Length..])
-            ?? throw new InvalidOperationException("The linked secret is no longer in the Windows Credential Manager; link the subscription again."));
+        return Task.FromResult(SecretStore.TryGet(encryptedText[Prefix.Length..])
+            ?? throw new InvalidOperationException($"The linked secret is no longer in the {SecretStore.Name}; link the subscription again."));
     }
 }
 

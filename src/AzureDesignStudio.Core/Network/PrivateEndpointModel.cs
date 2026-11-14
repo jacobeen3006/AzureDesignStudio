@@ -36,6 +36,10 @@ namespace AzureDesignStudio.Core.Network
             ["Microsoft.DataFactory/factories"] = "dataFactory",
         };
 
+        /// <summary>True when the ARM resource type offers a private link on the palette.</summary>
+        public static bool SupportsPrivateLink(string armResourceType) =>
+            !string.IsNullOrEmpty(armResourceType) && GroupIdByType.ContainsKey(armResourceType);
+
         public PrivateEndpointModel() : base()
         {
             AddAzurePort(PortAlignment.Left);

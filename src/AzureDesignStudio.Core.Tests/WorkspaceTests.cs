@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -270,6 +271,131 @@ namespace AzureDesignStudio.Core.Tests
             // and the fresh scan is now the single resumable candidate
             var current = await scans.GetResumableAsync();
             Assert.Equal(fresh.Id, current!.Id);
+        }
+
+        // Wave B3: governance findings are stored with the scan that collected them.
+
+        [Fact]
+        public async Task PersistSourcePage_UpsertsAndKeepsResourceCount()
+        {
+            var scans = new WorkspaceScans(_workspace);
+            var scan = await scans.StartAsync("tenant", "Tenant");
+            await scans.PersistPageAsync(scan.Id, [Snapshot("one"), Snapshot("two")], """{"rows":2}""");
+
+            var assignment = "/subscriptions/s/providers/Microsoft.Authorization/policyAssignments/require-tags";
+            var policy = new GovernanceFindingRow("Policy", "state-1", Widget("one"), "s", "Medium", "Policy", "require-tags",
+                "tagRule", assignment, "/providers/Microsoft.Authorization/policyDefinitions/d1");
+            await scans.PersistSourcePageAsync(scan.Id,
+                [Finding("Advisor", "rec-1", title: "Enable backup"), policy],
+                """{"rows":2}""");
+
+            // The same records stored again (a group queried a second time) replace their rows
+            // on (source, record id); the same record id under another source is another row,
+            // and a record listed twice in one page is stored once, the later one winning.
+            await scans.PersistSourcePageAsync(scan.Id,
+                [
+                    Finding("Advisor", "rec-1", title: "Enable soft delete", severity: "High"),
+                    Finding("Advisor", "rec-2", title: "first"),
+                    Finding("Advisor", "rec-2", title: "second"),
+                    Finding("Defender", "state-1"),
+                ],
+                """{"rows":2}""");
+
+            var stored = await scans.GetGovernanceAsync(scan.Id);
+            Assert.Equal(4, stored.Count);
+            var rec1 = stored.Single(r => r.Source == "Advisor" && r.RecordId == "rec-1");
+            Assert.Equal(("Enable soft delete", "High"), (rec1.Title, rec1.Severity));
+            Assert.Equal("second", stored.Single(r => r.RecordId == "rec-2").Title);
+            Assert.Equal(policy, stored.Single(r => r.Source == "Policy")); // every field round-trips
+            Assert.Single(stored, r => r.Source == "Defender" && r.RecordId == "state-1");
+
+            // ResourceCount counts the inventory; findings never change it.
+            Assert.Equal(2, Assert.Single(await scans.ListAsync()).ResourceCount);
+        }
+
+        [Fact]
+        public async Task PersistSourcePage_WritesTheCheckpoint()
+        {
+            var scans = new WorkspaceScans(_workspace);
+            var scan = await scans.StartAsync("tenant", "Tenant", checkpointJson: """{"completedQueries":[],"rows":0}""");
+
+            const string afterAdvisor = """{"completedQueries":["advisor:gA"],"rows":0,"sourceRows":{"advisor":1}}""";
+            await scans.PersistSourcePageAsync(scan.Id, [Finding("Advisor", "rec-1")], afterAdvisor);
+            var resumable = await scans.GetResumableAsync();
+            Assert.Equal(scan.Id, resumable!.Id);
+            Assert.Equal(afterAdvisor, resumable.CheckpointJson);
+
+            // A group collected with no findings still records that it was collected.
+            const string afterPolicy = """{"completedQueries":["advisor:gA","policy:gA"],"rows":0,"sourceRows":{"advisor":1,"policy":0}}""";
+            await scans.PersistSourcePageAsync(scan.Id, [], afterPolicy);
+            Assert.Equal(afterPolicy, (await scans.GetResumableAsync())!.CheckpointJson);
+            Assert.Single(await scans.GetGovernanceAsync(scan.Id));
+        }
+
+        [Fact]
+        public async Task PersistSourcePage_PageThatCannotBeStored_LeavesRowsAndCheckpointAsTheyWere()
+        {
+            var scans = new WorkspaceScans(_workspace);
+            var scan = await scans.StartAsync("tenant", "Tenant");
+            const string before = """{"completedQueries":["advisor:gA"],"rows":0}""";
+            await scans.PersistSourcePageAsync(scan.Id, [Finding("Advisor", "rec-1", title: "kept")], before);
+
+            // One row breaks a NOT NULL column: the whole page and its checkpoint are refused,
+            // including the replacement of rec-1 that came before it.
+            await Assert.ThrowsAnyAsync<DbUpdateException>(() => scans.PersistSourcePageAsync(scan.Id,
+                [Finding("Advisor", "rec-1", title: "replaced"), Finding("Advisor", "rec-2") with { Title = null! }],
+                """{"completedQueries":["advisor:gA","advisor:gB"],"rows":0}"""));
+
+            Assert.Equal("kept", Assert.Single(await scans.GetGovernanceAsync(scan.Id)).Title);
+            Assert.Equal(before, (await scans.GetResumableAsync())!.CheckpointJson);
+        }
+
+        [Fact]
+        public async Task GetGovernance_ReturnsOnlyThatScan()
+        {
+            var scans = new WorkspaceScans(_workspace);
+            var first = await scans.StartAsync("tenant", "Tenant");
+            await scans.PersistSourcePageAsync(first.Id,
+                [Finding("Advisor", "rec-1", resourceId: Widget("b")), Finding("Policy", "state-1", resourceId: Widget("a"))],
+                "{}");
+            var second = await scans.StartAsync("tenant", "Tenant");
+            await scans.PersistSourcePageAsync(second.Id,
+                [Finding("Advisor", "rec-1", title: "second scan"), Finding("Defender", "assessment-9")],
+                "{}");
+
+            // Ordered by resource id; the same record id in another scan is that scan's own row.
+            Assert.Equal([("Policy", "state-1"), ("Advisor", "rec-1")],
+                (await scans.GetGovernanceAsync(first.Id)).Select(r => (r.Source, r.RecordId)));
+            Assert.All(await scans.GetGovernanceAsync(first.Id), r => Assert.NotEqual("second scan", r.Title));
+            Assert.Equal(2, (await scans.GetGovernanceAsync(second.Id)).Count);
+            Assert.Empty(await scans.GetGovernanceAsync("no-such-scan"));
+        }
+
+        private static string Widget(string name) =>
+            "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Test/widgets/" + name;
+
+        private static InventorySnapshotRow Snapshot(string name) =>
+            new(Widget(name), name, "Microsoft.Test/widgets", "westeurope", "rg", "s", null, null);
+
+        private static GovernanceFindingRow Finding(string source, string recordId, string? resourceId = null,
+            string title = "Enable soft delete", string severity = "Medium") =>
+            new(source, recordId, resourceId ?? Widget("one"), "s", severity, "Security", title,
+                Detail: null, PolicyAssignmentId: null, PolicyDefinitionId: null);
+
+        /// <summary>Each result row of <paramref name="sql"/> as its columns joined with '|'.</summary>
+        private static List<string> Query(WorkspaceDb workspace, string sql)
+        {
+            using var db = workspace.CreateContext();
+            var connection = db.Database.GetDbConnection();
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            using var reader = command.ExecuteReader();
+            var rows = new List<string>();
+            while (reader.Read())
+                rows.Add(string.Join("|", Enumerable.Range(0, reader.FieldCount)
+                    .Select(i => Convert.ToString(reader.GetValue(i), CultureInfo.InvariantCulture))));
+            return rows;
         }
     }
 }

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AzureDesignStudio.Discovery.Governance;
 using AzureDesignStudio.Discovery.Inventory;
 using AzureDesignStudio.Discovery.Scan;
 using AzureDesignStudio.Workspace;
@@ -9,7 +10,8 @@ namespace AzureDesignStudio.Desktop;
 /// <summary>
 /// Workspace-backed scan sink (plan 7.5): pages land as snapshots + durable checkpoint in
 /// SQLite; the finished scan keeps a manifest (scope, group counts, partial failures) so
-/// history answers "what did this snapshot cover, and what was missing".
+/// history answers "what did this snapshot cover, and what was missing". Governance source
+/// groups (Wave B3) land the same way, as findings stored with the scan.
 /// </summary>
 public sealed class WorkspaceScanSink(WorkspaceDb db) : IScanSink
 {
@@ -33,20 +35,26 @@ public sealed class WorkspaceScanSink(WorkspaceDb db) : IScanSink
         await _scans.PersistPageAsync(ScanId!, rows, checkpoint.ToJson());
     }
 
+    public async Task SourcePagePersistedAsync(string source, string queryKey, IReadOnlyList<GovernanceFinding> findings, ScanCheckpoint checkpoint, CancellationToken ct)
+    {
+        // Enum values by name: the workspace stores plain strings, never Discovery types.
+        var rows = findings.Select(f => new GovernanceFindingRow(
+            f.Source.ToString(), f.RecordId, f.ResourceId, f.SubscriptionId, f.Severity.ToString(),
+            f.Category, f.Title, f.Detail, f.PolicyAssignmentId, f.PolicyDefinitionId)).ToList();
+        await _scans.PersistSourcePageAsync(ScanId!, rows, checkpoint.ToJson(), ct);
+    }
+
     public async Task ScanFinishedAsync(string status, ScanCheckpoint checkpoint, CancellationToken ct)
     {
-        var manifest = JsonSerializer.Serialize(new ScanManifestView(
-            checkpoint.CompletedQueries.Count,
-            checkpoint.FailedQueries.Count,
-            checkpoint.Rows,
-            checkpoint.AnyTruncated), JsonOptions);
+        // TotalGroups is set by the engine from the request on every run, resumes included.
+        var manifest = ScanManifest.Build(status, checkpoint, checkpoint.TotalGroups).ToJson();
+        // The error describes the inventory only. A governance source that failed is in the
+        // manifest (that source unavailable, with its reason), never in the scan's Error.
         var error = checkpoint.FailedQueries.Count == 0
             ? null
             : string.Join("; ", checkpoint.FailedQueries.Select(f => $"{f.Key}: {f.Value}"));
         await _scans.FinishAsync(ScanId!, status, checkpoint.ToJson(), manifest, error);
     }
-
-    private sealed record ScanManifestView(int GroupsCompleted, int GroupsFailed, int Rows, bool Truncated);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {

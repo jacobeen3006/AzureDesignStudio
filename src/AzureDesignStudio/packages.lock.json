@@ -97,9 +97,9 @@
       },
       "Grpc.Tools": {
         "type": "Direct",
-        "requested": "[2.66.0, )",
-        "resolved": "2.66.0",
-        "contentHash": "URTltx2E0aTGQqVW+H09AZiGR/qyQ3naHPymSG1/Ytgm8bPdjSltnsIFanbxb7rXxdYwGzLFGy82R82M1UktXg=="
+        "requested": "[2.85.0, )",
+        "resolved": "2.85.0",
+        "contentHash": "JpACpJuD56v9MBlgJEakwBLbbDifYwE3fpktbsKMPOI3yvs/VFFQVGnmWatu6mgZSNo7gzFe+TDmda9SOKg+NQ=="
       },
       "Microsoft.AspNetCore.App.Internal.Assets": {
         "type": "Direct",

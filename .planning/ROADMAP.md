@@ -14,9 +14,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Land and Stabilize** - Commit the working slice in reviewable chunks, remove tracked blobs and scratch, fix the stale pointer zone, correct docs, decide the publisher (completed 2026-10-21)
 - [ ] **Phase 2: Reproducible Build and CI Baseline** - Pin the SDK, centralize and lock packages, gate Desktop on PRs, block vulnerable packages
-- [ ] **Phase 3: Server Foundation and Integration Harness** - Config-selected providers, a reachable `Program`, and a real hosted-server test channel
-- [ ] **Phase 4: Database Durability** - Baseline migrations, WAL, integrity check, backup/restore, and read-only MCP over one workspace
-- [ ] **Phase 5: Identity, Guardrails, and Offline Development** - Typed `oid`/`tid`, deny-by-default RPCs, tenant-scoped roles, and a DEV crypto provider
+- [x] **Phase 3: Server Foundation and Integration Harness** - Config-selected providers, a reachable `Program`, and a real hosted-server test channel (completed 2026-11-14)
+- [x] **Phase 4: Database Durability** - Baseline migrations, WAL, integrity check, backup/restore, and read-only MCP over one workspace (completed 2026-11-14)
+- [x] **Phase 5: Identity, Guardrails, and Offline Development** - Typed `oid`/`tid`, deny-by-default RPCs, tenant-scoped roles, and a DEV crypto provider (completed 2026-11-14)
 - [ ] **Phase 6: Bounds, Payload Contract, and Health** - Per-user limits, calibrated deadlines, shared payload caps, and anonymous health endpoints
 - [ ] **Phase 7: Round 2 Shell Completion** - Zone contract, palette lifetime and keyboard path, honest status, one theme axis, link and a11y gates (parallel track)
 - [ ] **Phase 8: Verification Depth and Diagnostics** - Server, component, and E2E suites in CI, coverage and flake budgets, stable error codes, bounded logs, support bundle
@@ -106,7 +106,21 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. A test that creates a design writes to a temporary SQLite file; no test touches a developer's `workspace.db` or a live tenant.
   4. `Program` is reachable from the test project, and the RPC hot path no longer calls `EnsureCreated`.
 
-**Plans**: TBD
+**Plans**: 6/6 plans complete
+**Wave 1**
+- [x] 03-01-PLAN.md — Restore unblock (two new AutoMapper advisories, same dated expiry), Mvc.Testing 10.0.15 / EF Core Sqlite / Core reference, only the Server and Server.Tests locks regenerated
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [x] 03-02-PLAN.md — Tracer: the real host booted under `WebApplicationFactory<Program>`, test auth handler, TestServer gRPC channel, auth contract and the three-service surface
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [x] 03-03-PLAN.md — Config-selected providers: `DatabaseProvider`, `DatabaseBootstrapper`, `CryptoProvider`, no preprocessor conditionals, harness on a unique temp SQLite file
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [x] 03-04-PLAN.md — Seam unit tests (bootstrapper, provider rules, crypto rules) and the design-time `DesignDbContext` factory
+- [x] 03-05-PLAN.md — Handler fault becomes an RPC status, temp-file lifecycle and isolation, crypto seam over RPC
+- [x] 03-06-PLAN.md — Source guards (no `#if`, single `EnsureCreated` caller, no test auth in Server) and AGENTS.md
+
 **Implementation note**: `src/AzureDesignStudio.Server/Program.cs` (`public partial class Program`), `Database:Provider`/`Crypto:Provider` read from configuration, `IsDevelopment()` gating diagnostics only, direct Server→Core reference, design-time context factories beside `Persistence/DatabaseBootstrapper`. New `AzureDesignStudio.Server.Tests` on `Microsoft.AspNetCore.Mvc.Testing` 10.0.13 with a test auth handler; SQLite temp files with `ClearAllPools()` by default, InMemory only for pure service logic.
 
 ### Phase 4: Database Durability
@@ -121,7 +135,36 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Startup `quick_check` surfaces a deliberately corrupted workspace instead of opening it, and a user can take a `VACUUM INTO` backup and restore it with data verified.
   5. MCP opens a WAL workspace read-only (or reports the explicit `ReadWrite + query_only` fallback it used) and passes a cold-workspace test; the baseline adopts existing DDL, reports or dedupes rows violating new unique indexes, and documents `__EFMigrationsLock` recovery.
 
-**Plans**: TBD
+**Plans**: 13/13 plans complete
+**Wave 1**
+- [x] 04-01-PLAN.md — Tooling and fixtures: dotnet-ef 10.0.13 root manifest, EF Design package, L1-L4 legacy workspace fixtures, loader and schema describer
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [x] 04-02-PLAN.md — Workspace schema authority: guarded-SQL baseline migration, legacy adoption, bounded Migrate, WAL assertion
+- [x] 04-03-PLAN.md — Server schema authority: SqlServerDesignDbContext, guarded T-SQL baseline, Migrate bootstrap with AllowCreate/Migrate switches, migration-site guard
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [x] 04-04-PLAN.md — One connection factory: WAL without shared cache, per-open pragmas, MCP read-only ladder, `ads-mcp --self-check`, 15 s concurrency proof
+- [x] 04-05-PLAN.md — Integrity check and `VACUUM INTO` backups: manifest, strict naming, pure retention
+- [x] 04-06-PLAN.md — SQL Server rehearsal in a container: parity, concurrent migrate, backup/restore rollback, migration 2, CI job
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [x] 04-07-PLAN.md — Workspace startup: corruption quarantine with notice, premigration backup before any migration
+- [x] 04-08-PLAN.md — deploy.db under migrations (separable): SqliteDesignDbContext set, private backup, no model-creation calls outside the server bootstrapper
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [x] 04-09-PLAN.md — Verified staged restore and the 24 h backup service
+- [x] 04-10-PLAN.md — Unique-index dedupe (backup first, removed-rows report) and abandoned-lock recovery proof
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [x] 04-11-PLAN.md — Desktop host: startup swap, failure page, workspace-data drawer, scheduler, `ADS_DATA_DIR`
+
+**Wave 7** *(blocked on Wave 6 completion)*
+- [x] 04-12-PLAN.md — Operator runbook, AGENTS.md updates and a drift-guard test
+
+**Wave 8** *(blocked on Wave 7 completion)*
+- [x] 04-13-PLAN.md — Phase gate and human verification (Mac Catalyst launch, restore drill, runbook read) — non-autonomous
+
 **Implementation note**: `src/AzureDesignStudio.Workspace/WorkspaceDbContext.cs` and the `WorkspaceDb` options/pragma factory; `src/AzureDesignStudio.Mcp/AdsWorkspace.cs`. Baseline-as-guarded-SQL: migration 1 is the existing guarded DDL via `migrationBuilder.Sql` for both providers so legacy databases receive a history row without re-creation; migrations 2+ are generated diffs. `dotnet-ef` 10.0.13, no `Cache=Shared`, `VACUUM INTO` backup, SQL Server parity in its own container job, checked-in legacy fixtures built from today's bootstrap DDL. Back up before migrating; never re-create a user database.
 
 ### Phase 5: Identity, Guardrails, and Offline Development
@@ -136,7 +179,36 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. A caller without `Guardrail.Admin` receives 403 for guardrail read/mutation, two tenants cannot read or overwrite each other's policies or approvals, and approval requires `Deploy.Approver` with self-approval refused as a separate rule.
   5. A DEBUG developer registers and exercises a subscription with no Key Vault and no Azure credentials, while Production refuses development keys and still requires Key Vault.
 
-**Plans**: TBD
+**Plans**: 11/11 plans complete
+**Wave 1**
+- [x] 05-01-PLAN.md — Typed caller identity foundation (AdsIdentity, AdsCaller, `ServiceTools.TryGetCaller` traced through `Design.GetSaved`), in-process single-user marker, extended test helpers
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [x] 05-02-PLAN.md — Typed caller and in-band 401 on all 20 Design and Deploy RPCs, legacy URI claim proof, client no-retry contract, legacy accessor removed
+- [x] 05-03-PLAN.md — Deny-by-default RPC surface: fallback policy, explicit anonymous `Cost.GetRetailPrices`, reflection test
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [x] 05-04-PLAN.md — Tenant-scoped guardrail policy storage and enforcement (`TenantGuardrails` migration on both providers), SQL Server proof
+- [x] 05-05-PLAN.md — Development crypto provider on Data Protection, Production refusal, launch profiles
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [x] 05-06-PLAN.md — Guardrail role gate, policy-change audit event, what-if previews and tokens bound to scope and requester
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [x] 05-07-PLAN.md — Audited tenant settings (self-approval, policy mode replace/merge), `GuardrailPolicy.Merge`, thin non-UI client wrappers
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [x] 05-08-PLAN.md — Scope-keyed plan and decommission approvals (`TenantApprovals` migration), fail-closed legacy rows, SQL Server proof
+
+**Wave 7** *(blocked on Wave 6 completion)*
+- [x] 05-09-PLAN.md — `Deploy.Approver` rule, self-approval as a separate rule, requester deploys, decommission approvals
+
+**Wave 8** *(blocked on Wave 7 completion)*
+- [x] 05-10-PLAN.md — Service-worker precache exclusion, appRoles and operator documents with the settings call recipe, AGENTS.md, source guards
+
+**Wave 9** *(blocked on Wave 8 completion)*
+- [x] 05-11-PLAN.md — Phase gate and human verification (real token claims, macOS deploy.db upgrade, documents and the policy-mode interpretation) — non-autonomous
+
 **Implementation note**: new server `Auth/AdsIdentity.TryFrom` (accept mapped `oid` and the legacy URI claim through `Guid.TryParse`; never `sub`; never flip `MapInboundClaims`; in-band 401 rather than `RpcException`). `AdsPolicies` fallback plus `Guardrail.Admin`/`Deploy.Approver` app roles; tenant column on the guardrail and approval rows after Phase 4's migrations, with the legacy `Id=1`/NULL-tenant row retained as the inherited default. `ICryptoService` with a DPAPI/Data-Protection DEBUG implementation selected by `Crypto:Provider`; exclude `appsettings*.json` from service-worker precache so role/scope changes are not sticky.
 
 ### Phase 6: Bounds, Payload Contract, and Health
@@ -241,9 +313,9 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 |-------|----------------|--------|-----------|
 | 1. Land and Stabilize | 8/8 | Complete    | 2026-10-21 |
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
-| 3. Server Foundation and Integration Harness | 0/TBD | Not started | - |
-| 4. Database Durability | 0/TBD | Not started | - |
-| 5. Identity, Guardrails, and Offline Development | 0/TBD | Not started | - |
+| 3. Server Foundation and Integration Harness | 6/6 | Complete    | 2026-11-14 |
+| 4. Database Durability | 13/13 | Complete    | 2026-11-14 |
+| 5. Identity, Guardrails, and Offline Development | 11/11 | Complete    | 2026-11-14 |
 | 6. Bounds, Payload Contract, and Health | 0/TBD | Not started | - |
 | 7. Round 2 Shell Completion | 0/TBD | Not started | - |
 | 8. Verification Depth and Diagnostics | 0/TBD | Not started | - |

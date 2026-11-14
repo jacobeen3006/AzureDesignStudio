@@ -184,7 +184,9 @@ namespace AzureDesignStudio.Services.InProcess
     }
 
     /// <summary>The <see cref="ServerCallContext"/> of an in-process call: the caller in
-    /// <see cref="ServiceTools.UserStateKey"/>, the client's cancellation and deadline.</summary>
+    /// <see cref="ServiceTools.UserStateKey"/>, the client's cancellation and deadline. The
+    /// in-process invoker exists only in the single-user Desktop host, so this is the one
+    /// place that sets <see cref="ServiceTools.SingleUserHostKey"/>; the server never does.</summary>
     public sealed class InProcessServerCallContext : ServerCallContext
     {
         private readonly Dictionary<object, object> _userState = new();
@@ -197,6 +199,7 @@ namespace AzureDesignStudio.Services.InProcess
             _method = method;
             _options = options;
             _userState[ServiceTools.UserStateKey] = caller;
+            _userState[ServiceTools.SingleUserHostKey] = true;
         }
 
         protected override string MethodCore => _method;
