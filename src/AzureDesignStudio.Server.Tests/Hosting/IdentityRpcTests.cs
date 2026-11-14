@@ -79,6 +79,8 @@ public sealed class IdentityRpcTests(AdsServerFactory factory) : IClassFixture<A
         ["Deploy.GetStack"] = async c => (await new Deploy.DeployClient(c).GetStackAsync(new GetStackRequest())).StatusCode,
         ["Deploy.SetGuardrailPolicy"] = async c => (await new Deploy.DeployClient(c).SetGuardrailPolicyAsync(new GuardrailPolicyRequest())).StatusCode,
         ["Deploy.GetGuardrailPolicy"] = async c => (await new Deploy.DeployClient(c).GetGuardrailPolicyAsync(new Empty())).StatusCode,
+        ["Deploy.GetTenantSettings"] = async c => (await new Deploy.DeployClient(c).GetTenantSettingsAsync(new Empty())).StatusCode,
+        ["Deploy.SetTenantSettings"] = async c => (await new Deploy.DeployClient(c).SetTenantSettingsAsync(new TenantSettingsRequest())).StatusCode,
         ["Deploy.ApproveDecomWindow"] = async c => (await new Deploy.DeployClient(c).ApproveDecomWindowAsync(new ApproveDecomWindowRequest())).StatusCode,
         ["Deploy.ExecuteDecomWindow"] = async c => (await new Deploy.DeployClient(c).ExecuteDecomWindowAsync(new ExecuteDecomWindowRequest())).StatusCode,
         ["Deploy.ReleaseDecomWindow"] = async c => (await new Deploy.DeployClient(c).ReleaseDecomWindowAsync(new ReleaseDecomWindowRequest())).StatusCode,
@@ -88,7 +90,7 @@ public sealed class IdentityRpcTests(AdsServerFactory factory) : IClassFixture<A
     private const string PublicRpc = "Cost.GetRetailPrices";
 
     [Fact]
-    public void TheTableListsTwentyRpcs() => Assert.Equal(20, Rpcs.Count);
+    public void TheTableListsTwentyTwoRpcs() => Assert.Equal(22, Rpcs.Count);
 
     [Fact]
     public void TheTableCoversEveryGrpcMethodOfTheHost()

@@ -26,6 +26,11 @@ service Deploy {
 	// reads it at review and apply, so a client can never deploy around it by omitting it.
 	rpc SetGuardrailPolicy(GuardrailPolicyRequest) returns(GuardrailPolicyResponse);
 	rpc GetGuardrailPolicy(google.protobuf.Empty) returns(GuardrailPolicyResponse);
+	// Phase 5 (D-02, D-05): two audited per-tenant settings - allow-self-approval (default off) and
+	// the guardrail policy mode (replace by default, or merge). Guardrail.Admin only; the tenant is
+	// the caller's scope, never a request field. A Set replaces both settings (read, edit, write back).
+	rpc GetTenantSettings(google.protobuf.Empty) returns(TenantSettingsResponse);
+	rpc SetTenantSettings(TenantSettingsRequest) returns(TenantSettingsResponse);
 	// v2 plan 13.5: decommission window execution. Approval names the execution hash that
 	// binds the exact lock set; the app only lands and releases window-owned locks. Purge is
 	// NEVER executed here - it stays script-side behind its epoch guard.
@@ -157,6 +162,20 @@ message GuardrailPolicyResponse {
 	string json = 3;
 	string updated_by = 4;
 	string updated_at = 5;
+}
+
+message TenantSettingsRequest {
+	bool allow_self_approval = 1;
+	string guardrail_policy_mode = 2;
+}
+
+message TenantSettingsResponse {
+	int32 status_code = 1;
+	string error_message = 2;
+	bool allow_self_approval = 3;
+	string guardrail_policy_mode = 4;
+	string updated_by = 5;
+	string updated_at = 6;
 }
 
 message PlanApprovalRequest {

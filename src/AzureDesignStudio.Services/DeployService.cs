@@ -1866,6 +1866,142 @@ namespace AzureDesignStudio.Services
             return row.UpdatedAtUtc;
         }
 
+        /// <summary>Answer to a caller who may not read or change the tenant settings (D-01, D-04).
+        /// The same administrators as the guardrail policy; app roles are not retroactive.</summary>
+        private const string TenantSettingsAdminRequiredMessage =
+            "TENANT_SETTINGS_ADMIN_REQUIRED: the Guardrail.Admin app role is required to read or change tenant settings. If the role was just assigned, sign out and back in to get a new token.";
+
+        private static TenantSettingsResponse SettingsResponse(TenantSettingsModel? row) => new()
+        {
+            StatusCode = StatusCodes.Status200OK,
+            AllowSelfApproval = row?.AllowSelfApproval ?? false,
+            GuardrailPolicyMode = string.IsNullOrWhiteSpace(row?.GuardrailPolicyMode) ? GuardrailPolicyModes.Replace : row!.GuardrailPolicyMode,
+            UpdatedBy = row?.UpdatedBy ?? "",
+            UpdatedAt = row is null ? "" : row.UpdatedAtUtc.ToString("O"),
+        };
+
+        /// <summary>
+        /// Reads the caller's tenant settings (D-02, D-05). 200 with the defaults (self-approval off,
+        /// mode replace, empty author) when the scope has no row. The tenant is the caller's scope -
+        /// the request names none.
+        /// </summary>
+        public override async Task<TenantSettingsResponse> GetTenantSettings(Empty request, ServerCallContext context)
+        {
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
+            {
+                _logger.LogWarning("Access denied. {Failure}", failure);
+                return new TenantSettingsResponse
+                {
+                    StatusCode = StatusCodes.Status401Unauthorized,
+                    ErrorMessage = ServiceTools.IdentityInvalidMessage,
+                };
+            }
+
+            if (!caller.CanAdministerGuardrails)
+                return new TenantSettingsResponse
+                {
+                    StatusCode = StatusCodes.Status403Forbidden,
+                    ErrorMessage = TenantSettingsAdminRequiredMessage,
+                };
+
+            var row = await _designContext.AdsTenantSettings.AsNoTracking()
+                .FirstOrDefaultAsync(e => e.TenantId == caller.ScopeId, context.CancellationToken);
+            return SettingsResponse(row);
+        }
+
+        /// <summary>
+        /// Replaces both tenant settings (a client reads, edits and writes back). Every changed
+        /// setting appends one audit event in the same SaveChanges as the row (D-15), so a change never
+        /// exists without its record and a failed audit insert stores nothing. Nothing changed = no
+        /// write. The mode is validated: an unknown mode is rejected, never guessed.
+        /// </summary>
+        public override async Task<TenantSettingsResponse> SetTenantSettings(TenantSettingsRequest request, ServerCallContext context)
+        {
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
+            {
+                _logger.LogWarning("Access denied. {Failure}", failure);
+                return new TenantSettingsResponse
+                {
+                    StatusCode = StatusCodes.Status401Unauthorized,
+                    ErrorMessage = ServiceTools.IdentityInvalidMessage,
+                };
+            }
+
+            if (!caller.CanAdministerGuardrails)
+                return new TenantSettingsResponse
+                {
+                    StatusCode = StatusCodes.Status403Forbidden,
+                    ErrorMessage = TenantSettingsAdminRequiredMessage,
+                };
+
+            if (!GuardrailPolicyModes.TryNormalize(request.GuardrailPolicyMode, out var mode))
+                return new TenantSettingsResponse
+                {
+                    StatusCode = StatusCodes.Status400BadRequest,
+                    ErrorMessage = $"TENANT_SETTINGS_INVALID: guardrail_policy_mode must be '{GuardrailPolicyModes.Replace}' or '{GuardrailPolicyModes.Merge}'.",
+                };
+
+            TenantSettingsModel? row;
+            try
+            {
+                row = await UpsertTenantSettingsAsync(caller, request.AllowSelfApproval, mode, context.CancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                // A concurrent first write by the same scope won the key: re-read and apply once more.
+                _designContext.ChangeTracker.Clear();
+                row = await UpsertTenantSettingsAsync(caller, request.AllowSelfApproval, mode, context.CancellationToken);
+            }
+
+            return SettingsResponse(row);
+        }
+
+        private async Task<TenantSettingsModel?> UpsertTenantSettingsAsync(
+            AdsCaller caller, bool allowSelfApproval, string mode, CancellationToken ct)
+        {
+            var row = await _designContext.AdsTenantSettings.FirstOrDefaultAsync(e => e.TenantId == caller.ScopeId, ct);
+            var oldSelfApproval = row?.AllowSelfApproval ?? false;
+            var oldMode = string.IsNullOrWhiteSpace(row?.GuardrailPolicyMode) ? GuardrailPolicyModes.Replace : row!.GuardrailPolicyMode;
+            var selfApprovalChanged = oldSelfApproval != allowSelfApproval;
+            var modeChanged = !string.Equals(oldMode, mode, StringComparison.Ordinal);
+            if (!selfApprovalChanged && !modeChanged) return row;
+
+            var now = DateTime.UtcNow;
+            if (row is null)
+            {
+                row = new TenantSettingsModel { TenantId = caller.ScopeId };
+                _designContext.AdsTenantSettings.Add(row);
+            }
+
+            row.AllowSelfApproval = allowSelfApproval;
+            row.GuardrailPolicyMode = mode;
+            row.UpdatedBy = caller.Principal;
+            row.UpdatedByUserId = caller.UserIdText;
+            row.UpdatedAtUtc = now;
+
+            if (selfApprovalChanged)
+                AddSecurityEvent(caller, SecurityEventTypes.SelfApprovalChanged, $"{oldSelfApproval} -> {allowSelfApproval}", now);
+            if (modeChanged)
+                AddSecurityEvent(caller, SecurityEventTypes.PolicyModeChanged, $"{oldMode} -> {mode}", now);
+
+            await _designContext.SaveChangesAsync(ct);
+            _logger.LogInformation("Tenant settings changed by {Principal}: self-approval {SelfApproval}, mode {Mode}.",
+                caller.Principal, allowSelfApproval, mode);
+            return row;
+        }
+
+        private void AddSecurityEvent(AdsCaller caller, string eventType, string detail, DateTime atUtc) =>
+            _designContext.AdsSecurityEvents.Add(new SecurityEventModel
+            {
+                Id = Guid.NewGuid(),
+                TenantId = caller.ScopeId,
+                EventType = eventType,
+                Principal = caller.Principal,
+                PrincipalUserId = caller.UserIdText,
+                Detail = detail,
+                AtUtc = atUtc,
+            });
+
 
         private static string? TryGetProvisioningState(string json)
         {
