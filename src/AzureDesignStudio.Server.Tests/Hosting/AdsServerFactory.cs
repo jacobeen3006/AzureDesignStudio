@@ -52,7 +52,23 @@ public sealed class AdsServerFactory : WebApplicationFactory<Program>
                     $"Unsupported {nameof(DatabaseProviderName)} \"{DatabaseProviderName}\". Use \"Sqlite\" or \"InMemory\".");
         }
 
+        // Pin every ambient input the tests assume, so a shell or CI job that exports a real vault,
+        // a telemetry resource or another database provider cannot leak into a test host. Empty
+        // counts as unset (ServiceTools.IsConfigured). UseSetting covers what Program.cs reads at
+        // top level; the in-memory layer below is added last, so it also beats environment variables
+        // for the values read lazily (CryptoService reads the vault names on first use).
+        builder.UseSetting("KeyVaultName", "");
+        builder.UseSetting("KeyVaultKeyName", "");
         builder.UseSetting("ApplicationInsights:ConnectionString", "");
+        builder.UseSetting("APPLICATIONINSIGHTS_CONNECTION_STRING", "");
+        builder.ConfigureAppConfiguration((_, configuration) =>
+            configuration.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["KeyVaultName"] = "",
+                ["KeyVaultKeyName"] = "",
+                ["ApplicationInsights:ConnectionString"] = "",
+                ["APPLICATIONINSIGHTS_CONNECTION_STRING"] = "",
+            }));
 
         builder.ConfigureTestServices(services =>
             services.AddAuthentication(options =>
