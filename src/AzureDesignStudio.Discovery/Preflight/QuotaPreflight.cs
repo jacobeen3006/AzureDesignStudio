@@ -55,6 +55,7 @@ public sealed class QuotaPreflight(ArmTransport transport)
         "Quota is not capacity: Azure can still be out of capacity for a size in a region.",
         "Limits are per subscription and per region.",
         "AKS upgrades temporarily use extra vCPUs.",
+        "vCPUs the batch releases (a scale-in, a smaller size) are subtracted from what it adds, but Azure deploys independent resources in parallel and may check a new one before they are freed.",
         "The family-to-quota mapping follows the Resource SKUs family name.",
         "Only the previewed batch is counted.",
     ];

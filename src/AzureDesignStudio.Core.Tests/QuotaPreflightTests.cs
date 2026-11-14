@@ -1039,10 +1039,11 @@ public class QuotaPreflightTests
     [Fact]
     public void Caveats_SayQuotaIsNotCapacity()
     {
-        Assert.Equal(5, QuotaPreflight.Caveats.Count);
+        Assert.Equal(6, QuotaPreflight.Caveats.Count);
         Assert.StartsWith("Quota is not capacity", QuotaPreflight.Caveats[0], StringComparison.Ordinal);
         Assert.Contains(QuotaPreflight.Caveats, c => c.Contains("per subscription and per region", StringComparison.Ordinal));
         Assert.Contains(QuotaPreflight.Caveats, c => c.Contains("AKS upgrades", StringComparison.Ordinal));
+        Assert.Contains(QuotaPreflight.Caveats, c => c.Contains("may check a new one before they are freed", StringComparison.Ordinal));
         Assert.Contains(QuotaPreflight.Caveats, c => c.Contains("Resource SKUs family name", StringComparison.Ordinal));
         Assert.Contains("Only the previewed batch is counted.", QuotaPreflight.Caveats);
     }
