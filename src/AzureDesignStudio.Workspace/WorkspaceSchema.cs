@@ -59,10 +59,7 @@ internal static class WorkspaceSchema
         }
 
         IReadOnlyList<string> pending;
-        var options2 = new DbContextOptionsBuilder<WorkspaceDbContext>()
-            .UseSqlite(new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString())
-            .Options;
-        using (var db = new WorkspaceDbContext(options2))
+        using (var db = new WorkspaceDbContext(WorkspaceConnection.WriterOptions(databasePath)))
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(options.MigrateTimeout);

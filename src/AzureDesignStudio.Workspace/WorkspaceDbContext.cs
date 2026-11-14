@@ -84,14 +84,14 @@ public class WorkspaceDbContext(DbContextOptions<WorkspaceDbContext> options) : 
 /// </summary>
 public sealed class WorkspaceDb
 {
+    private readonly string _databasePath;
+
     public string ConnectionString { get; }
 
     public WorkspaceDb(string databasePath)
     {
-        ConnectionString = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-        }.ToString();
+        _databasePath = databasePath;
+        ConnectionString = WorkspaceConnection.WriterConnectionString(databasePath);
 
         // The thread-pool hop keeps a UI synchronization context from deadlocking the blocking wait.
         Task.Run(() => WorkspaceSchema.UpgradeAsync(databasePath, new WorkspaceUpgradeOptions(), CancellationToken.None))
@@ -100,9 +100,7 @@ public sealed class WorkspaceDb
 
     public WorkspaceDbContext CreateContext()
     {
-        var options = new DbContextOptionsBuilder<WorkspaceDbContext>()
-            .UseSqlite(ConnectionString)
-            .Options;
-        return new WorkspaceDbContext(options);
+        // The factory attaches the pragma interceptor, so a pooled connection carries busy_timeout and foreign_keys.
+        return new WorkspaceDbContext(WorkspaceConnection.WriterOptions(_databasePath));
     }
 }

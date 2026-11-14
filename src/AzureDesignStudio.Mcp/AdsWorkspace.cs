@@ -1,47 +1,45 @@
 using AzureDesignStudio.Discovery.Governance;
 using AzureDesignStudio.Workspace;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace AzureDesignStudio.Mcp;
 
 /// <summary>
-/// Read-only window over the desktop workspace database: per-call contexts on a
-/// Mode=ReadOnly shared-cache connection, so the server works while the desktop app
-/// holds the file open and can never write. Deliberately not <see cref="WorkspaceDb"/>:
-/// its bootstrap path (EnsureCreated / column + table migration) writes, and the class
-/// is sealed - a read-only server must not run it.
+/// Read-only window over the desktop workspace database: per-call contexts on a connection built by
+/// <see cref="WorkspaceConnection.OpenReader"/>, so the server works while the desktop app holds the
+/// file open and can never write (read-only open; if the platform refuses that, read-write with
+/// <c>query_only</c>; in a read-only folder with no live log, <c>immutable=1</c>). The rung that
+/// opened it is exposed as <see cref="OpenMode"/> and reported on stderr by the host. Deliberately
+/// not <see cref="WorkspaceDb"/>: its schema upgrade writes, and a read-only server must never run it.
 /// </summary>
 public sealed class AdsWorkspace
 {
-    private readonly string _connectionString;
+    private readonly WorkspaceReaderOpen _open;
 
     public AdsWorkspace(string databasePath)
     {
-        _connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-            Mode = SqliteOpenMode.ReadOnly,
-            Cache = SqliteCacheMode.Shared,
-        }.ToString();
+        _open = WorkspaceConnection.OpenReader(databasePath);
     }
 
-    private WorkspaceDbContext NewContext()
-    {
-        var options = new DbContextOptionsBuilder<WorkspaceDbContext>()
-            .UseSqlite(_connectionString)
-            .Options;
-        return new WorkspaceDbContext(options);
-    }
+    /// <summary>The rung of the reader ladder that opened the workspace.</summary>
+    public WorkspaceOpenMode OpenMode => _open.Mode;
+
+    /// <summary>One sentence saying how the workspace was opened and why that rung.</summary>
+    public string OpenDetail => _open.Detail;
+
+    private WorkspaceDbContext NewContext() => new(WorkspaceConnection.ReaderOptions(_open));
 
     /// <summary>True when the table exists in the database file. New tables are created by the desktop app's first run after an update; this read-only server must report their absence honestly instead of throwing.</summary>
     private async Task<bool> HasTableAsync(string tableName)
     {
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync();
-        await using var command = connection.CreateCommand();
+        await using var ctx = NewContext();
+        await ctx.Database.OpenConnectionAsync();   // opens through EF so the pragma interceptor runs
+        await using var command = ctx.Database.GetDbConnection().CreateCommand();
         command.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name";
-        command.Parameters.AddWithValue("$name", tableName);
+        var name = command.CreateParameter();
+        name.ParameterName = "$name";
+        name.Value = tableName;
+        command.Parameters.Add(name);
         return await command.ExecuteScalarAsync() is not null;
     }
 
