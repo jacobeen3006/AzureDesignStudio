@@ -7,7 +7,7 @@
 # Environment: SQLTEST_PORT (host port, default 14333), SQLTEST_WAIT (seconds to wait for the
 # server, default 240; an emulated start can need more), CONFIGURATION (default Debug).
 # Needs: Docker and the .NET SDK from global.json. On Apple silicon the image runs under amd64
-# emulation (--platform linux/amd64) and takes a minute or two to become ready.
+# emulation (--platform linux/amd64).
 # The SA password below is an ephemeral credential for a container that lives only for this run.
 set -euo pipefail
 
@@ -35,7 +35,10 @@ docker run -d --name "$name" ${platform[@]+"${platform[@]}"} \
 echo "Waiting for SQL Server in $name (up to $wait_seconds s)..."
 ready=0
 for _ in $(seq 1 $((wait_seconds / 2))); do
-  if docker logs "$name" 2>&1 | grep -q "SQL Server is now ready for client connections"; then
+  # Read the log into a variable first: `docker logs | grep -q` under pipefail fails with SIGPIPE
+  # whenever grep matches and exits before docker finishes writing.
+  logs="$(docker logs "$name" 2>&1 || true)"
+  if grep -q "SQL Server is now ready for client connections" <<<"$logs"; then
     ready=1
     break
   fi

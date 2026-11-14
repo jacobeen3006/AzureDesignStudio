@@ -8,13 +8,14 @@ namespace AzureDesignStudio.Server.Tests.Persistence;
 /// Describes a SQL Server database's logical schema as one stable string so two databases can be
 /// compared. Column order is ignored on purpose (a column added by ALTER lands last while a fresh
 /// table has model order), and the suffixes SQL Server generates for unnamed constraints are
-/// normalised away.
+/// normalised away (a generated primary-key name reads as PK_&lt;table&gt;, a generated default
+/// name as <see cref="SystemName"/>).
 /// </summary>
 public static class SqlServerSchemaDescriber
 {
     public const string SystemName = "<system-name>";
 
-    private static readonly Regex GeneratedName = new(@"^(PK|DF)__.+__[0-9A-F]{8}$", RegexOptions.Compiled);
+    private static readonly Regex GeneratedName = new(@"^(PK|DF)__.+__[0-9A-F]{8,16}$", RegexOptions.Compiled);
 
     public static string Normalise(string name) => GeneratedName.IsMatch(name) ? SystemName : name;
 
@@ -60,7 +61,9 @@ public static class SqlServerSchemaDescriber
             WHERE i.is_primary_key = 1 AND t.name <> N'__EFMigrationsHistory'
             GROUP BY t.name, i.name
             """,
-            r => $"pk {r.GetString(0)} ({r.GetString(2)}) [{Normalise(r.GetString(1))}]");
+            // A generated primary-key name is reported as the conventional PK_<table> the baseline
+            // and the model give it, so a legacy database and a fresh one compare equal.
+            r => $"pk {r.GetString(0)} ({r.GetString(2)}) [{(GeneratedName.IsMatch(r.GetString(1)) ? "PK_" + r.GetString(0) : r.GetString(1))}]");
 
     private static IReadOnlyList<string> Indexes(string connectionString) =>
         Query(connectionString, """
