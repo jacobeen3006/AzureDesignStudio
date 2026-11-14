@@ -53,10 +53,11 @@ public static class WorkspaceBackup
                 $"Not enough free space for a backup in {directory}: {needed:N0} bytes needed " +
                 $"({FreeSpaceFactor:0.0} x the {sourceSize:N0}-byte database), {free:N0} free, short by {needed - free:N0}.");
 
-        var tempPath = finalPath + ".tmp";
-        var tempManifestPath = manifestPath + ".tmp";
-        DeleteIfExists(tempPath);
-        DeleteIfExists(tempManifestPath);
+        // A unique suffix per call: two calls for the same stem, reason and second (a double click on "Back up now")
+        // must not share, and so must not delete, each other's in-flight output.
+        var suffix = "." + Guid.NewGuid().ToString("N")[..8] + ".tmp";
+        var tempPath = finalPath + suffix;
+        var tempManifestPath = manifestPath + suffix;
 
         try
         {
@@ -88,8 +89,12 @@ public static class WorkspaceBackup
                 new FileInfo(tempPath).Length, Path.GetFileName(source));
 
             manifest.Write(tempManifestPath);
-            File.Move(tempManifestPath, manifestPath, overwrite: true);
-            File.Move(tempPath, finalPath, overwrite: false);   // an existing target is refused
+            // The database goes first and is never overwritten: if a concurrent call already placed a backup of this
+            // name the move is refused and the manifest of that backup is left alone. A crash between the two moves
+            // leaves a database without a manifest, which restore tolerates with a note; the other order could
+            // leave a manifest with no database, or replace the manifest of a backup that already exists.
+            File.Move(tempPath, finalPath, overwrite: false);
+            File.Move(tempManifestPath, manifestPath, overwrite: true);   // the name was free, so only a stale orphan can be here
 
             if (!OperatingSystem.IsWindows())
             {
@@ -153,6 +158,8 @@ public static class WorkspaceBackup
         var prefix = directory.EndsWith(Path.DirectorySeparatorChar) ? directory : directory + Path.DirectorySeparatorChar;
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
+        DeleteOrphanManifests(directory, stem, onProblem);
+
         var plan = BackupRetention.Plan(List(directory, stem), now, policy, HoldsData);
         var deleted = new List<BackupFile>();
         foreach (var file in plan.Delete)
@@ -178,6 +185,31 @@ public static class WorkspaceBackup
         }
 
         return Task.FromResult<IReadOnlyList<BackupFile>>(deleted);
+    }
+
+    // A manifest whose backup is gone (an interrupted create or a hand-deleted database) is never listed, so it
+    // would never be pruned. Only names that parse as our backups are considered.
+    private static void DeleteOrphanManifests(string directory, string stem, Action<string>? onProblem)
+    {
+        if (!Directory.Exists(directory)) return;
+
+        const string suffix = ".manifest.json";
+        foreach (var path in Directory.EnumerateFiles(directory, "*" + suffix))
+        {
+            var name = Path.GetFileName(path);
+            var backupName = name[..^suffix.Length];
+            if (!BackupNaming.TryParse(backupName, stem, out _, out _)) continue;
+            if (File.Exists(Path.Combine(directory, backupName))) continue;
+
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                onProblem?.Invoke($"Could not delete {path}: {e.Message}");
+            }
+        }
     }
 
     /// <summary>

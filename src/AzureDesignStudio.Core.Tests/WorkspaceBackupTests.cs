@@ -122,7 +122,53 @@ namespace AzureDesignStudio.Core.Tests
                 WorkspaceBackup.CreateAsync(live, backups, BackupReason.Manual, Now));
 
             Assert.Equal(before, File.ReadAllBytes(first.Path));
+            Assert.Equal(first.Manifest.Sha256, BackupManifest.Read(first.ManifestPath).Sha256);
             Assert.Empty(Directory.EnumerateFiles(backups, "*.tmp"));
+        }
+
+        [Fact]
+        public async Task TwoCallsForTheSameSecond_NeverCorruptEachOther_TheManifestMatchesTheDatabaseThatExists()
+        {
+            // WR-07: a double click on "Back up now" shared one .tmp path and replaced the manifest before the database
+            var (live, holder) = await LiveWalWorkspace(designs: 3);
+            using var keepWal = holder;
+            var backups = _temp.Path("backups");
+
+            var attempts = await Task.WhenAll(Enumerable.Range(0, 4).Select(async _ =>
+            {
+                try { return (BackupResult?)await WorkspaceBackup.CreateAsync(live, backups, BackupReason.Manual, Now); }
+                catch (IOException) { return null; }
+            }));
+
+            var winner = Assert.Single(attempts, a => a is not null)!;
+            var manifest = BackupManifest.Read(winner.ManifestPath);
+            Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(winner.Path))), manifest.Sha256);
+            Assert.Equal(3, manifest.TableCounts["Designs"]);
+            Assert.Empty(Directory.EnumerateFiles(backups, "*.tmp"));
+            Assert.Single(Directory.EnumerateFiles(backups, "*.manifest.json"));
+            Assert.Single(Directory.EnumerateFiles(backups, "*.db"));
+        }
+
+        [Fact]
+        public async Task Prune_RemovesAManifestWhoseBackupIsGone_ButNotOneThatBelongsToABackup_NorAStrangerFile()
+        {
+            var backups = _temp.Path("backups");
+            Directory.CreateDirectory(backups);
+            var orphan = Path.Combine(backups, "workspace-20260101T000000Z-scheduled.db.manifest.json");
+            var paired = Path.Combine(backups, "workspace-20260102T000000Z-scheduled.db");
+            var pairedManifest = paired + ".manifest.json";
+            var stranger = Path.Combine(backups, "notes.db.manifest.json");
+            var otherStem = Path.Combine(backups, "deploy-20260101T000000Z-scheduled.db.manifest.json");
+            foreach (var file in new[] { orphan, paired, pairedManifest, stranger, otherStem })
+                File.WriteAllText(file, "x");
+
+            await WorkspaceBackup.PruneAsync(backups, Now);
+
+            Assert.False(File.Exists(orphan));
+            Assert.True(File.Exists(paired));
+            Assert.True(File.Exists(pairedManifest));
+            Assert.True(File.Exists(stranger));
+            Assert.True(File.Exists(otherStem));
         }
 
         [Fact]

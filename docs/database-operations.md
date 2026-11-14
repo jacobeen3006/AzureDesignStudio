@@ -71,9 +71,9 @@ Retention, applied after each scheduled backup:
 - every **premigration** backup from the **last 30 days** is kept as well;
 - the **newest two** scheduled or premigration backups whose manifest `tableCounts` show data (any table other than the migration bookkeeping tables has rows) are kept as well. After a quarantine or an unnoticed wipe the app runs on an empty workspace and backs that up every day; without this rule five days of backups of an empty database would push every backup that holds your data out of the newest five. A backup with a missing or unreadable manifest counts as holding data. These two extra files stay until two newer backups with data exist, so after you deliberately empty a workspace they are not pruned; delete them yourself when you no longer need them.
 
-Everything else is deleted together with its manifest. Only files whose names match the pattern above are ever touched, so files you put in `backups/` yourself are left alone. `deploy.db` premigration backups in `backups/deploy/` keep the newest three, with no age rule.
+Everything else is deleted together with its manifest. A manifest whose backup file is gone is removed too. Only files whose names match the pattern above are ever touched, so files you put in `backups/` yourself are left alone. `deploy.db` premigration backups in `backups/deploy/` keep the newest three, with no age rule.
 
-A SIGTERM (or a crash) during a scheduled backup can leave a file such as `workspace-<UTC>-scheduled.db.tmp` in `backups/`. It is an unfinished copy of a backup that was never completed; it is safe to delete, and the app never reads it.
+A SIGTERM (or a crash) during a scheduled backup can leave a file such as `workspace-<UTC>-scheduled.db.<8 hex digits>.tmp` in `backups/`. It is an unfinished copy of a backup that was never completed; it is safe to delete, and the app never reads it.
 
 ## Restore
 
