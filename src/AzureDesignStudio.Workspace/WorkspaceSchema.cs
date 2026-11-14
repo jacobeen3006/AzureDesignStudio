@@ -33,7 +33,12 @@ public sealed class WorkspaceUpgradeException : Exception
 /// <summary>Knobs of the upgrade; tests shorten the migration bound.</summary>
 internal sealed class WorkspaceUpgradeOptions
 {
-    /// <summary>How long <c>MigrateAsync</c> may run before the upgrade is reported as stuck.</summary>
+    /// <summary>
+    /// The base of the bound on <c>MigrateAsync</c> (30 seconds). The bound that applies is this plus
+    /// <see cref="WorkspaceSchema.SecondsPerMegabyte"/> seconds per whole MiB of the database file, so a later data
+    /// migration over a large database is not cancelled while it is working; a stuck lock still fails quickly
+    /// on a small file, which is where the baseline and every guarded-DDL migration run.
+    /// </summary>
     public TimeSpan MigrateTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>Where the premigration backup goes; null means a <c>backups</c> folder beside the database.</summary>
@@ -53,6 +58,18 @@ internal static class WorkspaceSchema
     private const string LockTable = "__EFMigrationsLock";
     private const string HistoryTable = "__EFMigrationsHistory";
 
+    /// <summary>Extra seconds of migration time allowed per whole MiB of database file.</summary>
+    internal const int SecondsPerMegabyte = 1;
+
+    /// <summary>The time the migration may take before it is reported as stuck: the base plus a size allowance.</summary>
+    internal static TimeSpan MigrateBound(string databasePath, WorkspaceUpgradeOptions options)
+    {
+        long bytes;
+        try { bytes = File.Exists(databasePath) ? new FileInfo(databasePath).Length : 0; }
+        catch (IOException) { bytes = 0; }
+        return options.MigrateTimeout + TimeSpan.FromSeconds((bytes / (1024 * 1024)) * SecondsPerMegabyte);
+    }
+
     public static async Task<WorkspaceUpgradeResult> UpgradeAsync(
         string databasePath, WorkspaceUpgradeOptions options, CancellationToken ct)
     {
@@ -65,12 +82,12 @@ internal static class WorkspaceSchema
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(options.MigrateTimeout);
+            cts.CancelAfter(MigrateBound(databasePath, options));
             pending = (await db.Database.GetPendingMigrationsAsync(cts.Token).ConfigureAwait(false)).ToList();
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw StuckUpgrade(databasePath, options);
+            throw StuckUpgrade(databasePath, MigrateBound(databasePath, options));
         }
         catch (DbException e)
         {
@@ -146,16 +163,17 @@ internal static class WorkspaceSchema
             }
         }
 
+        var bound = MigrateBound(databasePath, options);
         using (var cts = CancellationTokenSource.CreateLinkedTokenSource(ct))
         {
-            cts.CancelAfter(options.MigrateTimeout);
+            cts.CancelAfter(bound);
             try
             {
                 await db.Database.MigrateAsync(cts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                throw StuckUpgrade(databasePath, options);
+                throw StuckUpgrade(databasePath, bound);
             }
             catch (DbException e)
             {
@@ -212,12 +230,46 @@ internal static class WorkspaceSchema
         return message.ToString();
     }
 
-    private static WorkspaceUpgradeException StuckUpgrade(string databasePath, WorkspaceUpgradeOptions options) =>
-        new($"The workspace upgrade did not finish within {options.MigrateTimeout.TotalSeconds:0} seconds. " +
+    internal static WorkspaceUpgradeException StuckUpgrade(string databasePath, TimeSpan bound)
+    {
+        var seconds = bound.TotalSeconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+        if (!LockIsHeld(databasePath))
+        {
+            // The cancelled migration released its own lock, so nothing is left to delete: it was slow, not stuck.
+            return new($"The workspace upgrade did not finish within {seconds} seconds and was cancelled; no migration lock " +
+                $"is left in the table {LockTable}, so this is not an interrupted upgrade and nothing should be deleted. " +
+                "A large database can need longer than the time allowed for it. " +
+                $"The upgrade was rolled back and is retried from the beginning the next time the app starts. Database file: {databasePath}");
+        }
+
+        return new($"The workspace upgrade did not finish within {seconds} seconds. " +
             $"An earlier upgrade may have been interrupted and left its lock in the table {LockTable}. " +
             $"Close the app first, then run this statement against the database and start again: " +
             $"DELETE FROM \"{LockTable}\"; " +
+            "Do this only when no other copy of the app or ads-mcp is running: a lock held by an upgrade that is still working must not be removed. " +
             $"Database file: {databasePath}");
+    }
+
+    // Best effort: if the table cannot be read the lock is assumed held, which keeps the recovery statement in the message.
+    private static bool LockIsHeld(string databasePath)
+    {
+        try
+        {
+            using var raw = OpenRaw(databasePath);
+            raw.Open();
+            using var exists = raw.CreateCommand();
+            exists.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = $name";
+            exists.Parameters.AddWithValue("$name", LockTable);
+            if (Convert.ToInt64(exists.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 0) return false;
+            using var rows = raw.CreateCommand();
+            rows.CommandText = $"SELECT COUNT(*) FROM \"{LockTable}\"";
+            return Convert.ToInt64(rows.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) > 0;
+        }
+        catch (SqliteException)
+        {
+            return true;
+        }
+    }
 
     // Unpooled, so the raw step neither keeps the file open nor leaves a pooled handle behind.
     private static SqliteConnection OpenRaw(string databasePath) =>

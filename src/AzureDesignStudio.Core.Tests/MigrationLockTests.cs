@@ -56,6 +56,39 @@ namespace AzureDesignStudio.Core.Tests
         }
 
         [Fact]
+        public void TheBound_GrowsWithTheSizeOfTheDatabase_SoASlowButHealthyMigrationIsNotCancelled()
+        {
+            // WR-08: a flat 30 s bound would cancel a legitimate data migration over a large database
+            var small = _temp.Path("small.db");
+            File.WriteAllBytes(small, new byte[100 * 1024]);
+            var large = _temp.Path("large.db");
+            File.WriteAllBytes(large, new byte[5 * 1024 * 1024 + 17]);
+            var options = new WorkspaceUpgradeOptions();
+
+            Assert.Equal(TimeSpan.FromSeconds(30), WorkspaceSchema.MigrateBound(small, options));
+            Assert.Equal(TimeSpan.FromSeconds(30 + 5 * WorkspaceSchema.SecondsPerMegabyte), WorkspaceSchema.MigrateBound(large, options));
+            Assert.Equal(TimeSpan.FromSeconds(30), WorkspaceSchema.MigrateBound(_temp.Path("absent.db"), options));
+        }
+
+        [Fact]
+        public void TheStuckMessage_OnlyTellsTheUserToDeleteTheLock_WhenALockIsActuallyLeft()
+        {
+            var locked = LockedLegacyDatabase();
+            var free = _temp.Path("free.db");
+            WorkspaceFixtures.Load(WorkspaceFixtures.L3CurrentLegacy, free);
+
+            var held = WorkspaceSchema.StuckUpgrade(locked, TimeSpan.FromSeconds(30));
+            var slow = WorkspaceSchema.StuckUpgrade(free, TimeSpan.FromSeconds(95));
+
+            Assert.Contains("DELETE FROM \"__EFMigrationsLock\"", held.Message, StringComparison.Ordinal);
+            Assert.Contains("30 seconds", held.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("DELETE FROM", slow.Message, StringComparison.Ordinal);
+            Assert.Contains("nothing should be deleted", slow.Message, StringComparison.Ordinal);
+            Assert.Contains("95 seconds", slow.Message, StringComparison.Ordinal);
+            Assert.Contains(free, slow.Message, StringComparison.Ordinal);
+        }
+
+        [Fact]
         public async Task ManualRecovery_LetsTheNextUpgradeSucceed()
         {
             var path = LockedLegacyDatabase();

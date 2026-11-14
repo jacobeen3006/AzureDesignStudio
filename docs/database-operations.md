@@ -47,7 +47,7 @@ The desktop app opens the workspace in this order. Each step runs before the nex
 3. **Premigration backup.** If the file exists, is not empty and has migrations pending, a `premigration` backup is written to `backups/` first. If the backup cannot be written (no space, no permission), the upgrade is not attempted and the workspace file is unchanged.
 4. **Unique-index dedupe.** Rows that would violate a unique index the new schema creates are removed, newest kept, and written to a report first (see Removed duplicate rows).
 5. **Legacy column adoption.** A workspace that predates migrations gets the two scan columns the baseline cannot add.
-6. **Migrate**, bounded to 30 seconds. SQLite schema changes are transactional, so a failed migration rolls back and the file is as it was.
+6. **Migrate**, bounded to 30 seconds plus one second per MiB of the database file (so a large database gets proportionally longer than the small one the baseline runs on). SQLite schema changes are transactional, so a failed or cancelled migration rolls back; the only thing that is not rolled back is the duplicate-row cleanup of step 4.
 7. **WAL assertion.** The journal mode must be `wal` afterwards; anything else stops the app.
 
 A failed upgrade is **not** corruption. The workspace is not quarantined: the app shows the failure page, "Your workspace could not be opened", with the message, an "Open data folder" button and "Quit". The message names the premigration backup that was taken. Fix the cause (for a stuck lock see Migration lock recovery), then start the app again; the upgrade is retried from the beginning.
@@ -113,7 +113,9 @@ The only acceptable answer is a single line, `ok`. Anything else means the file 
 
 ## Migration lock recovery
 
-Symptom: startup fails after about 30 seconds with a message that says the workspace upgrade did not finish, that an earlier upgrade may have been interrupted, and that it left its lock in the table `__EFMigrationsLock`. This happens only when a previous upgrade was killed while it held the migration lock.
+Symptom: startup fails after about 30 seconds (more for a large database, see step 6 above) with a message that says the workspace upgrade did not finish, that an earlier upgrade may have been interrupted, and that it left its lock in the table `__EFMigrationsLock`. This happens only when a previous upgrade was killed while it held the migration lock.
+
+If the message instead says that no migration lock is left and nothing should be deleted, the upgrade was only slow: it was cancelled and rolled back, there is nothing to clean up, and the next start retries it. Do not delete anything in that case.
 
 The app never deletes the lock automatically: a lock can also mean another process is genuinely migrating, and removing it from under that process would corrupt the upgrade. Recover by hand:
 
