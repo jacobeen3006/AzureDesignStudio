@@ -164,7 +164,7 @@ A file that is corrupt, not a database, or locked at open time fails at once and
 
 ## deploy.db
 
-`deploy.db` holds deploy approvals, guardrails, linked subscriptions (including service principal client secrets) and the audit trail. It is migrated at launch with EF migrations, like the workspace. An existing `deploy.db` that needs an upgrade gets a premigration backup first in `backups/deploy/`, kept private (the folder is `0700`, the files `0600` on macOS). **These backups contain subscription client secrets in plaintext.** Never share them, never attach them to a bug report, never put them in a synced folder. If the premigration backup of `deploy.db` cannot be written, the upgrade is not attempted, `deploy.db` is unchanged and the app shows the same failure page as for the workspace. A `deploy.db` migration that itself fails (a database, file or permission error) shows the same page, and the crash log `ads_desktop_crash.log` in the system temp folder has the details; SQLite schema changes are transactional, so the file is as it was. To go back to a previous state, close the app, move `deploy.db` (and its `-wal`, `-shm`) aside and copy the chosen file from `backups/deploy/` in as `deploy.db`.
+`deploy.db` holds deploy approvals, guardrails, linked subscriptions (including service principal client secrets) and the audit trail. It is migrated at launch with EF migrations, like the workspace. An existing `deploy.db` that needs an upgrade gets a premigration backup first in `backups/deploy/`, kept private (the folder is `0700`, the files `0600` on macOS). **These backups contain subscription client secrets in plaintext.** Never share them, never attach them to a bug report, never put them in a synced folder. If the premigration backup of `deploy.db` cannot be written, the upgrade is not attempted, `deploy.db` is unchanged and the app shows the same failure page as for the workspace. A `deploy.db` migration that itself fails (a database, file or permission error) shows the same page, and the crash log `ads_desktop_crash.log` in the system temp folder has the details; SQLite schema changes are transactional, so the file is as it was. To go back to a previous state, close the app, move `deploy.db` (and its `-wal`, `-shm`) aside and copy the chosen file from `backups/deploy/` in as `deploy.db`. The same two tenant migrations (`TenantGuardrails`, `TenantApprovals`) run on `deploy.db` after that premigration backup; approvals that were pending are backfilled to the empty-GUID scope and must be re-approved; the desktop app is a single-user host, so it approves them again itself.
 
 ## SQL Server (the server database)
 
@@ -196,6 +196,14 @@ A value other than `true` or `false` for either flag stops the host instead of b
 3. Watch the startup log for `Applied <n> database migration(s): <ids>`. A host that stops with an exception about the database has changed nothing it could not roll back; read the message.
 
 A database created before migrations existed is adopted by the baseline migration without recreating anything: its guarded statements skip what already exists and a history row is written.
+
+#### Tenant migrations (`TenantGuardrails`, `TenantApprovals`)
+
+Two migrations make guardrails and approvals per tenant (see `docs/identity-and-guardrails.md`). Both are guarded, so they can be replayed.
+
+- `TenantGuardrails` adds a nullable `TenantId` column to the guardrail table with a filtered unique index, and creates the empty tables `AdsTenantSettings` and `AdsSecurityEvents`. The existing guardrail row keeps a NULL tenant and stays the inherited default for every scope that has no policy of its own.
+- `TenantApprovals` adds `TenantId` (and `RequestedByUserId` on plan approvals) to the plan and decommission approval tables and makes the primary key composite (`TenantId` plus the hash). Every approval that exists at upgrade is **backfilled to the empty-GUID scope**, which no caller has, so those approvals are not found and have to be **re-approved**; nothing is deleted.
+- Rollback is unchanged: restore the pre-upgrade backup (see Rollback), not the generated `Down()` methods, which are empty for these migrations.
 
 ### Backup
 
