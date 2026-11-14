@@ -203,6 +203,23 @@ interpretation and needs the owner's confirmation; it is recorded here so it can
 - `merge`: the rules of the inherited default policy always apply, and the tenant's own rules are added; the
   tenant can only add rules, never remove one of the default.
 
+**Consequence an operator must know (chosen behavior, not a defect).** The inherited default policy is a
+fallback, not an enforced floor, on a hosted multi-tenant server:
+
+- Under `replace` (the default), the first `SetGuardrailPolicy` of a scope creates that scope's own row and the
+  scope stops inheriting every rule of the default from then on. The new row is whatever the administrator
+  sends (the editor starts from the effective policy it read, but nothing forces the administrator to keep the
+  default's rules), and neither the response nor the audit event says that inherited rules stopped applying.
+- Every guardrail administrator of a scope, including every personal Microsoft account for its own scope, can
+  choose the mode of that scope. The operator's default therefore binds only scopes that have not written a
+  policy of their own, and scopes that chose `merge`.
+- Under `merge` the default's rules always apply, but the default row can be changed or removed by no RPC. After
+  the upgrade the pre-upgrade policy is read-only through the application; to change or remove one of its rules
+  edit the guardrail table row with a NULL `TenantId` directly in the database.
+
+An operator who needs the default to be binding on every tenant cannot get that from this version. It would need
+an operator-only "enforce" flag on the default row, which is a new decision and a new migration.
+
 If the reading is wrong, change it in exactly these places:
 
 1. The mode vocabulary: `src/AzureDesignStudio.Services/Models/TenantModels.cs` (`GuardrailPolicyModes`).
