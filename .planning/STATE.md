@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 02
-current_phase_name: Reproducible Build and CI Baseline
+current_phase: 03
+current_phase_name: Server Foundation and Integration Harness
 status: executing
-stopped_at: Phase 1 complete, ready to execute Phase 02
-last_updated: "2026-10-31T18:47:40.612Z"
-last_activity: 2026-10-31
-last_activity_desc: Phase 1 complete, transitioned to Phase 02
-state_head: fa62bb9001fccb35bae7bea9df27499c4b31fa92
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-11-14T10:21:23.883Z"
+last_activity: 2026-11-14
+last_activity_desc: Phase 03 execution started
+state_head: d8dc9f6dcb75ff3e8f0920204ff0deb56d1be6fa
 progress:
   total_phases: 11
   completed_phases: 1
-  total_plans: 15
-  completed_plans: 9
+  total_plans: 21
+  completed_plans: 14
   percent: 9
 ---
 
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-21)
 
 **Core value:** Design, observe, and change Azure from one workspace — canvas fidelity, live tenant truth, and gated execution are all first-class.
-**Current focus:** Phase 01 — Land and Stabilize
+**Current focus:** Phase 03 — Server Foundation and Integration Harness
 
 ## Current Position
 
-Phase: 02 — Reproducible Build and CI Baseline
-Plan: 2
+Phase: 03 (Server Foundation and Integration Harness) — EXECUTING
+Plan: 2 of 6
 Status: Ready to execute
-Last activity: 2026-10-31 — Phase 1 complete, transitioned to Phase 02
+Last activity: 2026-11-14 — Phase 03 execution started
 
 Progress: [█░░░░░░░░░] 9%
 
@@ -57,6 +57,7 @@ Progress: [█░░░░░░░░░] 9%
 |------|----------|-------|-------|
 | Phase 01 P06 | 9min | 3 tasks | 1 files |
 | Phase 01 P07 | 9 | 3 tasks | 1 files |
+| Phase 03 P01 | 8 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,8 @@ Progress: [█░░░░░░░░░] 9%
 - [Phase 01]: Pushed pre-land tip e9078d1 by fast-forward refspec e9078d1:refs/heads/main first, then main (3127ba3), verifying ls-remote equality after each; no force, lease, or rebase (D-10/D-12).
 - [Phase 01]: Recovery bundle AzureDesignStudio-3127ba3-20261021.bundle (99616738 bytes) cut at parent directory and clone-verified to restore 3127ba3 with a clean tree; retained for plan 01-08's re-cut and deletion (D-11).
 - [Phase 01]: SC#2 recorded as clone HEAD == recorded BUNDLE_SHA plus zero non-.planning unpushed paths; no live-head equality; DOM probe true so SC#4 primary proof is the 01-02 harness.
+- [Phase 03]: AutoMapper 12.0.1 advisories GHSA-gpwp-5797-mjff and GHSA-6vhm-j9h7-f9gh suppressed under the single 2027-01-31 expiry; allowlist stays AutoMapper-only
+- [Phase 03]: Microsoft.AspNetCore.Mvc.Testing pinned at 10.0.15 (not the roadmap's stale 10.0.13)
 
 ### Pending Todos
 
@@ -92,6 +95,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-21T10:47:34.169Z
-Stopped at: Phase 1 complete, ready to execute Phase 02
+Last session: 2026-11-14T10:21:23.819Z
+Stopped at: Completed 03-01-PLAN.md
 Resume file: None
