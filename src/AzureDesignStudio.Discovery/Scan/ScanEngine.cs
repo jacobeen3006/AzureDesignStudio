@@ -24,7 +24,14 @@ public sealed class ScanCheckpoint
     public List<string> CompletedQueries { get; set; } = [];
     public Dictionary<string, string> FailedQueries { get; set; } = [];
     public int Rows { get; set; }
+    /// <summary>Hash of the inventory every completed group stored, whichever run stored it;
+    /// set when a run finishes. Null when a group was stored by a checkpoint written before
+    /// <see cref="GroupHashes"/> existed (its rows cannot be hashed again).</summary>
     public string? ContentHash { get; set; }
+    /// <summary>Per completed inventory group, the hash of its rows (id, type, name, location),
+    /// so <see cref="ContentHash"/> still covers groups an earlier run stored. Empty on
+    /// checkpoints written before it existed.</summary>
+    public Dictionary<string, string> GroupHashes { get; set; } = [];
     public bool AnyTruncated { get; set; }
     /// <summary>Identity of the request this checkpoint was written for (scope type,
     /// subscription set, group size). Null on checkpoints written before it existed.</summary>
@@ -63,6 +70,7 @@ public sealed class ScanCheckpoint
         checkpoint.SourceRows ??= [];
         checkpoint.FailedSourceGroups ??= [];
         checkpoint.DefenderPlans ??= [];
+        checkpoint.GroupHashes ??= [];
         return checkpoint;
     }
 }
@@ -166,7 +174,6 @@ public sealed class ScanEngine(ResourceGraphClient graph, int groupSize = 100, i
             .Where(w => !checkpoint.CompletedQueries.Contains(w.Key))
             .ToList();
         var totalQueries = groups.Count * (1 + checkpoint.RequestedSources.Count);
-        var hashParts = new System.Collections.Concurrent.ConcurrentBag<string>();
         var slotGate = new SemaphoreSlim(maxParallel, maxParallel);
         // One group at a time marks itself complete and persists. The sink stores the rows
         // and the checkpoint together, so interleaving two groups let a checkpoint that
@@ -205,6 +212,9 @@ public sealed class ScanEngine(ResourceGraphClient graph, int groupSize = 100, i
 
                 var result = await graph.QueryAllAsync(BuildQuery(g.Subs), ct: ct).ConfigureAwait(false);
                 var items = result.Rows.Select(InventoryNormalizer.FromArgRow).ToList();
+                // Kept with the group in the checkpoint: a resumed run that queries no
+                // inventory group still hashes every group the scan stored.
+                var groupHash = ScanHash(items.Select(i => $"{i.Id}\u001f{i.Type}\u001f{i.Name}\u001f{i.Location}"));
 
                 await persistGate.WaitAsync(ct).ConfigureAwait(false);
                 try
@@ -212,6 +222,7 @@ public sealed class ScanEngine(ResourceGraphClient graph, int groupSize = 100, i
                     lock (checkpoint)
                     {
                         checkpoint.CompletedQueries.Add(g.Key);
+                        checkpoint.GroupHashes[g.Key] = groupHash;
                         checkpoint.Rows += items.Count;
                         checkpoint.AnyTruncated |= result.Truncated;
                         checkpoint.FailedQueries.Remove(g.Key); // a retried group that now succeeded
@@ -228,6 +239,7 @@ public sealed class ScanEngine(ResourceGraphClient graph, int groupSize = 100, i
                         lock (checkpoint)
                         {
                             checkpoint.CompletedQueries.Remove(g.Key);
+                            checkpoint.GroupHashes.Remove(g.Key);
                             checkpoint.Rows -= items.Count;
                         }
                         throw;
@@ -237,8 +249,6 @@ public sealed class ScanEngine(ResourceGraphClient graph, int groupSize = 100, i
                 {
                     persistGate.Release();
                 }
-
-                foreach (var i in items) hashParts.Add($"{i.Id}\u001f{i.Type}\u001f{i.Name}\u001f{i.Location}");
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -367,7 +377,14 @@ public sealed class ScanEngine(ResourceGraphClient graph, int groupSize = 100, i
         if (status == "Completed" && (checkpoint.FailedQueries.Count > 0 || checkpoint.AnyTruncated))
             status = "Partial";
 
-        checkpoint.ContentHash = ScanHash(hashParts);
+        // Over every inventory group the scan stored, not only the ones this run queried: a
+        // resume after the whole inventory was stored (only source groups pending) queries none.
+        // A group stored before GroupHashes existed cannot be hashed again, so then no hash
+        // rather than one that leaves its rows out.
+        var storedGroups = checkpoint.CompletedQueries.Where(k => !k.Contains(':')).ToList();
+        checkpoint.ContentHash = storedGroups.All(checkpoint.GroupHashes.ContainsKey)
+            ? ScanHash(storedGroups.Select(k => checkpoint.GroupHashes[k]))
+            : null;
         // The terminal record is written whatever happened to the caller's token: after a
         // cancel that token is already cancelled, and a sink honouring it would never store
         // "Canceled".

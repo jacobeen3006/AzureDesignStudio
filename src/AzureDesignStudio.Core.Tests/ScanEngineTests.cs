@@ -516,6 +516,8 @@ public class ScanEngineTests
     {
         public readonly List<string> InventoryPages = [];
         public readonly List<StoredSourcePage> SourcePages = [];
+        /// <summary>The checkpoint JSON stored with the last inventory page.</summary>
+        public string? InventoryCheckpointJson;
         public ScanCheckpoint? Started;
         public string? Status;
         public Func<int, Task>? OnSourcePage;
@@ -528,7 +530,11 @@ public class ScanEngineTests
 
         public Task PagePersistedAsync(string queryKey, IReadOnlyList<InventoryItem> page, ScanCheckpoint checkpoint, CancellationToken ct)
         {
-            lock (InventoryPages) InventoryPages.Add(queryKey);
+            lock (InventoryPages)
+            {
+                InventoryPages.Add(queryKey);
+                InventoryCheckpointJson = checkpoint.ToJson();
+            }
             return Task.CompletedTask;
         }
 
@@ -842,6 +848,33 @@ public class ScanEngineTests
     }
 
     [Fact]
+    public async Task Resume_OnlySourceGroupsPending_KeepsTheContentHash()
+    {
+        var uninterrupted = await new ScanEngine(Graph(GovernanceHandler()), groupSize: 1)
+            .RunAsync(SourcesRequest(["advisor"], SubA), new GovernanceSink());
+
+        var firstSink = new GovernanceSink();
+        await new ScanEngine(Graph(GovernanceHandler((kind, _) => kind == "advisor" ? Forbidden() : null)), groupSize: 1)
+            .RunAsync(SourcesRequest(["advisor"], SubA), firstSink);
+        // The checkpoint a run leaves when it is killed after storing its inventory page, while
+        // the Advisor query is still in flight: the inventory group complete, the source group
+        // neither complete nor failed, and no content hash (that is set when a run finishes).
+        var json = System.Text.Json.Nodes.JsonNode.Parse(firstSink.InventoryCheckpointJson!)!.AsObject();
+        Assert.Null(json["contentHash"]);
+        json["failedSourceGroups"] = new System.Text.Json.Nodes.JsonObject();
+
+        var handler = GovernanceHandler();
+        var resumed = await new ScanEngine(Graph(handler), groupSize: 1)
+            .RunAsync(SourcesRequest(["advisor"], SubA), new GovernanceSink(), resume: ScanCheckpoint.FromJson(json.ToJsonString()));
+
+        // No inventory worker ran, yet the hash still describes the inventory the scan holds.
+        Assert.Equal(["advisor"], handler.RequestBodies.Select(KindOf).ToArray());
+        Assert.NotNull(uninterrupted.ContentHash);
+        Assert.Equal(uninterrupted.ContentHash, resumed.ContentHash);
+        Assert.Equal(uninterrupted.Rows, resumed.Rows);
+    }
+
+    [Fact]
     public async Task OldCheckpointWithoutSourceFields_StillResumes()
     {
         var first = await new ScanEngine(Graph(GovernanceHandler((kind, sub) => kind == "inventory" && sub == SubB ? Forbidden() : null)), groupSize: 1)
@@ -850,7 +883,7 @@ public class ScanEngineTests
 
         // The checkpoint as it was written before governance sources existed.
         var json = System.Text.Json.Nodes.JsonNode.Parse(first.ToJson())!.AsObject();
-        foreach (var added in new[] { "requestedSources", "sourceRows", "failedSourceGroups", "defenderPlans", "totalGroups" })
+        foreach (var added in new[] { "requestedSources", "sourceRows", "failedSourceGroups", "defenderPlans", "totalGroups", "groupHashes" })
             Assert.True(json.Remove(added), added);
         var old = ScanCheckpoint.FromJson(json.ToJsonString())!;
         Assert.Empty(old.RequestedSources);
@@ -870,6 +903,9 @@ public class ScanEngineTests
         Assert.Empty(resumed.FailedQueries);
         Assert.Empty(resumed.RequestedSources);
         Assert.All(ScanManifest.Build("Completed", resumed, 2).Sources!.Values, s => Assert.Equal(SourceState.NotRequested, s.State));
+        // SubA's rows were stored by a run that kept no per-group hash, so they cannot be hashed
+        // again: no hash rather than one that leaves them out.
+        Assert.Null(resumed.ContentHash);
     }
 
     private sealed class ListProgress : IProgress<ScanProgress>
