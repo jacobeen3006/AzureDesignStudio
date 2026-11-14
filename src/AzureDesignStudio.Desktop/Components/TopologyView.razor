@@ -4,13 +4,15 @@
 @using AzureDesignStudio.Discovery.Governance
 @using AzureDesignStudio.Discovery.Inventory
 @using AzureDesignStudio.Discovery.Report
+@using AzureDesignStudio.Discovery.Scan
 @using AzureDesignStudio.Workspace
 @using AntDesign
 
 @* Read-only topology (plan 8.3): derives the graph from scan snapshots, draws canonical
    nested frames, persists drag positions by ARM id, inspects the selected resource.
    Drag works in svg units: css size = layout size x scale, so 1 unit = scale px.
-   Governance findings (Wave B3) badge a node in its left gutter, coloured by the most severe. *@
+   Governance findings (Wave B3) badge a node in its left gutter, coloured by the most severe;
+   a note names the sources the badges do not cover (GovernanceStatus.PartialNote). *@
 
 @if (layout is null)
 {
@@ -48,6 +50,14 @@ else
                 <Button Size="ButtonSize.Small" OnClick="@(() => { scale = Math.Clamp(scale / 1.25, 0.2, 3); })">−</Button>
                 <span style="color:#999;font-size:12px;">@(layout.Nodes.Count) resources · @visibleEdgeCount links · drag to move, wheel to zoom</span>
             </div>
+            @if (governanceNote is { } gnote)
+            {
+                <div style="font-size:12px;color:#999;margin-bottom:4px;">@gnote</div>
+            }
+            @if (malformedNote is { } mnote)
+            {
+                <div style="font-size:12px;color:#999;margin-bottom:4px;">@mnote</div>
+            }
 
             <div style="overflow:auto;border:1px solid #f0f0f0;height:min(560px,60vh);">
                 <svg width="@N(layout.Width * scale)" height="@N(layout.Height * scale)"
@@ -159,6 +169,10 @@ else
                 @if (findingsById.TryGetValue(node.Id, out var nodeFindings))
                 {
                     <h5 style="margin:8px 0 2px;">Governance findings (@nodeFindings.Count)</h5>
+                    @if (governanceNote is { } inote)
+                    {
+                        <div style="font-size:12px;color:#999;">@inote</div>
+                    }
                     @foreach (var f in nodeFindings)
                     {
                         <div style="font-size:12px;border-bottom:1px solid #fafafa;padding:2px 0;">
@@ -184,6 +198,11 @@ else
     [Parameter] public IReadOnlySet<string>? ChangedIds { get; set; }
     /// <summary>Governance findings of the scan by ARM id (case-insensitive keys); null = none to show.</summary>
     [Parameter] public IReadOnlyDictionary<string, IReadOnlyList<GovernanceFinding>>? Findings { get; set; }
+    /// <summary>The scan manifest's source states (<see cref="ScanManifest.Sources"/>); null = the
+    /// scan predates governance collection, as in GovernanceFindingsView.</summary>
+    [Parameter] public IReadOnlyDictionary<string, SourceState>? Sources { get; set; }
+    /// <summary>Stored governance rows this build could not read (not in <see cref="Findings"/>).</summary>
+    [Parameter] public int Malformed { get; set; }
 
     private const double NodeW = TopologyLayout.NodeW, NodeH = TopologyLayout.NodeH;
 
@@ -206,6 +225,9 @@ else
     // Per node: its findings (most severe first) and the badge's count and top severity.
     private Dictionary<string, IReadOnlyList<GovernanceFinding>> findingsById = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, (int Count, GovernanceSeverity Top)> badges = new(StringComparer.OrdinalIgnoreCase);
+    // Badges and the inspector list carry no status lines, so absence there is qualified here.
+    private string? governanceNote;
+    private string? malformedNote;
 
     protected override Task OnParametersSetAsync()
     {
@@ -228,6 +250,8 @@ else
         }
 
         findingsById = merged.ToDictionary(kv => kv.Key, kv => GovernanceStatus.Ordered(kv.Value), StringComparer.OrdinalIgnoreCase);
+        governanceNote = GovernanceStatus.PartialNote(Sources, merged.Values.SelectMany(l => l).ToList());
+        malformedNote = GovernanceStatus.MalformedNote(Malformed);
         badges = findingsById.Where(kv => kv.Value.Count > 0)
             .ToDictionary(kv => kv.Key, kv => (kv.Value.Count, kv.Value.Max(f => f.Severity)), StringComparer.OrdinalIgnoreCase);
     }

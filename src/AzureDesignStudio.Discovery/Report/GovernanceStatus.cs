@@ -62,6 +62,21 @@ public static class GovernanceStatus
         };
     }
 
+    /// <summary>The note beside findings shown without status lines (the topology's badges):
+    /// each source that was not collected, in its <see cref="Brief"/> form; null when every
+    /// source was collected. <paramref name="findings"/> are the findings shown.</summary>
+    public static string? PartialNote(IReadOnlyDictionary<string, SourceState>? sources, IReadOnlyList<GovernanceFinding> findings)
+    {
+        if (sources is null)
+            return "Governance: not collected (this scan predates governance collection)";
+
+        var missing = GovernanceSources.All
+            .Where(s => !(sources.TryGetValue(s, out var state) && state.State == SourceState.Collected))
+            .Select(s => Label(s) + ": " + Brief(sources, s, findings.Count(f => KeyOf(f.Source) == s)))
+            .ToList();
+        return missing.Count == 0 ? null : "Governance badges cover only collected sources - " + string.Join(" · ", missing);
+    }
+
     /// <summary>The note for stored governance rows this build cannot read; null when there are none.</summary>
     public static string? MalformedNote(int rows) =>
         rows <= 0

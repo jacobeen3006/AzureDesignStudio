@@ -291,6 +291,35 @@ public class ReportGovernanceTests
             GovernanceStatus.MalformedNote(3));
     }
 
+    [Fact]
+    public void PartialNote_NamesEverySourceNotCollected()
+    {
+        // The topology shows badges and no status lines; this is the note beside them.
+        Assert.Equal("Governance: not collected (this scan predates governance collection)",
+            GovernanceStatus.PartialNote(null, []));
+
+        var all = GovernanceSources.All.ToDictionary(s => s, _ => Collected(0), StringComparer.OrdinalIgnoreCase);
+        Assert.Null(GovernanceStatus.PartialNote(all, []));
+
+        var partial = new Dictionary<string, SourceState>(StringComparer.OrdinalIgnoreCase)
+        {
+            [GovernanceSources.Advisor] = Collected(1),
+            [GovernanceSources.Policy] = new(SourceState.Unavailable, 0, "Throttled"),
+            [GovernanceSources.Defender] = NotRequested,
+        };
+        Assert.Equal("Governance badges cover only collected sources - Policy: unavailable · Defender: not requested",
+            GovernanceStatus.PartialNote(partial, [Advisor]));
+
+        // A source with rows stored before it stopped says so; one the manifest omits is unknown.
+        var stopped = new Dictionary<string, SourceState>(StringComparer.OrdinalIgnoreCase)
+        {
+            [GovernanceSources.Advisor] = Collected(1),
+            [GovernanceSources.Policy] = new(SourceState.Incomplete, 1, "1 of 2 subscription groups were read."),
+        };
+        Assert.Equal("Governance badges cover only collected sources - Policy: incomplete (1 stored) · Defender: unknown",
+            GovernanceStatus.PartialNote(stopped, [Advisor, Policy]));
+    }
+
     // --- Defender plans (drawer) ---
 
     private static readonly DefenderPlan VmPlan = new("s1", "VirtualMachines", "Standard");

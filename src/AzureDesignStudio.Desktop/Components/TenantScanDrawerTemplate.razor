@@ -401,7 +401,7 @@
         }
         else
         {
-            <TopologyView Items="topoItems" Positions="Session.Positions" ChangedIds="topoChanged" Findings="topoFindings" />
+            <TopologyView Items="topoItems" Positions="Session.Positions" ChangedIds="topoChanged" Findings="topoFindings" Sources="topoSources" Malformed="topoMalformed" />
         }
     }
     else if (activeTab == "exposure")
@@ -1043,6 +1043,9 @@
     private List<InventoryItem> topoItems = [];
     private IReadOnlySet<string>? topoChanged;
     private IReadOnlyDictionary<string, IReadOnlyList<GovernanceFinding>>? topoFindings;
+    // The manifest's source states beside the badges (null = the scan predates governance).
+    private IReadOnlyDictionary<string, SourceState>? topoSources;
+    private int topoMalformed;
 
     // Wave B3 Governance tab: the findings stored with one scan plus its manifest's source states
     // (null = the scan predates governance collection). Workspace reads only, no ARM call.
@@ -1900,6 +1903,8 @@
     {
         topoChanged = null;
         topoFindings = null;
+        topoSources = null;
+        topoMalformed = 0;
         if (topoScanId is null)
         {
             topoItems = [];
@@ -1909,8 +1914,12 @@
         var rows = await Session.GetSnapshotsAsync(topoScanId);
         topoItems = rows.Select(ToItem).ToList();
 
-        // Wave B3 badges: the scan's governance findings by ARM id (case-insensitive).
-        var (governance, _) = await Session.GetGovernanceAsync(topoScanId);
+        // Wave B3 badges: the scan's governance findings by ARM id (case-insensitive), with the
+        // manifest's source states so a source that was not collected is named beside them.
+        var (governance, malformed, manifest) = await GovernanceOfAsync(topoScanId,
+            completed.FirstOrDefault(s => s.Id == topoScanId)?.ManifestJson);
+        topoSources = manifest?.Sources;
+        topoMalformed = malformed;
         if (governance.Count > 0)
             topoFindings = governance
                 .GroupBy(f => f.ResourceId, StringComparer.OrdinalIgnoreCase)
