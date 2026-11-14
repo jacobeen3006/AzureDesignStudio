@@ -126,6 +126,14 @@ namespace AzureDesignStudio.Core.Tests
                 $"{RunbookRelativePath} must use placeholders only; it contains: {string.Join(", ", found)}");
         }
 
+        [Fact]
+        public void AgentsMd_PointsAtTheRunbook()
+        {
+            var agents = File.ReadAllText(Path.Combine(RepositoryRoot(), "AGENTS.md"));
+
+            Assert.Contains("docs/database-operations.md", agents, StringComparison.Ordinal);
+        }
+
         private static string ReadRunbook()
         {
             var path = Path.Combine(RepositoryRoot(), "docs", "database-operations.md");
