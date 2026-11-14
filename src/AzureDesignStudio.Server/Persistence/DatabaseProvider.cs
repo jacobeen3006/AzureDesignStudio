@@ -49,10 +49,14 @@ internal static class DatabaseProvider
 
     /// <summary>Configures the context options for the resolved provider. Runs when the first
     /// context is built, so a connection string from the vault source is already loaded.</summary>
-    public static void Configure(DbContextOptionsBuilder options, IConfiguration configuration)
-    {
-        var kind = Resolve(configuration);
+    public static void Configure(DbContextOptionsBuilder options, IConfiguration configuration) =>
+        Configure(options, Resolve(configuration), configuration);
 
+    /// <summary>Configures the context options for an already resolved provider. The host resolves
+    /// <c>Database:Provider</c> once, before the vault decision, and passes that same value here, so the
+    /// vault and the EF provider can never be chosen from two different reads.</summary>
+    public static void Configure(DbContextOptionsBuilder options, DatabaseKind kind, IConfiguration configuration)
+    {
         // "ads-main" is both the vault secret name and the connection-string key.
         var connectionString = configuration["ads-main"] ?? configuration.GetConnectionString("ads-main");
 

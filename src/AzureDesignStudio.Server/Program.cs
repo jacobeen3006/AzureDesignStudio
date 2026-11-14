@@ -34,8 +34,10 @@ builder.Services.Configure<JwtBearerOptions>(
         options.TokenValidationParameters.NameClaimType = "name";
     });
 
-// The one value read before Build(): the vault decision below needs it. Tests must therefore
-// supply Database:Provider with UseSetting, not ConfigureAppConfiguration.
+// The one value read before Build(): the vault decision below needs it. It is resolved once and
+// carried to the DbContext registration, so the vault and the EF provider cannot diverge. Tests
+// must therefore supply Database:Provider with UseSetting, not ConfigureAppConfiguration (a late
+// source would be ignored, not silently disagree).
 var databaseKind = DatabaseProvider.Resolve(builder.Configuration);
 
 // Key Vault supplies configuration (the "ads-main" connection string among it) when one is
@@ -56,7 +58,7 @@ if (databaseKind == DatabaseKind.SqlServer && ServiceTools.IsConfigured(keyVault
 // request), so a connection string from the vault source or from late configuration is
 // honoured and a missing one still stops the host before it serves.
 builder.Services.AddDbContext<DesignDbContext>((serviceProvider, options) =>
-    DatabaseProvider.Configure(options, serviceProvider.GetRequiredService<IConfiguration>()));
+    DatabaseProvider.Configure(options, databaseKind, serviceProvider.GetRequiredService<IConfiguration>()));
 
 // The provider is read from configuration (Crypto:Provider, default KeyVault); the real service
 // contacts the vault lazily on first use, so the host boots without one. This runs at top
