@@ -48,6 +48,50 @@ internal static class WorkspaceSchema
     {
         var existed = File.Exists(databasePath) && new FileInfo(databasePath).Length > 0;
 
+        // What is pending decides whether an existing file needs a backup: a legacy file has no history table,
+        // so every migration is pending; a brand-new file also reports them all, but then there is nothing to lose.
+        using var db = new WorkspaceDbContext(WorkspaceConnection.WriterOptions(databasePath));
+        IReadOnlyList<string> pending;
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(options.MigrateTimeout);
+            pending = (await db.Database.GetPendingMigrationsAsync(cts.Token).ConfigureAwait(false)).ToList();
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw StuckUpgrade(databasePath, options);
+        }
+        catch (DbException e)
+        {
+            throw new WorkspaceUpgradeException(
+                $"The workspace database could not be read to plan the upgrade ({e.Message}). " +
+                $"Nothing was changed. Database file: {databasePath}", e);
+        }
+
+        // The backup comes before anything alters the file (legacy adoption included). If it cannot be
+        // written the upgrade is not attempted, so the live file is exactly as it was.
+        string? premigrationBackup = null;
+        if (existed && pending.Count > 0)
+        {
+            var backupsDirectory = options.BackupsDirectory
+                ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(databasePath))!, "backups");
+            try
+            {
+                premigrationBackup = (await WorkspaceBackup.CreateAsync(
+                    databasePath, backupsDirectory, BackupReason.Premigration, options.Clock.GetUtcNow(), "workspace", ct)
+                    .ConfigureAwait(false)).Path;
+            }
+            catch (Exception e) when (e is not OperationCanceledException && (e is IOException or UnauthorizedAccessException
+                or SqliteException or ArgumentException or NotSupportedException))
+            {
+                throw new WorkspaceUpgradeException(
+                    "The workspace needs an upgrade but its backup could not be written, so the upgrade was not attempted " +
+                    $"and the workspace file is unchanged. Reason: {e.Message} Backups folder: {backupsDirectory} " +
+                    $"Database file: {databasePath}", e);
+            }
+        }
+
         // A file that predates migrations: add the columns the guarded baseline cannot add.
         if (existed)
         {
@@ -66,24 +110,16 @@ internal static class WorkspaceSchema
             }
         }
 
-        IReadOnlyList<string> pending;
-        using (var db = new WorkspaceDbContext(WorkspaceConnection.WriterOptions(databasePath)))
+        using (var cts = CancellationTokenSource.CreateLinkedTokenSource(ct))
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(options.MigrateTimeout);
             try
             {
-                pending = (await db.Database.GetPendingMigrationsAsync(cts.Token).ConfigureAwait(false)).ToList();
                 await db.Database.MigrateAsync(cts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                throw new WorkspaceUpgradeException(
-                    $"The workspace upgrade did not finish within {options.MigrateTimeout.TotalSeconds:0} seconds. " +
-                    $"An earlier upgrade may have been interrupted and left its lock in the table {LockTable}. " +
-                    $"Close the app first, then run this statement against the database and start again: " +
-                    $"DELETE FROM \"{LockTable}\"; " +
-                    $"Database file: {databasePath}");
+                throw StuckUpgrade(databasePath, options);
             }
             catch (DbException e)
             {
@@ -113,8 +149,15 @@ internal static class WorkspaceSchema
             throw new WorkspaceUpgradeException(
                 $"The workspace database stayed in journal mode '{journalMode}' instead of 'wal'. File: {databasePath}");
 
-        return new WorkspaceUpgradeResult(!existed, pending, journalMode);
+        return new WorkspaceUpgradeResult(!existed, pending, journalMode, premigrationBackup);
     }
+
+    private static WorkspaceUpgradeException StuckUpgrade(string databasePath, WorkspaceUpgradeOptions options) =>
+        new($"The workspace upgrade did not finish within {options.MigrateTimeout.TotalSeconds:0} seconds. " +
+            $"An earlier upgrade may have been interrupted and left its lock in the table {LockTable}. " +
+            $"Close the app first, then run this statement against the database and start again: " +
+            $"DELETE FROM \"{LockTable}\"; " +
+            $"Database file: {databasePath}");
 
     // Unpooled, so the raw step neither keeps the file open nor leaves a pooled handle behind.
     private static SqliteConnection OpenRaw(string databasePath) =>

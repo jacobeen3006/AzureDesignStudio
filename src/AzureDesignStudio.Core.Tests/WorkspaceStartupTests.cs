@@ -153,6 +153,7 @@ namespace AzureDesignStudio.Core.Tests
             Assert.Equal(WorkspaceStartupOutcome.Fresh, result.Report.Outcome);
             Assert.Null(result.Report.Notice);
             Assert.True(result.Report.Upgrade.Created);
+            Assert.Null(result.Report.Upgrade.PremigrationBackupPath);
             Assert.True(File.Exists(WorkspacePath));
             Assert.False(Directory.Exists(BackupsPath));
             Assert.Empty(Quarantined());
@@ -192,6 +193,87 @@ namespace AzureDesignStudio.Core.Tests
             using (var ctx = result.Db.CreateContext())
                 Assert.Equal(40, ctx.Designs.Count());
             Assert.Empty(Quarantined());
+        }
+
+        [Fact]
+        public void ALegacyFile_IsUpgraded_AfterExactlyOneVerifiedPremigrationBackup()
+        {
+            var path = WorkspacePath;
+            WorkspaceFixtures.Load(WorkspaceFixtures.L3CurrentLegacy, path);
+            var before = WorkspaceFixtures.TableCounts(path);
+
+            var result = WorkspaceStartup.Open(Options());
+            SqliteConnection.ClearAllPools();
+
+            Assert.Equal(WorkspaceStartupOutcome.Upgraded, result.Report.Outcome);
+            var backup = Assert.Single(WorkspaceBackup.List(BackupsPath));
+            Assert.Equal(BackupReason.Premigration, backup.Reason);
+            Assert.Equal(backup.Path, result.Report.Upgrade.PremigrationBackupPath);
+
+            var manifest = BackupManifest.Read(BackupManifest.PathFor(backup.Path));
+            Assert.Equal(WorkspaceFixtures.ExpectedCounts(WorkspaceFixtures.L3CurrentLegacy), manifest.TableCounts.OrderBy(c => c.Key, StringComparer.Ordinal)
+                .ToDictionary(c => c.Key, c => c.Value));
+            Assert.Null(manifest.LatestMigrationId);   // the file had no migration history when it was backed up
+            Assert.Equal(IntegrityOutcome.Ok, WorkspaceIntegrity.Check(backup.Path, IntegrityDepth.Full, IntegrityAccess.Snapshot).Outcome);
+
+            Assert.Equal(before, WorkspaceFixtures.TableCounts(path).Where(c => before.ContainsKey(c.Key))
+                .ToDictionary(c => c.Key, c => c.Value));   // the live file kept every row
+            Assert.Equal(1, WorkspaceFixtures.Scalar(path, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\""));
+        }
+
+        // L1 lacks the Scans columns that legacy adoption adds (L3 already has them), so it shows adoption did not run.
+        [Theory]
+        [InlineData(WorkspaceFixtures.L1Oldest)]
+        [InlineData(WorkspaceFixtures.L3CurrentLegacy)]
+        public void WhenTheBackupCannotBeWritten_TheUpgradeIsNotAttempted_AndTheLiveFileIsUnchanged(string fixture)
+        {
+            var path = WorkspacePath;
+            WorkspaceFixtures.Load(fixture, path);
+            var before = Hash(path);
+            var columnsBefore = SqliteSchemaDescriber.ColumnNames(path, "Scans");
+            File.WriteAllText(BackupsPath, "a regular file where the backups folder should be");
+
+            var thrown = Assert.Throws<WorkspaceUpgradeException>(() => WorkspaceStartup.Open(Options()));
+            SqliteConnection.ClearAllPools();
+
+            Assert.Contains("not attempted", thrown.Message);
+            Assert.DoesNotContain("__EFMigrationsHistory", SqliteSchemaDescriber.TableNames(path));
+            Assert.Equal(columnsBefore, SqliteSchemaDescriber.ColumnNames(path, "Scans"));   // adoption did not run
+            Assert.Equal(before, Hash(path));
+            Assert.Empty(Quarantined());
+        }
+
+        [Fact]
+        public void ReopeningAnUpgradedFile_AddsNoBackup_AndReportsOpened()
+        {
+            WorkspaceFixtures.Load(WorkspaceFixtures.L3CurrentLegacy, WorkspacePath);
+            WorkspaceStartup.Open(Options());
+            SqliteConnection.ClearAllPools();
+            var listing = WorkspaceBackup.List(BackupsPath).Select(b => b.Path).ToArray();
+            Assert.Single(listing);
+
+            var again = WorkspaceStartup.Open(Options());
+            SqliteConnection.ClearAllPools();
+
+            Assert.Equal(WorkspaceStartupOutcome.Opened, again.Report.Outcome);
+            Assert.Null(again.Report.Upgrade.PremigrationBackupPath);
+            Assert.Equal(listing, WorkspaceBackup.List(BackupsPath).Select(b => b.Path).ToArray());
+        }
+
+        [Fact]
+        public void ThePlainWorkspaceDbConstructor_AlsoBacksUpFirst_IntoABackupsFolderBesideTheDatabase()
+        {
+            var path = WorkspacePath;
+            WorkspaceFixtures.Load(WorkspaceFixtures.L3CurrentLegacy, path);
+
+            _ = new WorkspaceDb(path);
+            SqliteConnection.ClearAllPools();
+
+            var backup = Assert.Single(WorkspaceBackup.List(_temp.Path("backups")));
+            Assert.Equal(BackupReason.Premigration, backup.Reason);
+            Assert.Equal(WorkspaceFixtures.ExpectedCounts(WorkspaceFixtures.L3CurrentLegacy),
+                BackupManifest.Read(BackupManifest.PathFor(backup.Path)).TableCounts
+                    .OrderBy(c => c.Key, StringComparer.Ordinal).ToDictionary(c => c.Key, c => c.Value));
         }
 
         private sealed class FixedClock(DateTimeOffset now) : TimeProvider
