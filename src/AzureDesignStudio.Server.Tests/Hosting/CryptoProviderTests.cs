@@ -83,4 +83,36 @@ public class CryptoProviderTests
         Assert.NotNull(descriptor.ImplementationFactory);
         Assert.Null(descriptor.ImplementationType);
     }
+
+    [Fact]
+    public void DevelopmentInProductionIsRefusedBeforeAnythingIsRegistered()
+    {
+        var services = new ServiceCollection();
+
+        var failure = Assert.Throws<InvalidOperationException>(
+            () => CryptoProvider.Register(services, Config((CryptoProvider.Key, "Development")), new FakeEnvironment("Production")));
+
+        Assert.Contains("Production", failure.Message);
+        Assert.Contains("KeyVault", failure.Message);
+        Assert.Empty(services);
+    }
+
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Testing")]
+    [InlineData("Staging")]
+    public void DevelopmentIsAllowedOutsideProduction(string environment)
+    {
+        var descriptor = Registered(Config((CryptoProvider.Key, "Development")), environment);
+
+        Assert.NotNull(descriptor.ImplementationFactory);
+    }
+
+    [Fact]
+    public void KeyVaultIsStillAllowedInProduction()
+    {
+        var descriptor = Registered(Config((CryptoProvider.Key, "KeyVault")), "Production");
+
+        Assert.Equal(typeof(CryptoService), descriptor.ImplementationType);
+    }
 }
