@@ -51,7 +51,9 @@ public class InProcessTests
     private static readonly Guid User = Guid.NewGuid();
 
     private static ClaimsPrincipal SignedIn(Guid oid) =>
-        new(new ClaimsIdentity([new Claim("oid", oid.ToString()), new Claim("name", "Ada")], "test"));
+        new(new ClaimsIdentity(
+            [new Claim("oid", oid.ToString()), new Claim("tid", TestTenants.Contoso.ToString()), new Claim("name", "Ada")],
+            "test"));
 
     /// <summary>The desktop host's wiring, minus MAUI: services in DI, the invoker in front.</summary>
     private static (ServiceProvider Services, InProcessCallInvoker Invoker) Host(

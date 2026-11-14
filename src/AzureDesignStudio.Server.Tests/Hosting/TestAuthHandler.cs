@@ -20,7 +20,7 @@ public sealed class TestAuthHandler(
     /// <summary>Authenticated, but the token carries no scope claim.</summary>
     public const string NoScopeHeader = "x-test-no-scope";
 
-    /// <summary>What <c>ServiceTools.GetUserId</c> reads first.</summary>
+    /// <summary>The object id claim as Microsoft.Identity.Web maps it.</summary>
     public const string ObjectIdClaimType = "http://schemas.microsoft.com/identity/claims/objectidentifier";
 
     public const string TenantIdClaimType = "http://schemas.microsoft.com/identity/claims/tenantid";

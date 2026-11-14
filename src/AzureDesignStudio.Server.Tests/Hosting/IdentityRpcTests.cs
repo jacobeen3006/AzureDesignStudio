@@ -1,6 +1,9 @@
 using AzureDesignStudio.SharedModels.Protos;
 using Google.Protobuf.WellKnownTypes;
+using Grpc.AspNetCore.Server;
 using Grpc.Net.Client;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace AzureDesignStudio.Server.Tests.Hosting;
@@ -46,7 +49,7 @@ public sealed class IdentityRpcTests(AdsServerFactory factory) : IClassFixture<A
         Assert.Equal(401, await GetSavedStatus(new TestClaims(
             NoTid: true, Extra: [("tid", "not-a-guid")])));
 
-    // --- every Design RPC (Task 2 grows this table to the Deploy RPCs) ---
+    // --- every Design and Deploy RPC ---
 
     /// <summary>Each RPC by name, called with an empty request; the answer is the response's StatusCode.</summary>
     private static readonly Dictionary<string, Func<GrpcChannel, Task<int>>> Rpcs = new()
@@ -55,7 +58,50 @@ public sealed class IdentityRpcTests(AdsServerFactory factory) : IClassFixture<A
         ["Design.GetSaved"] = async c => (await new Design.DesignClient(c).GetSavedAsync(new Empty())).StatusCode,
         ["Design.Load"] = async c => (await new Design.DesignClient(c).LoadAsync(new LoadDesignRequest())).StatusCode,
         ["Design.Delete"] = async c => (await new Design.DesignClient(c).DeleteAsync(new DeleteDesignRequest())).StatusCode,
+        ["Deploy.SaveSubscriptionInfo"] = async c => (await new Deploy.DeployClient(c).SaveSubscriptionInfoAsync(new SubscriptionInfo())).StatusCode,
+        ["Deploy.LoadSubscriptionInfo"] = async c => (await new Deploy.DeployClient(c).LoadSubscriptionInfoAsync(new Empty())).StatusCode,
+        ["Deploy.GetResourceGroups"] = async c => (await new Deploy.DeployClient(c).GetResourceGroupsAsync(new GetRgsRequest())).StatusCode,
+        ["Deploy.WhatIf"] = async c => (await new Deploy.DeployClient(c).WhatIfAsync(new DeploymentRequest())).StatusCode,
+        ["Deploy.ApprovePlan"] = async c => (await new Deploy.DeployClient(c).ApprovePlanAsync(new PlanApprovalRequest())).StatusCode,
+        ["Deploy.CreateDeployment"] = async c =>
+        {
+            // Server-streaming: the 401 is the first (and only) streamed message.
+            using var call = new Deploy.DeployClient(c).CreateDeployment(new DeploymentRequest());
+            Assert.True(await call.ResponseStream.MoveNext(CancellationToken.None));
+            return call.ResponseStream.Current.StatusCode;
+        },
+        ["Deploy.GetDeploymentOperations"] = async c => (await new Deploy.DeployClient(c).GetDeploymentOperationsAsync(new DeploymentOperationsRequest())).StatusCode,
+        ["Deploy.PrepareRetry"] = async c => (await new Deploy.DeployClient(c).PrepareRetryAsync(new PrepareRetryRequest())).StatusCode,
+        ["Deploy.CreateStack"] = async c => (await new Deploy.DeployClient(c).CreateStackAsync(new CreateStackRequest())).StatusCode,
+        ["Deploy.StackWhatIf"] = async c => (await new Deploy.DeployClient(c).StackWhatIfAsync(new StackWhatIfRequest())).StatusCode,
+        ["Deploy.GetStack"] = async c => (await new Deploy.DeployClient(c).GetStackAsync(new GetStackRequest())).StatusCode,
+        ["Deploy.SetGuardrailPolicy"] = async c => (await new Deploy.DeployClient(c).SetGuardrailPolicyAsync(new GuardrailPolicyRequest())).StatusCode,
+        ["Deploy.GetGuardrailPolicy"] = async c => (await new Deploy.DeployClient(c).GetGuardrailPolicyAsync(new Empty())).StatusCode,
+        ["Deploy.ApproveDecomWindow"] = async c => (await new Deploy.DeployClient(c).ApproveDecomWindowAsync(new ApproveDecomWindowRequest())).StatusCode,
+        ["Deploy.ExecuteDecomWindow"] = async c => (await new Deploy.DeployClient(c).ExecuteDecomWindowAsync(new ExecuteDecomWindowRequest())).StatusCode,
+        ["Deploy.ReleaseDecomWindow"] = async c => (await new Deploy.DeployClient(c).ReleaseDecomWindowAsync(new ReleaseDecomWindowRequest())).StatusCode,
     };
+
+    /// <summary>The one RPC that is not identity-bound: it reads the public retail price list.</summary>
+    private const string PublicRpc = "Cost.GetRetailPrices";
+
+    [Fact]
+    public void TheTableListsTwentyRpcs() => Assert.Equal(20, Rpcs.Count);
+
+    [Fact]
+    public void TheTableCoversEveryGrpcMethodOfTheHost()
+    {
+        var hosted = factory.Services.GetServices<EndpointDataSource>()
+            .SelectMany(source => source.Endpoints)
+            .Select(endpoint => endpoint.Metadata.GetMetadata<GrpcMethodMetadata>())
+            .Where(metadata => metadata is not null)
+            .Select(metadata => $"{metadata!.Method.ServiceName}.{metadata.Method.Name}")
+            .Where(name => !name.StartsWith("grpc.", StringComparison.Ordinal)) // reflection and health, Debug only
+            .ToHashSet();
+        hosted.Remove(PublicRpc);
+
+        Assert.Equal(hosted.Order(), Rpcs.Keys.Order());
+    }
 
     public static TheoryData<string> RpcNames => new(Rpcs.Keys);
 

@@ -8,6 +8,7 @@ using AzureDesignStudio.Discovery.Preflight;
 using AzureDesignStudio.Discovery.ResourceGraph;
 using AzureDesignStudio.Discovery.Decommission;
 using AzureDesignStudio.Discovery.Unmanaged;
+using AzureDesignStudio.Services.Auth;
 using AzureDesignStudio.Services.Models;
 using Grpc.Core;
 using Microsoft.EntityFrameworkCore;
@@ -51,14 +52,13 @@ namespace AzureDesignStudio.Services
         {
             var response = new SaveSubInfoResponse();
             // Get user id
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
                 return response;
             }
-            var userId = new Guid(userIdClaim);
+            var userId = caller.UserId;
 
             if (!ServiceTools.IsValidSubscriptionName(request.SubscriptionName))
             {
@@ -141,14 +141,13 @@ namespace AzureDesignStudio.Services
         {
             var response = new LoadSubInfoResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
                 return response;
             }
-            var userId = new Guid(userIdClaim);
+            var userId = caller.UserId;
 
             // Newest link per subscription: rows saved before links were upserted can repeat one.
             var subResources = _designContext.AzureSubscriptions.AsNoTracking()
@@ -350,6 +349,15 @@ namespace AzureDesignStudio.Services
         {
             var response = new WhatIfResponse();
 
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
+            {
+                _logger.LogWarning("Access denied. {Failure}", failure);
+                response.StatusCode = StatusCodes.Status401Unauthorized;
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
+                return response;
+            }
+            var userId = caller.UserId;
+
             if (string.IsNullOrWhiteSpace(request.ArmTemplate))
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -380,15 +388,6 @@ namespace AzureDesignStudio.Services
                 response.ErrorMessage = scopeErrors;
                 return response;
             }
-
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
-            {
-                response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
-                return response;
-            }
-            var userId = new Guid(userIdClaim);
 
             Guid subscriptionId;
             try
@@ -661,14 +660,14 @@ namespace AzureDesignStudio.Services
         {
             var response = new DeploymentOperationsResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
                 return response;
             }
-            var userId = new Guid(userIdClaim);
+            var userId = caller.UserId;
 
             // The subscription id names the credential (the linked subscription) for every target -
             // management-group and tenant deployments still authenticate through one. The scope
@@ -830,11 +829,11 @@ namespace AzureDesignStudio.Services
         {
             var response = new PrepareRetryResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
                 return Task.FromResult(response);
             }
 
@@ -863,12 +862,11 @@ namespace AzureDesignStudio.Services
         {
             var response = new PlanApprovalResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
                 return response;
             }
 
@@ -887,8 +885,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var displayName = ServiceTools.GetUser(context).FindFirst("name")?.Value;
-            var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
+            var principal = caller.Principal;
 
             var existing = await _designContext.AdsPlanApprovals.FindAsync([planHash], context.CancellationToken);
             if (existing != null)
@@ -900,7 +897,7 @@ namespace AzureDesignStudio.Services
                 PlanJson = planJson,
                 Status = PlanApprovalGate.ApprovedStatus,
                 ApprovedBy = principal,
-                ApprovedByUserId = userIdClaim,
+                ApprovedByUserId = caller.UserIdText,
                 ApprovedAtUtc = DateTime.UtcNow,
                 RevertPlanJson = revertJson,
             };
@@ -919,6 +916,16 @@ namespace AzureDesignStudio.Services
         public override async Task CreateDeployment(DeploymentRequest request, IServerStreamWriter<DeploymentResponse> responseStream, ServerCallContext context)
         {
             var response = new DeploymentResponse();
+
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
+            {
+                _logger.LogWarning("Access denied. {Failure}", failure);
+                response.StatusCode = StatusCodes.Status401Unauthorized;
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
+                await responseStream.WriteAsync(response);
+                return;
+            }
+            var userId = caller.UserId;
 
             if (string.IsNullOrWhiteSpace(request.ArmTemplate))
             {
@@ -955,17 +962,6 @@ namespace AzureDesignStudio.Services
                 await responseStream.WriteAsync(response);
                 return;
             }
-
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
-            {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
-                response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
-                await responseStream.WriteAsync(response);
-                return;
-            }
-            var userId = new Guid(userIdClaim);
 
             Guid subscriptionId;
             try
@@ -1053,7 +1049,7 @@ namespace AzureDesignStudio.Services
                 return;
             }
 
-            if (!string.Equals(approval.ApprovedByUserId, userIdClaim, StringComparison.Ordinal))
+            if (!AdsIdentity.SameUser(approval.ApprovedByUserId, caller.UserId))
             {
                 _logger.LogWarning("Plan {PlanHash} approved by {Approver} but deployed by a different principal", planHash, approval.ApprovedBy);
                 response.StatusCode = StatusCodes.Status403Forbidden;
@@ -1129,7 +1125,7 @@ namespace AzureDesignStudio.Services
                 targetScope: target.ScopePath);
         }
         /// <summary>Everything CreateStack and StackWhatIf validate identically before the gate.</summary>
-        private sealed record StackPlan(string UserIdClaim, Guid SubscriptionId, Azure.Core.TokenCredential Credential,
+        private sealed record StackPlan(AdsCaller Caller, Guid SubscriptionId, Azure.Core.TokenCredential Credential,
             string ParametersJson, string PlanHash, DeploymentStackBody Body, GuardrailPolicy Guardrails);
 
         /// <summary>
@@ -1142,6 +1138,13 @@ namespace AzureDesignStudio.Services
         private async Task<(StackPlan? Plan, int StatusCode, string Error)> PrepareStackAsync(
             CreateStackRequest request, ServerCallContext context)
         {
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
+            {
+                _logger.LogWarning("Access denied. {Failure}", failure);
+                return (null, StatusCodes.Status401Unauthorized, ServiceTools.IdentityInvalidMessage);
+            }
+            var userId = caller.UserId;
+
             if (string.IsNullOrWhiteSpace(request.ArmTemplate))
                 return (null, StatusCodes.Status400BadRequest, "Template is empty.");
 
@@ -1176,14 +1179,6 @@ namespace AzureDesignStudio.Services
                     return (null, StatusCodes.Status400BadRequest, "deny_mode must be none, denyDelete or denyWriteAndDelete.");
                 denySettings = new StackDenySettings(denyMode, request.DenyApplyToChildScopes);
             }
-
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
-            {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
-                return (null, StatusCodes.Status401Unauthorized, "Access denied.");
-            }
-            var userId = new Guid(userIdClaim);
 
             Guid subscriptionId;
             try
@@ -1241,7 +1236,7 @@ namespace AzureDesignStudio.Services
             if (rg == null)
                 return (null, rgStatus, rgError);
 
-            return (new StackPlan(userIdClaim, subscriptionId, credential, parametersJson, planHash, body, guardrailPolicy),
+            return (new StackPlan(caller, subscriptionId, credential, parametersJson, planHash, body, guardrailPolicy),
                 StatusCodes.Status200OK, string.Empty);
         }
 
@@ -1393,7 +1388,7 @@ namespace AzureDesignStudio.Services
                 response.ErrorMessage = prepareError;
                 return response;
             }
-            var userIdClaim = prepared.UserIdClaim;
+            var caller = prepared.Caller;
             var subscriptionId = prepared.SubscriptionId;
             var credential = prepared.Credential;
             var planHash = prepared.PlanHash;
@@ -1415,7 +1410,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            if (!string.Equals(approval.ApprovedByUserId, userIdClaim, StringComparison.Ordinal))
+            if (!AdsIdentity.SameUser(approval.ApprovedByUserId, caller.UserId))
             {
                 _logger.LogWarning("Plan {PlanHash} approved by {Approver} but stacked by a different principal", planHash, approval.ApprovedBy);
                 response.StatusCode = StatusCodes.Status403Forbidden;
@@ -1555,6 +1550,15 @@ namespace AzureDesignStudio.Services
         {
             var response = new GetStackResponse();
 
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
+            {
+                _logger.LogWarning("Access denied. {Failure}", failure);
+                response.StatusCode = StatusCodes.Status401Unauthorized;
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
+                return response;
+            }
+            var userId = caller.UserId;
+
             if (string.IsNullOrWhiteSpace(request.StackName))
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -1568,16 +1572,6 @@ namespace AzureDesignStudio.Services
                 response.ErrorMessage = @"STACK_NAME_INVALID: stack name must match ^[-\w._()]{1,63}$.";
                 return response;
             }
-
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
-            {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
-                response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
-                return response;
-            }
-            var userId = new Guid(userIdClaim);
 
             Guid subscriptionId;
             try
@@ -1719,11 +1713,11 @@ namespace AzureDesignStudio.Services
         public override async Task<GuardrailPolicyResponse> GetGuardrailPolicy(Empty request, ServerCallContext context)
         {
             var response = new GuardrailPolicyResponse();
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
                 return response;
             }
 
@@ -1746,11 +1740,11 @@ namespace AzureDesignStudio.Services
         public override async Task<GuardrailPolicyResponse> SetGuardrailPolicy(GuardrailPolicyRequest request, ServerCallContext context)
         {
             var response = new GuardrailPolicyResponse();
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
                 return response;
             }
 
@@ -1773,8 +1767,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var displayName = ServiceTools.GetUser(context).FindFirst("name")?.Value;
-            var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
+            var principal = caller.Principal;
 
             var row = await _designContext.AdsGuardrailPolicies.FindAsync([GuardrailRowId], context.CancellationToken);
             if (row is null)
@@ -1785,7 +1778,7 @@ namespace AzureDesignStudio.Services
 
             row.Json = json;
             row.UpdatedBy = principal;
-            row.UpdatedByUserId = userIdClaim;
+            row.UpdatedByUserId = caller.UserIdText;
             row.UpdatedAtUtc = DateTime.UtcNow;
             await _designContext.SaveChangesAsync(context.CancellationToken);
 
@@ -2142,14 +2135,13 @@ namespace AzureDesignStudio.Services
         {
             var response = new GetRgsResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
                 return response;
             }
-            var userId = new Guid(userIdClaim);
+            var userId = caller.UserId;
 
             Guid subscriptionId;
             try
@@ -2207,12 +2199,11 @@ namespace AzureDesignStudio.Services
         {
             var response = new ApproveDecomWindowResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
                 return response;
             }
 
@@ -2245,7 +2236,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var credential = await GetCredentialAsync(new Guid(userIdClaim), subscriptionId);
+            var credential = await GetCredentialAsync(caller.UserId, subscriptionId);
             if (credential == null)
             {
                 _logger.LogWarning("No subscription is found.");
@@ -2254,8 +2245,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var displayName = ServiceTools.GetUser(context).FindFirst("name")?.Value;
-            var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
+            var principal = caller.Principal;
 
             var existing = await _designContext.AdsDecomApprovals.FindAsync([executionHash], context.CancellationToken);
             if (existing != null)
@@ -2268,7 +2258,7 @@ namespace AzureDesignStudio.Services
                 PlanHash = planHash,
                 SubscriptionId = subscriptionId.ToString(),
                 ApprovedBy = principal,
-                ApprovedByUserId = userIdClaim,
+                ApprovedByUserId = caller.UserIdText,
                 ApprovedAtUtc = DateTime.UtcNow,
             };
             _designContext.AdsDecomApprovals.Add(approval);
@@ -2296,12 +2286,11 @@ namespace AzureDesignStudio.Services
         {
             var response = new ExecuteDecomWindowResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
                 return response;
             }
 
@@ -2327,7 +2316,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var credential = await GetCredentialAsync(new Guid(userIdClaim), subscriptionId);
+            var credential = await GetCredentialAsync(caller.UserId, subscriptionId);
             if (credential == null)
             {
                 _logger.LogWarning("No subscription is found.");
@@ -2363,7 +2352,7 @@ namespace AzureDesignStudio.Services
             }
 
             // Same rule as CreateDeployment: the approval belongs to the principal who gave it.
-            if (!string.Equals(approval.ApprovedByUserId, userIdClaim, StringComparison.Ordinal))
+            if (!AdsIdentity.SameUser(approval.ApprovedByUserId, caller.UserId))
             {
                 _logger.LogWarning("Decom execution {ExecutionHash} approved by {Approver} but executed by a different principal", executionHash, approval.ApprovedBy);
                 response.StatusCode = StatusCodes.Status403Forbidden;
@@ -2404,7 +2393,6 @@ namespace AzureDesignStudio.Services
                 response.ErrorMessage = policyError;
                 return response;
             }
-
 
             var findings = new List<string>();
             var emptyTags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -2450,8 +2438,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var displayName = ServiceTools.GetUser(context).FindFirst("name")?.Value;
-            var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
+            var principal = caller.Principal;
 
             // Consume the approval and land the Started row before any ARM mutation; a failed audit
             // write aborts the run - fail closed, the run has no durable trail without it.
@@ -2554,12 +2541,11 @@ namespace AzureDesignStudio.Services
         {
             var response = new ReleaseDecomWindowResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
                 return response;
             }
 
@@ -2583,7 +2569,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var credential = await GetCredentialAsync(new Guid(userIdClaim), subscriptionId);
+            var credential = await GetCredentialAsync(caller.UserId, subscriptionId);
             if (credential == null)
             {
                 _logger.LogWarning("No subscription is found.");
@@ -2599,8 +2585,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var displayName = ServiceTools.GetUser(context).FindFirst("name")?.Value;
-            var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
+            var principal = caller.Principal;
             var applyId = Guid.NewGuid();
 
             // The Aborted event lands before the first delete; a failed write is logged critical
