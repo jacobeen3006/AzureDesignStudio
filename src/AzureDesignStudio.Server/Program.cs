@@ -126,7 +126,9 @@ app.MapGrpcService<RetailPriceService>().EnableGrpcWeb();
 
 if (app.Environment.IsDevelopment())
 {
-    app.MapGrpcReflectionService();
+    // Authenticated callers only: a Development environment name that leaks onto a deployed
+    // host (a common slip) must not publish the service surface to anonymous callers.
+    app.MapGrpcReflectionService().RequireAuthorization();
 }
 
 app.MapStaticAssets();

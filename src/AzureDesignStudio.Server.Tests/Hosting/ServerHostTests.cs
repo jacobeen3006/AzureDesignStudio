@@ -4,6 +4,8 @@ using Google.Protobuf.WellKnownTypes;
 using Grpc.AspNetCore.Server;
 using Grpc.Core;
 using AzureDesignStudio.Services.Models;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
@@ -217,6 +219,32 @@ public class ServerHostTests(AdsServerFactory factory) : IClassFixture<AdsServer
         var configuration = factory.Services.GetRequiredService<IConfiguration>();
 
         Assert.Equal(TestAuthHandler.ScopeValue, configuration["AzureAd:Scopes"]);
+    }
+
+    [Fact]
+    public void ReflectionIsNotMappedOutsideDevelopment()
+    {
+        var reflection = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .Select(e => e.Metadata.GetMetadata<GrpcMethodMetadata>())
+            .Where(m => m is not null && m.Method.ServiceName.Contains("Reflection", StringComparison.Ordinal));
+
+        Assert.Empty(reflection);
+    }
+
+    [Fact]
+    public void ReflectionInDevelopmentRequiresAnAuthenticatedCaller()
+    {
+        // A Development environment name that leaks onto a deployed host must not publish the
+        // service surface anonymously.
+        using var development = factory.WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
+
+        var reflection = development.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .Where(e => e.Metadata.GetMetadata<GrpcMethodMetadata>() is { } m
+                        && m.Method.ServiceName.Contains("Reflection", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.NotEmpty(reflection);
+        Assert.All(reflection, e => Assert.NotEmpty(e.Metadata.GetOrderedMetadata<IAuthorizeData>()));
     }
 
     [Fact]
