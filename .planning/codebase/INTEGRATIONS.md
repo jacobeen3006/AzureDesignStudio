@@ -83,7 +83,7 @@ last_mapped_at: 2026-10-21
   - Client: `DesignDbContext` in `src/AzureDesignStudio.Server/Models/DesignDbContext.cs` (`AdsDesigns`, `AzureSubscriptions`, `AdsPlanApprovals`, `AdsPlanApplyEvents`, `AdsGuardrailPolicies`, `AdsDecomApprovals`, `AdsDecomWindowEvents`)
   - Schema bootstrap is `EnsureCreated()` plus raw `CREATE TABLE/ALTER TABLE` guards in `src/AzureDesignStudio.Server/Program.cs`
 - Desktop workspace — SQLite file `workspace.db` under `FileSystem.Current.AppDataDirectory` (`src/AzureDesignStudio.Desktop/MauiProgram.cs`, `src/AzureDesignStudio.Workspace/WorkspaceDbContext.cs`)
-  - Tables: `Designs`, `Scans`, `ResourceSnapshots`, `CostCache`, `ExecutionPlans`, `AuditRecords`, `NodePositions`, `ChangeFeed`, `DecomWindows`
+  - Tables: `Designs`, `Scans`, `ResourceSnapshots`, `CostCache`, `ExecutionPlans`, `AuditRecords`, `NodePositions`, `ChangeFeed`, `DecomWindows`, `GovernanceFindings`
   - Bootstrap: `EnsureCreated()` + additive `ALTER TABLE`/`CREATE TABLE IF NOT EXISTS` in `WorkspaceDb` (`src/AzureDesignStudio.Workspace/WorkspaceDbContext.cs`)
 - Tests — SQLite provider (`src/AzureDesignStudio.Core.Tests/AzureDesignStudio.Core.Tests.csproj`)
 
