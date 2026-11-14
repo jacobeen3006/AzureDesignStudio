@@ -168,28 +168,37 @@ namespace AzureDesignStudio.Core.Tests
         }
 
         [Theory]
+        [InlineData(1, true)]    // error: a plain SQL error says nothing about the file
         [InlineData(3, true)]    // perm
+        [InlineData(4, true)]    // abort
         [InlineData(5, true)]    // busy
         [InlineData(6, true)]    // locked
         [InlineData(7, true)]    // nomem
         [InlineData(8, true)]    // readonly
+        [InlineData(9, true)]    // interrupt
         [InlineData(10, true)]   // ioerr
         [InlineData(13, true)]   // full
         [InlineData(14, true)]   // cantopen
+        [InlineData(15, true)]   // protocol: WAL lock contention with another process
+        [InlineData(17, true)]   // schema
+        [InlineData(21, true)]   // misuse
+        [InlineData(23, true)]   // auth
+        [InlineData(99, true)]   // unknown: never trusted as proof of damage
         [InlineData(11, false)]  // corrupt
+        [InlineData(24, false)]  // format
         [InlineData(26, false)]  // notadb
-        [InlineData(99, false)]  // unknown: not known to be environmental, so it is not trusted as harmless
-        public void ContentionPermissionAndIoCodes_AreInconclusive_EverythingElseIsNot(int code, bool inconclusive)
+        public void OnlyCorruptFormatAndNotADbAreCorruption_EverythingElseIsInconclusive(int code, bool inconclusive)
         {
             Assert.Equal(inconclusive, IntegrityCodes.IsInconclusive(code));
+            Assert.Equal(!inconclusive, IntegrityCodes.IsCorrupt(code));
         }
 
         [Fact]
-        public void TheClassificationTable_CoversExactlyTheEightEnvironmentalCodes()
+        public void TheClassificationTable_CoversExactlyTheThreeCorruptionCodes()
         {
-            var inconclusive = Enumerable.Range(0, 300).Where(IntegrityCodes.IsInconclusive).ToArray();
+            var corrupt = Enumerable.Range(0, 300).Where(IntegrityCodes.IsCorrupt).ToArray();
 
-            Assert.Equal(new[] { 3, 5, 6, 7, 8, 10, 13, 14 }, inconclusive);
+            Assert.Equal(new[] { 11, 24, 26 }, corrupt);
         }
     }
 }

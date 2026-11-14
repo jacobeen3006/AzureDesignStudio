@@ -49,12 +49,12 @@ public sealed record IntegrityResult(IntegrityOutcome Outcome, IReadOnlyList<str
 /// unpooled connection and classifies the outcome exactly: a truncated file or destroyed header is
 /// <see cref="IntegrityOutcome.Corrupt"/>; a zero-length main file next to a non-empty write-ahead log is
 /// corrupt, while a zero-length file without one is a valid empty database; busy, locked, permission,
-/// IO, full-disk and out-of-memory errors are <see cref="IntegrityOutcome.Inconclusive"/>.
+/// IO, full-disk and out-of-memory errors, and every other SQLite error code, are <see cref="IntegrityOutcome.Inconclusive"/>.
 /// <para>
 /// This deliberately narrows the CONTEXT entry "treat any exception from quick_check as corruption":
 /// a second process holding the file must never cause a healthy workspace to be quarantined. Only
-/// exceptions that say something about the file's content (not-a-database, corrupt, and any code not
-/// known to be environmental) are corruption.
+/// exceptions that say something about the file's content (SQLITE_CORRUPT, SQLITE_FORMAT, SQLITE_NOTADB)
+/// are corruption; any other code is inconclusive.
 /// </para>
 /// <para>
 /// Known blind spot: <c>quick_check</c> does not verify UNIQUE constraints or that index content matches
@@ -104,7 +104,7 @@ public static class WorkspaceIntegrity
         {
             var problem = $"SQLite error {e.SqliteErrorCode}: {e.Message}";
             return new IntegrityResult(
-                IntegrityCodes.IsInconclusive(e.SqliteErrorCode) ? IntegrityOutcome.Inconclusive : IntegrityOutcome.Corrupt,
+                IntegrityCodes.IsCorrupt(e.SqliteErrorCode) ? IntegrityOutcome.Corrupt : IntegrityOutcome.Inconclusive,
                 [problem]);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -114,10 +114,16 @@ public static class WorkspaceIntegrity
     }
 }
 
-/// <summary>Primary SQLite result codes that say nothing about the content of the file.</summary>
+/// <summary>
+/// Primary SQLite result codes. An allow-list: only the codes that SQLite documents as "the file content is
+/// damaged" count as corruption; every other code (busy, locked, protocol, interrupt, abort, misuse, auth,
+/// schema, a plain SQL error, a code this list has never heard of) says nothing about the content and is
+/// inconclusive, so startup stops with "nothing was moved" instead of moving a possibly healthy workspace.
+/// </summary>
 internal static class IntegrityCodes
 {
-    /// <summary>perm 3, busy 5, locked 6, nomem 7, readonly 8, ioerr 10, full 13, cantopen 14.</summary>
-    public static bool IsInconclusive(int primaryCode) =>
-        primaryCode is 3 or 5 or 6 or 7 or 8 or 10 or 13 or 14;
+    /// <summary>corrupt 11, format 24, notadb 26.</summary>
+    public static bool IsCorrupt(int primaryCode) => primaryCode is 11 or 24 or 26;
+
+    public static bool IsInconclusive(int primaryCode) => !IsCorrupt(primaryCode);
 }
