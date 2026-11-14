@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Database Durability
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-11-14T11:59:55.598Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-11-14T12:04:36.624Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 04 execution started
-state_head: 27aeccbef08cec532050770114195f1f756be891
+state_head: 611e1194e08bd58a4db704fdd4c269cd6ab99e77
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 34
-  completed_plans: 20
+  completed_plans: 21
   percent: 18
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 ## Current Position
 
 Phase: 04 (Database Durability) — EXECUTING
-Plan: 2 of 13
+Plan: 3 of 13
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 04 execution started
 
@@ -65,6 +65,7 @@ Progress: [██░░░░░░░░] 18%
 | Phase 03 P05 | 10min | 3 tasks | 1 files |
 | Phase 03 P06 | 10min | 2 tasks | 2 files |
 | Phase 04 P01 | 25min | 2 tasks | 14 files |
+| Phase 04 P02 | 30min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,7 @@ Progress: [██░░░░░░░░] 18%
 - [Phase 03]: 03-06: source guards match call shape and line-start directives; test-auth text banned from the production Server tree
 - [Phase 04]: 04-01: dotnet-ef 10.0.13 pinned in a root tool manifest; EF Design 10.0.12 central, PrivateAssets=all in Workspace and Server only
 - [Phase 04]: 04-01: legacy workspace fixtures are plain SQL built from shipped DDL; schema parity compared via pragmas, never sqlite_master text; fixture loader refuses non-temp targets
+- [Phase 04]: 04-02: workspace baseline migration is guarded SQL derived from EF's generated DDL; legacy adoption adds the Scans columns before it; Migrate bounded to 30s with lock-recovery message
 
 ### Pending Todos
 
@@ -112,6 +114,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T11:59:55.496Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-11-14T12:04:36.517Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
