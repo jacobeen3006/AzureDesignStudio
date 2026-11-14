@@ -228,6 +228,60 @@ public class InProcessTests
         Assert.Equal("Ada <" + User + ">", get.UpdatedBy);
     }
 
+    [Fact]
+    public async Task TheSingleUserCallerSetsBothTenantSettingsAndReadsThemBack()
+    {
+        // The in-process invoker marks its caller as the single-user host, which implies the
+        // administrator rights (D-04): no Guardrail.Admin role is needed on the desktop.
+        var (_, invoker) = Host(SignedIn(User));
+        var client = new Deploy.DeployClient(invoker);
+
+        var before = await client.GetTenantSettingsAsync(new Empty());
+        var set = await client.SetTenantSettingsAsync(new TenantSettingsRequest { AllowSelfApproval = true, GuardrailPolicyMode = "merge" });
+        var after = await client.GetTenantSettingsAsync(new Empty());
+
+        Assert.Equal(200, before.StatusCode);
+        Assert.False(before.AllowSelfApproval);
+        Assert.Equal("replace", before.GuardrailPolicyMode);
+        Assert.Equal(200, set.StatusCode);
+        Assert.True(after.AllowSelfApproval);
+        Assert.Equal("merge", after.GuardrailPolicyMode);
+        Assert.Equal("Ada <" + User + ">", after.UpdatedBy);
+    }
+
+    [Fact]
+    public async Task TheModeSetThroughTheGeneratedClientGovernsTheNextEvaluation()
+    {
+        // The default policy is operator-seeded data, so seed it through the host's own context;
+        // the single-user caller then adds an own policy and switches the scope to merge.
+        var (services, invoker) = Host(SignedIn(User));
+        var client = new Deploy.DeployClient(invoker);
+        await client.SetGuardrailPolicyAsync(new GuardrailPolicyRequest { Json = """{"types":["Microsoft.KeyVault/vaults"]}""" });
+        using (var scope = services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<DesignDbContext>();
+            db.AdsGuardrailPolicies.Add(new GuardrailPolicyModel
+            {
+                Id = 1, TenantId = null, Json = """{"types":["Microsoft.Network/virtualNetworks"]}""",
+                UpdatedBy = "operator", UpdatedByUserId = Guid.Empty.ToString("D"), UpdatedAtUtc = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        async Task<string[]> Effective()
+        {
+            using var scope = services.CreateScope();
+            var service = (DeployService)scope.ServiceProvider.GetRequiredService<Deploy.DeployBase>();
+            var (policy, error) = await service.LoadGuardrailPolicy(TestTenants.Contoso, CancellationToken.None);
+            Assert.Null(error);
+            return [.. policy!.ProtectedTypes];
+        }
+
+        Assert.Equal(["Microsoft.KeyVault/vaults"], await Effective());
+        await client.SetTenantSettingsAsync(new TenantSettingsRequest { GuardrailPolicyMode = "merge" });
+        Assert.Equal(["Microsoft.Network/virtualNetworks", "Microsoft.KeyVault/vaults"], await Effective());
+    }
+
     // --- deploying as the signed-in user, or as a linked service principal ---
 
     [Fact]

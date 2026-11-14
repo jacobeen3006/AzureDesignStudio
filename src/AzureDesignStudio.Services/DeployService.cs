@@ -1662,25 +1662,48 @@ namespace AzureDesignStudio.Services
                 .FirstOrDefaultAsync(e => e.TenantId == null && e.Id == GuardrailRowId, ct);
         }
 
+        private const string GuardrailPolicyUnreadableMessage =
+            "GUARDRAIL_POLICY_UNREADABLE: the stored do-not-touch policy is not a valid guardrail JSON object - repair it via the guardrails editor before deploying.";
+
         /// <summary>
-        /// Loads the server-side do-not-touch list of one scope: its own row, else the inherited
-        /// default row, else the empty policy (vacuous enforcement); a row that cannot be read fails
-        /// closed - deploys refuse rather than guess the list. An unreadable row affects only the scope
-        /// that resolves to it.
+        /// Loads the server-side do-not-touch list of one scope (D-05). In replace mode - the default,
+        /// also when the scope has no settings row - it is the scope's own row, else the inherited
+        /// default row, else the empty policy (vacuous enforcement). In merge mode it is the union of the
+        /// default row and the scope's own row (<see cref="GuardrailPolicy.Merge"/>), a missing side
+        /// counting as empty. A stored mode that is not recognised is judged as merge: the safe failure
+        /// is more protection. A row that cannot be read fails closed - deploys refuse rather than guess
+        /// the list - and an unreadable row affects only the scope that resolves to it.
         /// </summary>
         internal async Task<(GuardrailPolicy? Policy, string? Error)> LoadGuardrailPolicy(Guid scopeId, CancellationToken ct)
         {
-            var row = await FindEffectiveGuardrailRow(scopeId, ct);
-            if (row is null || string.IsNullOrWhiteSpace(row.Json)) return (GuardrailPolicy.Empty, null);
+            var settings = await _designContext.AdsTenantSettings.AsNoTracking()
+                .FirstOrDefaultAsync(e => e.TenantId == scopeId, ct);
+            var mode = settings?.GuardrailPolicyMode;
+            var merge = settings is not null
+                && !string.Equals(mode, GuardrailPolicyModes.Replace, StringComparison.OrdinalIgnoreCase);
+
             try
             {
-                return (GuardrailPolicy.FromJson(row.Json), null);
+                if (!merge)
+                {
+                    var row = await FindEffectiveGuardrailRow(scopeId, ct);
+                    return (ParseGuardrailRow(row), null);
+                }
+
+                var own = await _designContext.AdsGuardrailPolicies.AsNoTracking()
+                    .FirstOrDefaultAsync(e => e.TenantId == scopeId, ct);
+                var inherited = await _designContext.AdsGuardrailPolicies.AsNoTracking()
+                    .FirstOrDefaultAsync(e => e.TenantId == null && e.Id == GuardrailRowId, ct);
+                return (GuardrailPolicy.Merge(ParseGuardrailRow(inherited), ParseGuardrailRow(own)), null);
             }
             catch (Exception ex) when (ex is JsonException or InvalidOperationException)
             {
-                return (null, "GUARDRAIL_POLICY_UNREADABLE: the stored do-not-touch policy is not a valid guardrail JSON object - repair it via the guardrails editor before deploying.");
+                return (null, GuardrailPolicyUnreadableMessage);
             }
         }
+
+        private static GuardrailPolicy ParseGuardrailRow(GuardrailPolicyModel? row) =>
+            row is null || string.IsNullOrWhiteSpace(row.Json) ? GuardrailPolicy.Empty : GuardrailPolicy.FromJson(row.Json);
 
         /// <summary>Apply-time veto: the plan's bound targets against the live policy. The message
         /// lists every protected resource so the operator sees exactly what the list shields.</summary>

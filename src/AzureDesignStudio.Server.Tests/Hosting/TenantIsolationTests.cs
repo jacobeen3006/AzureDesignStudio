@@ -309,6 +309,162 @@ public sealed class TenantIsolationTests
         Assert.NotNull(own);
     }
 
+    // --- guardrail policy mode (D-05): replace by default, merge selectable per tenant ---
+
+    private async Task SeedOwn(Guid scope, string json, int id = 2)
+    {
+        _db.AdsGuardrailPolicies.Add(new GuardrailPolicyModel
+        {
+            Id = id, TenantId = scope, Json = json, UpdatedBy = "x", UpdatedByUserId = "x", UpdatedAtUtc = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+    }
+
+    private async Task SeedMode(Guid scope, string mode)
+    {
+        _db.AdsTenantSettings.Add(new TenantSettingsModel
+        {
+            TenantId = scope, GuardrailPolicyMode = mode, UpdatedBy = "x", UpdatedByUserId = "x", UpdatedAtUtc = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+    }
+
+    private static string[] Types(GuardrailPolicy? policy) => [.. policy!.ProtectedTypes];
+
+    [Fact]
+    public async Task WithNoSettingsRowTheScopeIsInReplaceMode()
+    {
+        await SeedDefault();
+        await SeedOwn(TestTenants.Contoso, StoragePolicy);
+
+        var (policy, error) = await Service.LoadGuardrailPolicy(TestTenants.Contoso, CancellationToken.None);
+
+        Assert.Null(error);
+        Assert.Equal(["Microsoft.Storage/storageAccounts"], Types(policy));
+    }
+
+    [Fact]
+    public async Task ReplaceModeUsesTheOwnPolicyElseTheDefaultElseEmpty()
+    {
+        await SeedMode(TestTenants.Contoso, GuardrailPolicyModes.Replace);
+        var service = Service;
+        var (empty, _) = await service.LoadGuardrailPolicy(TestTenants.Contoso, CancellationToken.None);
+        Assert.Empty(Types(empty));
+
+        await SeedDefault();
+        var (inherited, _) = await service.LoadGuardrailPolicy(TestTenants.Contoso, CancellationToken.None);
+        Assert.Equal(["Microsoft.Network/virtualNetworks"], Types(inherited));
+
+        await SeedOwn(TestTenants.Contoso, StoragePolicy);
+        var (own, _) = await service.LoadGuardrailPolicy(TestTenants.Contoso, CancellationToken.None);
+        Assert.Equal(["Microsoft.Storage/storageAccounts"], Types(own));
+    }
+
+    [Fact]
+    public async Task MergeModeJudgesTheUnionOfTheDefaultAndTheOwnPolicy()
+    {
+        await SeedDefault();
+        await SeedOwn(TestTenants.Contoso, StoragePolicy);
+        await SeedMode(TestTenants.Contoso, GuardrailPolicyModes.Merge);
+
+        var (policy, error) = await Service.LoadGuardrailPolicy(TestTenants.Contoso, CancellationToken.None);
+
+        Assert.Null(error);
+        Assert.Equal(["Microsoft.Network/virtualNetworks", "Microsoft.Storage/storageAccounts"], Types(policy));
+    }
+
+    [Fact]
+    public async Task MergeModeWithNoOwnRowIsTheDefaultAndWithNoDefaultRowIsTheOwnRow()
+    {
+        await SeedMode(TestTenants.Contoso, GuardrailPolicyModes.Merge);
+        await SeedMode(TestTenants.Fabrikam, GuardrailPolicyModes.Merge);
+        await SeedDefault();
+        await SeedOwn(TestTenants.Fabrikam, KeyVaultPolicy);
+        var service = Service;
+
+        var (noOwn, _) = await service.LoadGuardrailPolicy(TestTenants.Contoso, CancellationToken.None);
+        Assert.Equal(["Microsoft.Network/virtualNetworks"], Types(noOwn));
+
+        _db.AdsGuardrailPolicies.Remove(await _db.AdsGuardrailPolicies.SingleAsync(p => p.TenantId == null));
+        await _db.SaveChangesAsync();
+        var (noDefault, _) = await service.LoadGuardrailPolicy(TestTenants.Fabrikam, CancellationToken.None);
+        Assert.Equal(["Microsoft.KeyVault/vaults"], Types(noDefault));
+        var (neither, _) = await service.LoadGuardrailPolicy(TestTenants.Contoso, CancellationToken.None);
+        Assert.Empty(Types(neither));
+    }
+
+    [Fact]
+    public async Task AnUnrecognisedStoredModeIsJudgedAsMerge()
+    {
+        await SeedDefault();
+        await SeedOwn(TestTenants.Contoso, StoragePolicy);
+        await SeedMode(TestTenants.Contoso, "union");
+
+        var (policy, error) = await Service.LoadGuardrailPolicy(TestTenants.Contoso, CancellationToken.None);
+
+        Assert.Null(error);
+        Assert.Equal(["Microsoft.Network/virtualNetworks", "Microsoft.Storage/storageAccounts"], Types(policy));
+    }
+
+    [Fact]
+    public async Task MergeModeFailsClosedWhenEitherBodyIsUnreadable()
+    {
+        await SeedMode(TestTenants.Contoso, GuardrailPolicyModes.Merge);
+        await SeedMode(TestTenants.Fabrikam, GuardrailPolicyModes.Merge);
+        await SeedDefault();
+        await SeedOwn(TestTenants.Contoso, "{ not json");
+        var service = Service;
+
+        var (brokenOwn, ownError) = await service.LoadGuardrailPolicy(TestTenants.Contoso, CancellationToken.None);
+        Assert.Null(brokenOwn);
+        Assert.StartsWith("GUARDRAIL_POLICY_UNREADABLE", ownError);
+
+        _db.AdsGuardrailPolicies.Remove(await _db.AdsGuardrailPolicies.SingleAsync(p => p.TenantId == null));
+        await SeedDefault("{ not json");
+        await SeedOwn(TestTenants.Fabrikam, KeyVaultPolicy, id: 3);
+        var (brokenDefault, defaultError) = await service.LoadGuardrailPolicy(TestTenants.Fabrikam, CancellationToken.None);
+        Assert.Null(brokenDefault);
+        Assert.StartsWith("GUARDRAIL_POLICY_UNREADABLE", defaultError);
+    }
+
+    [Fact]
+    public async Task AnotherScopesModeDoesNotChangeThisScope()
+    {
+        await SeedDefault();
+        await SeedOwn(TestTenants.Contoso, StoragePolicy);
+        await SeedOwn(TestTenants.Fabrikam, KeyVaultPolicy, id: 3);
+        await SeedMode(TestTenants.Fabrikam, GuardrailPolicyModes.Merge);
+        var service = Service;
+
+        var (contoso, _) = await service.LoadGuardrailPolicy(TestTenants.Contoso, CancellationToken.None);
+        var (fabrikam, _) = await service.LoadGuardrailPolicy(TestTenants.Fabrikam, CancellationToken.None);
+
+        Assert.Equal(["Microsoft.Storage/storageAccounts"], Types(contoso));
+        Assert.Equal(["Microsoft.Network/virtualNetworks", "Microsoft.KeyVault/vaults"], Types(fabrikam));
+    }
+
+    [Fact]
+    public async Task SettingTheModeThroughTheRpcThenGovernsTheNextLoad()
+    {
+        await SeedDefault();
+        var admin = Member(Guid.NewGuid(), TestTenants.Contoso);
+        await Set(admin, StoragePolicy);
+        var service = Service;
+        var (before, _) = await service.LoadGuardrailPolicy(TestTenants.Contoso, CancellationToken.None);
+        Assert.Equal(["Microsoft.Storage/storageAccounts"], Types(before));
+
+        var set = await service.SetTenantSettings(
+            new TenantSettingsRequest { AllowSelfApproval = false, GuardrailPolicyMode = "Merge" }, Member(Guid.NewGuid(), TestTenants.Contoso));
+        var (merged, _) = await service.LoadGuardrailPolicy(TestTenants.Contoso, CancellationToken.None);
+        Assert.Equal(200, set.StatusCode);
+        Assert.Equal(["Microsoft.Network/virtualNetworks", "Microsoft.Storage/storageAccounts"], Types(merged));
+
+        await service.SetTenantSettings(
+            new TenantSettingsRequest { AllowSelfApproval = false, GuardrailPolicyMode = "replace" }, Member(Guid.NewGuid(), TestTenants.Contoso));
+        var (replaced, _) = await service.LoadGuardrailPolicy(TestTenants.Contoso, CancellationToken.None);
+        Assert.Equal(["Microsoft.Storage/storageAccounts"], Types(replaced));
+    }
+
     // --- enforcement uses the caller's scope ---
 
     private const string ResourceGroup = "rg";

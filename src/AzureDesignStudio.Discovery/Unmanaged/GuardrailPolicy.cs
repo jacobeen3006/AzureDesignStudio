@@ -38,6 +38,40 @@ public sealed record GuardrailPolicy(
         return new GuardrailPolicy(scopes, tags, types);
     }
 
+    /// <summary>
+    /// The merge mode of the per-tenant policy (Phase 5, D-05): the inherited default's rules always
+    /// apply and the scope's own policy can only add rules. An ordered union per list, inherited rules
+    /// first; scopes and types compare case-insensitively, a tag is a duplicate when key and value match
+    /// case-insensitively (a key-only tag and a keyed-value tag are different rules). Returns new lists
+    /// and never mutates either input; merging with <see cref="Empty"/> yields the other side's rules.
+    /// </summary>
+    public static GuardrailPolicy Merge(GuardrailPolicy inherited, GuardrailPolicy own)
+    {
+        ArgumentNullException.ThrowIfNull(inherited);
+        ArgumentNullException.ThrowIfNull(own);
+
+        var tags = new List<ProtectedTag>();
+        foreach (var tag in inherited.ProtectedTags.Concat(own.ProtectedTags))
+            if (!tags.Any(t => string.Equals(t.Key, tag.Key, StringComparison.OrdinalIgnoreCase)
+                               && string.Equals(t.Value, tag.Value, StringComparison.OrdinalIgnoreCase)))
+                tags.Add(tag);
+
+        return new GuardrailPolicy(
+            UnionIgnoringCase(inherited.ProtectedScopes, own.ProtectedScopes),
+            tags,
+            UnionIgnoringCase(inherited.ProtectedTypes, own.ProtectedTypes));
+    }
+
+    private static List<string> UnionIgnoringCase(IEnumerable<string> first, IEnumerable<string> second)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<string>();
+        foreach (var item in first.Concat(second))
+            if (seen.Add(item))
+                result.Add(item);
+        return result;
+    }
+
     /// <summary>Which guardrail protects this item, if any - the matched pattern is the audit reason.</summary>
     public string? ProtectionReason(Inventory.InventoryItem item) => ProtectionReasonFor(item.Id, item.Type, item.Tags);
 
