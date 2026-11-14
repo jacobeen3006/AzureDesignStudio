@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 2
-current_phase_name: Reproducible Build and CI Baseline
+current_phase: 04
+current_phase_name: Database Durability
 status: executing
-stopped_at: Phase 03 complete, ready to execute Phase 2
-last_updated: "2026-11-14T10:45:28.970Z"
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-11-14T11:59:55.598Z"
 last_activity: 2026-11-14
-last_activity_desc: Phase 03 complete, transitioned to Phase 2
-state_head: f893f18bbecbedac12b2410e136907f38f02a517
+last_activity_desc: Phase 04 execution started
+state_head: 27aeccbef08cec532050770114195f1f756be891
 progress:
   total_phases: 11
   completed_phases: 2
-  total_plans: 21
-  completed_plans: 19
+  total_plans: 34
+  completed_plans: 20
   percent: 18
 ---
 
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-21)
 
 **Core value:** Design, observe, and change Azure from one workspace — canvas fidelity, live tenant truth, and gated execution are all first-class.
-**Current focus:** Phase 03 — Server Foundation and Integration Harness
+**Current focus:** Phase 04 — Database Durability
 
 ## Current Position
 
-Phase: 2 — Reproducible Build and CI Baseline
-Plan: 6
+Phase: 04 (Database Durability) — EXECUTING
+Plan: 2 of 13
 Status: Ready to execute
-Last activity: 2026-11-14 — Phase 03 complete, transitioned to Phase 2
+Last activity: 2026-11-14 — Phase 04 execution started
 
 Progress: [██░░░░░░░░] 18%
 
@@ -64,6 +64,7 @@ Progress: [██░░░░░░░░] 18%
 | Phase 03 P04 | 15min | 3 tasks | 4 files |
 | Phase 03 P05 | 10min | 3 tasks | 1 files |
 | Phase 03 P06 | 10min | 2 tasks | 2 files |
+| Phase 04 P01 | 25min | 2 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -86,6 +87,8 @@ Progress: [██░░░░░░░░] 18%
 - [Phase 03]: 03-04: DesignDbContextFactory targets SQL Server on LocalDB with integrated security so the design-time model carries ADS_CHECK_JSON; never opened, no Design package added (Phase 4)
 - [Phase 03]: 03-05: no production change needed; handler faults map to StatusCode.Unknown and real CryptoService answers 503 in-band without a vault
 - [Phase 03]: 03-06: source guards match call shape and line-start directives; test-auth text banned from the production Server tree
+- [Phase 04]: 04-01: dotnet-ef 10.0.13 pinned in a root tool manifest; EF Design 10.0.12 central, PrivateAssets=all in Workspace and Server only
+- [Phase 04]: 04-01: legacy workspace fixtures are plain SQL built from shipped DDL; schema parity compared via pragmas, never sqlite_master text; fixture loader refuses non-temp targets
 
 ### Pending Todos
 
@@ -109,6 +112,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T10:35:37.307Z
-Stopped at: Phase 03 complete, ready to execute Phase 2
+Last session: 2026-11-14T11:59:55.496Z
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None

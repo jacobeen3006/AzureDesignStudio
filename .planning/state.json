@@ -21,7 +21,7 @@
     {
       "number": "4",
       "name": "Database Durability",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "number": "5",
@@ -62,7 +62,7 @@
   "next": {
     "command": "/gsd-progress --next",
     "label": "Advance to the next step",
-    "reason": "Phase 2 of 11 · 18% · executing"
+    "reason": "Phase 4 of 11 · 18% · executing"
   },
-  "updated_at": "2026-11-14T10:45:28.984Z"
+  "updated_at": "2026-11-14T11:59:54.363Z"
 }
