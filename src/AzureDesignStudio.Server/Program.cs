@@ -10,7 +10,6 @@ using AzureDesignStudio.Server.Utils;
 using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -71,9 +70,8 @@ builder.Services.AddHttpClient("RetailPrices", client => client.Timeout = TimeSp
 
 builder.Services.AddSingleton(new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl));
 builder.Services.AddHttpClient("arm", client => client.Timeout = TimeSpan.FromSeconds(120));
-#if DEBUG
-builder.Services.AddGrpcReflection();
-#endif
+if (builder.Environment.IsDevelopment())
+    builder.Services.AddGrpcReflection();
 // For running behind an ingress
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -85,100 +83,9 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 var app = builder.Build();
 
-#if !DEBUG
-if (string.Equals(app.Configuration["Database:Provider"], "InMemory", StringComparison.OrdinalIgnoreCase))
-    app.Logger.LogWarning("Database:Provider is InMemory: designs, links and approvals are lost when the server stops. Use it for testing only.");
-#endif
-
 // The schema is brought up once, here. The gRPC services used to call EnsureCreated in
 // their constructors - a synchronous database round trip on every request.
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<DesignDbContext>();
-    db.Database.EnsureCreated();
-#if !DEBUG
-    // EnsureCreated creates a brand-new database with the full schema, and does nothing at
-    // all for one that already exists - it never adds a missing table. The guarded DDL below
-    // is what brings a database created by an earlier release up to date. The DDL is T-SQL, so
-    // the guard is the SQL Server check: with SQLite selectable in Release builds the generic
-    // relational check would run T-SQL against SQLite and fail at startup.
-    {
-        if (db.Database.IsSqlServer())
-        {
-            db.Database.ExecuteSqlRaw("""
-                IF OBJECT_ID(N'AdsPlanApprovals', N'U') IS NULL
-                CREATE TABLE AdsPlanApprovals (
-                    PlanHash nvarchar(71) NOT NULL PRIMARY KEY,
-                    PlanJson nvarchar(max) NOT NULL,
-                    Status nvarchar(20) NOT NULL,
-                    ApprovedBy nvarchar(320) NOT NULL,
-                    ApprovedByUserId nvarchar(64) NOT NULL,
-                    ApprovedAtUtc datetime2 NOT NULL DEFAULT GETUTCDATE(),
-                    RevertPlanJson nvarchar(max) NULL);
-                IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NULL
-                CREATE TABLE AdsPlanApplyEvents (
-                    Id int IDENTITY(1,1) NOT NULL PRIMARY KEY,
-                    ApplyId uniqueidentifier NOT NULL,
-                    PlanHash nvarchar(71) NOT NULL,
-                    PlanJson nvarchar(max) NOT NULL,
-                    SubscriptionId nvarchar(64) NOT NULL,
-                    ResourceGroupName nvarchar(90) NOT NULL,
-                    TargetScope nvarchar(300) NULL,
-                    DeploymentName nvarchar(64) NOT NULL,
-                    ApprovedBy nvarchar(320) NOT NULL,
-                    ApprovedByUserId nvarchar(64) NOT NULL,
-                    ApprovedAtUtc datetime2 NOT NULL,
-                    PreviewEvidence nvarchar(64) NULL,
-                    RevertPlanHash nvarchar(71) NULL,
-                    RevertPlanJson nvarchar(max) NULL,
-                    EventType nvarchar(16) NOT NULL,
-                    Detail nvarchar(1024) NULL,
-                    TimestampUtc datetime2 NOT NULL);
-                IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND INDEXPROPERTY(OBJECT_ID(N'AdsPlanApplyEvents'), N'IX_AdsPlanApplyEvents_ApplyId', 'IndexID') IS NULL
-                CREATE INDEX IX_AdsPlanApplyEvents_ApplyId ON AdsPlanApplyEvents (ApplyId);
-                IF OBJECT_ID(N'AdsPlanApprovals', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApprovals', N'RevertPlanJson') IS NULL
-                ALTER TABLE AdsPlanApprovals ADD RevertPlanJson nvarchar(max) NULL;
-                IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApplyEvents', N'RevertPlanHash') IS NULL
-                ALTER TABLE AdsPlanApplyEvents ADD RevertPlanHash nvarchar(71) NULL;
-                IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApplyEvents', N'RevertPlanJson') IS NULL
-                ALTER TABLE AdsPlanApplyEvents ADD RevertPlanJson nvarchar(max) NULL;
-                IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApplyEvents', N'TargetScope') IS NULL
-                ALTER TABLE AdsPlanApplyEvents ADD TargetScope nvarchar(300) NULL;
-                IF OBJECT_ID(N'AdsGuardrailPolicies', N'U') IS NULL
-                CREATE TABLE AdsGuardrailPolicies (
-                    Id int NOT NULL PRIMARY KEY,
-                    Json nvarchar(max) NOT NULL,
-                    UpdatedBy nvarchar(320) NOT NULL,
-                    UpdatedByUserId nvarchar(64) NOT NULL,
-                    UpdatedAtUtc datetime2 NOT NULL);
-                IF OBJECT_ID(N'AdsDecomApprovals', N'U') IS NULL
-                CREATE TABLE AdsDecomApprovals (
-                    ExecutionHash nvarchar(71) NOT NULL PRIMARY KEY,
-                    WindowId nvarchar(64) NOT NULL,
-                    PlanHash nvarchar(71) NOT NULL,
-                    SubscriptionId nvarchar(64) NOT NULL,
-                    ApprovedBy nvarchar(320) NOT NULL,
-                    ApprovedByUserId nvarchar(64) NOT NULL,
-                    ApprovedAtUtc datetime2 NOT NULL);
-                IF OBJECT_ID(N'AdsDecomWindowEvents', N'U') IS NULL
-                CREATE TABLE AdsDecomWindowEvents (
-                    Id uniqueidentifier NOT NULL PRIMARY KEY,
-                    ApplyId uniqueidentifier NOT NULL,
-                    Event nvarchar(16) NOT NULL,
-                    WindowId nvarchar(64) NOT NULL,
-                    PlanHash nvarchar(71) NOT NULL,
-                    ExecutionHash nvarchar(71) NOT NULL,
-                    SubscriptionId nvarchar(64) NOT NULL,
-                    Principal nvarchar(320) NOT NULL,
-                    Detail nvarchar(1024) NULL,
-                    AtUtc datetime2 NOT NULL);
-                IF OBJECT_ID(N'AdsDecomWindowEvents', N'U') IS NOT NULL AND INDEXPROPERTY(OBJECT_ID(N'AdsDecomWindowEvents'), N'IX_AdsDecomWindowEvents_ApplyId', 'IndexID') IS NULL
-                CREATE INDEX IX_AdsDecomWindowEvents_ApplyId ON AdsDecomWindowEvents (ApplyId);
-                """);
-        }
-    }
-#endif
-}
+DatabaseBootstrapper.Initialize(app.Services);
 
 // Configure the HTTP request pipeline.
 // Forwarded headers first: behind a TLS-terminating ingress the request only reads as
@@ -212,12 +119,10 @@ app.MapGrpcService<HostedDesignService>().EnableGrpcWeb();
 app.MapGrpcService<HostedDeployService>().EnableGrpcWeb();
 app.MapGrpcService<RetailPriceService>().EnableGrpcWeb();
 
-#if DEBUG
 if (app.Environment.IsDevelopment())
 {
     app.MapGrpcReflectionService();
 }
-#endif
 
 app.MapStaticAssets();
 app.MapRazorPages();
