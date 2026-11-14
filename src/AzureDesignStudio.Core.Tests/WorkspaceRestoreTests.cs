@@ -365,6 +365,29 @@ namespace AzureDesignStudio.Core.Tests
         }
 
         [Fact]
+        public async Task WhenOnlyAWalRemainsOfTheLiveWorkspace_TheRestoreStillApplies_AndStagingIsCleaned()
+        {
+            // WR-03: the first move was the -wal, so there was no workspace.pre-restore-*.db to restrict and the
+            // permission call threw after the candidate was already in place
+            var backup = await BaseBackupAsync();
+            Assert.True((await RestoreStaging.StageAsync(backup.Path, _temp.Root)).Accepted);
+            SqliteConnection.ClearAllPools();
+            File.Delete(WorkspacePath);
+            File.Delete(WorkspacePath + "-shm");
+            File.WriteAllBytes(WorkspacePath + "-wal", new byte[64]);
+
+            var outcome = await RestoreStaging.ApplyPendingAsync(WorkspacePath, _temp.Root, new FixedClock(Now));
+
+            Assert.NotNull(outcome);
+            Assert.True(outcome.Applied, outcome.Problem);
+            Assert.True(File.Exists(WorkspacePath));
+            Assert.False(File.Exists(WorkspacePath + "-wal"));
+            Assert.True(File.Exists(_temp.Path("workspace.pre-restore-20261114T123045Z.db-wal")));
+            Assert.False(Directory.Exists(_temp.Path("restore-staging")));
+            Assert.Null(RestoreStaging.GetPending(_temp.Root));
+        }
+
+        [Fact]
         public async Task CancelPending_RemovesTheStagingFolderAndNothingElse()
         {
             var backup = await BaseBackupAsync();

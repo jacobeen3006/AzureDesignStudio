@@ -410,13 +410,25 @@ public static class RestoreStaging
                 $"Nothing was deleted or replaced. File: {workspace}", e);
         }
 
-        if (!OperatingSystem.IsWindows() && moves.Count > 0)
-            File.SetUnixFileMode(stem + ".db", UnixFileMode.UserRead | UnixFileMode.UserWrite);
-
-        // A write-ahead log or shared-memory file left at the target could be replayed onto the restored file.
-        DeleteFile(workspace + "-wal");
-        DeleteFile(workspace + "-shm");
-        DeleteDirectory(staging);
+        // The candidate is in place from here on, so the staging folder goes however the rest ends: a pending
+        // marker that outlived its applied restore would be retried (and discarded) at every launch.
+        try
+        {
+            // The live main file may have been absent (only a -wal moved): then there is no stem.db to restrict.
+            if (!OperatingSystem.IsWindows() && File.Exists(stem + ".db"))
+                File.SetUnixFileMode(stem + ".db", UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // best effort: tightening the permissions of the kept copy must not fail an applied restore
+        }
+        finally
+        {
+            // A write-ahead log or shared-memory file left at the target could be replayed onto the restored file.
+            DeleteFile(workspace + "-wal");
+            DeleteFile(workspace + "-shm");
+            DeleteDirectory(staging);
+        }
 
         return new RestoreOutcome(true, pending.SourceName, moves.Count > 0 ? stem + ".db" : null, null);
     }

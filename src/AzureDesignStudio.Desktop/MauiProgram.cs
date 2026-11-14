@@ -109,10 +109,12 @@ public static class MauiProgram
         {
             startup = WorkspaceStartup.Open(new WorkspaceStartupOptions(workspacePath, backupsDirectory));
         }
-        catch (WorkspaceUpgradeException e)
+        catch (Exception e) when (IsStartupFailure(e))
         {
             // An interrupted or failed upgrade must not open a half-working workspace: a native page
-            // names the error and the premigration backup. Nothing else is needed to show it.
+            // names the error and the premigration backup. Nothing else is needed to show it. A file
+            // system or database error outside the upgrade (a staged restore that cannot be read, the
+            // data folder that cannot be created) gets the same page instead of a raw crash.
             StartupFailure = e;
             LogCrash("WORKSPACE STARTUP FAILED", e);
             var failed = builder.Build();
@@ -294,7 +296,7 @@ public static class MauiProgram
                 System.IO.Path.Combine(appData, "deploy.db"),
                 System.IO.Path.Combine(appData, "backups", "deploy"));
         }
-        catch (InvalidOperationException e)
+        catch (Exception e) when (IsStartupFailure(e))
         {
             StartupFailure = e;
             LogCrash("DEPLOY DATABASE STARTUP FAILED", e);
@@ -310,6 +312,16 @@ public static class MauiProgram
         }
         return app;
     }
+
+    /// <summary>
+    /// The startup errors that get the failure page: a failed upgrade or backup (<see cref="WorkspaceUpgradeException"/>,
+    /// <see cref="InvalidOperationException"/>) and the file system or database errors a startup step can raise
+    /// (<see cref="IOException"/>, <see cref="UnauthorizedAccessException"/>, any <see cref="System.Data.Common.DbException"/>
+    /// such as <c>SqliteException</c>, and EF Core's <c>DbUpdateException</c>). Anything else is a bug and still crashes.
+    /// </summary>
+    internal static bool IsStartupFailure(Exception e) =>
+        e is WorkspaceUpgradeException or InvalidOperationException or IOException or UnauthorizedAccessException
+            or System.Data.Common.DbException or Microsoft.EntityFrameworkCore.DbUpdateException;
 
 }
 
