@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Database Durability
 status: executing
-stopped_at: Completed 04-05-PLAN.md
-last_updated: "2026-11-14T12:22:42.903Z"
+stopped_at: Completed 04-06-PLAN.md
+last_updated: "2026-11-14T12:56:20.968Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 04 execution started
-state_head: f45fca5aa3dac18a2d04b42809314d789084400f
+state_head: a09fc09383519fdcd54afa713849be5a47bf83ce
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 34
-  completed_plans: 24
+  completed_plans: 25
   percent: 18
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 ## Current Position
 
 Phase: 04 (Database Durability) — EXECUTING
-Plan: 6 of 13
+Plan: 7 of 13
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 04 execution started
 
@@ -69,6 +69,7 @@ Progress: [██░░░░░░░░] 18%
 | Phase 04 P03 | 15min | 3 tasks | 11 files |
 | Phase 04 P04 | 25min | 3 tasks | 13 files |
 | Phase 04 P05 | 40min | 3 tasks | 9 files |
+| Phase 04 P06 | 95min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,7 @@ Progress: [██░░░░░░░░] 18%
 - [Phase 04]: 04-05: backup free-space probe is an internal CreateAsync overload parameter (not a mutable static) so parallel tests cannot interfere
 - [Phase 04]: 04-05: integrity check classifies SQLite codes 3,5,6,7,8,10,13,14 as Inconclusive, never Corrupt; live file checked read-write, snapshots read-only
 - [Phase 04]: 04-05: .gitignore un-ignores src/AzureDesignStudio.Workspace/Backup/ (VS template ignores Backup*/)
+- [Phase 04]: 04-06: rollback is the rehearsed BACKUP/RESTORE sequence (a test runs it); Down() stays empty; a generated PK name is compared as PK_<table> and generated names match {8,16} hex digits
 
 ### Pending Todos
 
@@ -124,6 +126,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T12:22:42.788Z
-Stopped at: Completed 04-05-PLAN.md
+Last session: 2026-11-14T12:56:20.864Z
+Stopped at: Completed 04-06-PLAN.md
 Resume file: None
