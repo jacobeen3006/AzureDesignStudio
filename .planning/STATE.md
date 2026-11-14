@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Identity, Guardrails, and Offline Development
 status: executing
-stopped_at: Completed 05-09-PLAN.md
-last_updated: "2026-11-14T16:15:14.447Z"
+stopped_at: Completed 05-10-PLAN.md
+last_updated: "2026-11-14T16:21:54.831Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 05 execution started
-state_head: 996b81c3ff0548eeee149ba3d9cda6ccc7759301
+state_head: 4f227a881097228de483b276eee415edfc883cc0
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 45
-  completed_plans: 41
+  completed_plans: 42
   percent: 27
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 ## Current Position
 
 Phase: 05 (Identity, Guardrails, and Offline Development) — EXECUTING
-Plan: 10 of 11
+Plan: 11 of 11
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 05 execution started
 
@@ -87,6 +87,7 @@ Progress: [███░░░░░░░] 27%
 | Phase 05 P07 | 35 min | 3 tasks | 10 files |
 | Phase 05 P08 | 40min | 3 tasks | 12 files |
 | Phase 05 P09 | 35min | 3 tasks | 4 files |
+| Phase 05 P10 | 40min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -146,6 +147,7 @@ Progress: [███░░░░░░░] 27%
 - [Phase 05]: 05-08: approval backfill to the empty-GUID scope is an UPDATE, never a column default; pending legacy approvals fail closed and must be re-approved
 - [Phase 05]: 05-08: plan and decommission approvals keyed by (TenantId, hash); SQL Server key rebuild proven in the container (11 passed, 0 skipped)
 - [Phase 05]: 05-09: role check precedes hash/preview/setting lookups; self-approval is a separate rule with its own code; the recorded requester deploys, a row without one keeps approver-only; decommission approvals need the role with no self-approval rule
+- [Phase 05]: 05-10: precache excludes only appsettings*.json; operator guide documents the tenant-settings call recipe (token via ADS_TOKEN) and records the replace/merge reading as INTERPRETATION TO CONFIRM
 
 ### Pending Todos
 
@@ -169,6 +171,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T16:15:14.337Z
-Stopped at: Completed 05-09-PLAN.md
+Last session: 2026-11-14T16:21:54.694Z
+Stopped at: Completed 05-10-PLAN.md
 Resume file: None
