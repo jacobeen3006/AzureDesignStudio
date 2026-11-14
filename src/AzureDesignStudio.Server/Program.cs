@@ -57,8 +57,7 @@ if (databaseKind == DatabaseKind.SqlServer && ServiceTools.IsConfigured(keyVault
 // The callback runs when the first context is built (inside the startup bootstrap, before any
 // request), so a connection string from the vault source or from late configuration is
 // honoured and a missing one still stops the host before it serves.
-builder.Services.AddDbContext<DesignDbContext>((serviceProvider, options) =>
-    DatabaseProvider.Configure(options, databaseKind, serviceProvider.GetRequiredService<IConfiguration>()));
+DatabaseProvider.AddDesignDbContext(builder.Services, databaseKind);
 
 // The provider is read from configuration (Crypto:Provider, default KeyVault); the real service
 // contacts the vault lazily on first use, so the host boots without one. This runs at top

@@ -1,4 +1,3 @@
-using AzureDesignStudio.Services.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
@@ -15,10 +14,10 @@ namespace AzureDesignStudio.Server.Persistence;
 /// integrated security against LocalDB only. The factory lives in the Server because
 /// <c>AzureDesignStudio.Services</c> must not reference a database provider.
 /// </remarks>
-public sealed class DesignDbContextFactory : IDesignTimeDbContextFactory<DesignDbContext>
+public sealed class DesignDbContextFactory : IDesignTimeDbContextFactory<SqlServerDesignDbContext>
 {
-    public DesignDbContext CreateDbContext(string[] args) =>
-        new(new DbContextOptionsBuilder<DesignDbContext>()
+    public SqlServerDesignDbContext CreateDbContext(string[] args) =>
+        new(new DbContextOptionsBuilder<SqlServerDesignDbContext>()
             .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=ads-design-time;Integrated Security=true")
             .Options);
 }

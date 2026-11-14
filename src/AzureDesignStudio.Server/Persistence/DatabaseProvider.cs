@@ -1,4 +1,5 @@
 using AzureDesignStudio.Services;
+using AzureDesignStudio.Services.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace AzureDesignStudio.Server.Persistence;
@@ -45,6 +46,28 @@ internal static class DatabaseProvider
         throw new InvalidOperationException(
             $"{Key} is \"{value}\", which is not a database provider. Accepted values: " +
             $"{nameof(DatabaseKind.SqlServer)} (the default), {nameof(DatabaseKind.Sqlite)}, {nameof(DatabaseKind.InMemory)}.");
+    }
+
+    /// <summary>
+    /// Registers the design database context for an already resolved provider. Program.cs and the
+    /// bootstrapper tests both call this, so production and tests cannot drift. Services ask for
+    /// <see cref="DesignDbContext"/>; for SQL Server that request is served by
+    /// <see cref="SqlServerDesignDbContext"/>, whose assembly owns the migrations. The options
+    /// callback runs when the first context is built (inside the startup bootstrap, before any
+    /// request), so a connection string from the vault source or late configuration is honoured.
+    /// </summary>
+    public static void AddDesignDbContext(IServiceCollection services, DatabaseKind kind)
+    {
+        if (kind == DatabaseKind.SqlServer)
+        {
+            services.AddDbContext<DesignDbContext, SqlServerDesignDbContext>((serviceProvider, options) =>
+                Configure(options, kind, serviceProvider.GetRequiredService<IConfiguration>()));
+        }
+        else
+        {
+            services.AddDbContext<DesignDbContext>((serviceProvider, options) =>
+                Configure(options, kind, serviceProvider.GetRequiredService<IConfiguration>()));
+        }
     }
 
     /// <summary>Configures the context options for the resolved provider. Runs when the first
