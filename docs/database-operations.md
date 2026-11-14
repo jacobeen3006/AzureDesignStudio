@@ -160,3 +160,104 @@ A file that is corrupt, not a database, or locked at open time fails at once and
 ## deploy.db
 
 `deploy.db` holds deploy approvals, guardrails, linked subscriptions (including service principal client secrets) and the audit trail. It is migrated at launch with EF migrations, like the workspace. An existing `deploy.db` that needs an upgrade gets a premigration backup first in `backups/deploy/`, kept private (the folder is `0700`, the files `0600` on macOS). **These backups contain subscription client secrets in plaintext.** Never share them, never attach them to a bug report, never put them in a synced folder. If the premigration backup of `deploy.db` cannot be written, the upgrade is not attempted, `deploy.db` is unchanged and the app shows the same failure page as for the workspace. A `deploy.db` migration that itself fails is not routed to that page: the launch ends with an error and the crash log `ads_desktop_crash.log` in the system temp folder has the details; SQLite schema changes are transactional, so the file is as it was. To go back to a previous state, close the app, move `deploy.db` (and its `-wal`, `-shm`) aside and copy the chosen file from `backups/deploy/` in as `deploy.db`.
+
+## SQL Server (the server database)
+
+The Server stores designs, subscription links and plan approvals in the database `ads-main`. Production uses SQL Server. `Sqlite` and `InMemory` exist for development and tests only and have no migrations.
+
+Configuration keys:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `Database:Provider` | `SqlServer` | `SqlServer`, `Sqlite` or `InMemory`. |
+| connection string `ads-main` | none | From the Key Vault named by `KeyVaultName`, or from `ConnectionStrings__ads-main`. A standard SQL Server connection string; the examples below use `<database>` and `<path>` placeholders only. Never write the real value into a file in the repository or into this document. |
+| `Database:Migrate` | `true` | When `true`, the host applies pending migrations at startup. When `false`, the host **refuses to start** while migrations are pending and prints the command to run, `dotnet ef database update --context SqlServerDesignDbContext --project src/AzureDesignStudio.Server`. It is the switch for a future migration-bundle flow. |
+| `Database:AllowCreate` | `false` | When `false`, the host refuses to start if the database in the connection string does not exist, so a typo does not yield a silent empty database. Set it to `true` only for the very first deployment of a new environment (see First deployment), then remove it. |
+
+A value other than `true` or `false` for either flag stops the host instead of being guessed.
+
+**One replica.** Production runs a single replica (`replicas: 1` in `src/Configurations/main/deployment.yaml`). Keep it at one until a bundle flow with a separate deployment identity exists: with several replicas every starting pod would run the migrations and every pod's login would need DDL rights. **The application login needs DDL rights today** (the host migrates with the login it serves requests with). This is accepted for now because there is a single replica and migrations run once at startup; splitting the deployment identity from the runtime identity is the follow-up.
+
+### First deployment of a new environment
+
+1. Create or choose the SQL Server instance, and store the `ads-main` connection string in the secret store (never in the repository).
+2. Set `Database:AllowCreate=true` for this one deployment. The host creates the database, applies every migration from the baseline, and writes the migration history.
+3. Remove `Database:AllowCreate` (or set it to `false`) before the next deployment. Leaving it on means a mistyped database name creates a new empty database instead of failing.
+
+### Upgrade procedure
+
+1. **Take and verify a backup** (see Backup).
+2. Deploy the new image. The host applies the pending migrations at startup.
+3. Watch the startup log for `Applied <n> database migration(s): <ids>`. A host that stops with an exception about the database has changed nothing it could not roll back; read the message.
+
+A database created before migrations existed is adopted by the baseline migration without recreating anything: its guarded statements skip what already exists and a history row is written.
+
+### Backup
+
+The repository does not record which hosting production `ads-main` uses (self-hosted SQL Server, or Azure SQL), so choose the variant that matches your hosting.
+
+**Self-hosted SQL Server:**
+
+```sql
+BACKUP DATABASE [<database>] TO DISK = N'<path>/<database>-pre-upgrade.bak' WITH INIT, CHECKSUM, FORMAT;
+RESTORE VERIFYONLY FROM DISK = N'<path>/<database>-pre-upgrade.bak' WITH CHECKSUM;
+```
+
+Do not proceed to the upgrade until `RESTORE VERIFYONLY` has succeeded.
+
+**Azure SQL Database:** the service takes automatic backups that allow a point-in-time restore. Before an upgrade, note the current time (UTC) as the restore point, or make an explicit copy:
+
+```sql
+-- run in the master database of the logical server
+CREATE DATABASE [<database>-pre-upgrade] AS COPY OF [<server>].[<database>];
+```
+
+Wait for the copy to finish before deploying.
+
+### Rollback
+
+The supported rollback is **restoring the pre-upgrade backup**. The `Down()` methods of the migrations are generated by EF but are not the supported path and are not exercised: they cannot restore data that an upgrade changed.
+
+Self-hosted SQL Server:
+
+1. Stop the app, or scale it to zero, so nothing holds the database.
+2. Restore:
+
+   ```sql
+   ALTER DATABASE [<database>] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+   RESTORE DATABASE [<database>] FROM DISK = N'<path>/<database>-pre-upgrade.bak' WITH REPLACE, CHECKSUM;
+   ALTER DATABASE [<database>] SET MULTI_USER;
+   ```
+
+3. Roll the image back to the previous version, then start it.
+
+This is exactly the sequence the CI job rehearses: `BackupMigrateRestore_ReturnsToThePreUpgradeState` in `src/AzureDesignStudio.Server.Tests/Persistence/SqlServerMigrationTests.cs` takes a backup with `CHECKSUM`, verifies it, migrates, writes a row, restores with `REPLACE`, and asserts the pre-upgrade rows are back with no history table and that the database migrates again. The `sqlserver` job in `.github/workflows/build.yml` runs it on every build against a throwaway container. Locally, `src/RunSqlServerTests.sh` starts a SQL Server 2022 container, runs the `Category=SqlServer` tests and removes the container (it needs Docker; on Apple silicon the image runs under amd64 emulation and the first start takes minutes).
+
+Azure SQL Database: the rollback is a **restore to a new database** (point-in-time restore to the time noted before the upgrade, or rename the `AS COPY OF` copy), then swap the connection secret `ads-main` to the new database and roll the image back. The in-place `RESTORE DATABASE ... WITH REPLACE` is not available on Azure SQL Database. The CI job rehearses the self-hosted sequence; the Azure SQL procedure follows the service's own documentation and has not been rehearsed against Azure.
+
+### Migration lock on SQL Server
+
+SQL Server migrations take an application lock that belongs to the connection, so it is released when the connection closes, including when the process dies. There is no table to clean up and no equivalent of the workspace `__EFMigrationsLock` recovery.
+
+### Developer commands
+
+Restore the pinned tool once per checkout:
+
+```bash
+dotnet tool restore
+```
+
+Create a migration for each context (run from the repository root; `<Name>` is a short PascalCase description):
+
+```bash
+# workspace.db
+dotnet ef migrations add <Name> --context WorkspaceDbContext --project src/AzureDesignStudio.Workspace --startup-project src/AzureDesignStudio.Workspace --output-dir Migrations
+
+# server SQL Server database
+dotnet ef migrations add <Name> --context SqlServerDesignDbContext --project src/AzureDesignStudio.Server --startup-project src/AzureDesignStudio.Server --output-dir Persistence/Migrations
+
+# deploy.db (the Services project holds the migrations, the Server hosts the design-time factory)
+dotnet ef migrations add <Name> --context SqliteDesignDbContext --project src/AzureDesignStudio.Services --startup-project src/AzureDesignStudio.Server --output-dir Migrations/Sqlite
+```
+
+Rules: a baseline migration is **never edited** once released; every later migration is a generated diff. Pending-model-change tests (`HasPendingModelChanges`) turn a forgotten migration into a failing test, so a model change without a migration fails the build. On a machine whose .NET SDK differs from `global.json`, `dotnet ef` can rewrite unrelated `packages.lock.json` files; revert those and commit only the migration and its snapshot.

@@ -34,6 +34,21 @@ namespace AzureDesignStudio.Core.Tests
             "plaintext",
         ];
 
+        // SQL Server half of the runbook.
+        private static readonly string[] ServerStatements =
+        [
+            "RESTORE VERIFYONLY",
+            "SET SINGLE_USER WITH ROLLBACK IMMEDIATE",
+            "WITH REPLACE",
+            "Database:AllowCreate",
+            "Database:Migrate",
+            "AS COPY OF",
+            "RunSqlServerTests.sh",
+            "BackupMigrateRestore_ReturnsToThePreUpgradeState",
+            "dotnet tool restore",
+            "replica",
+        ];
+
         [Fact]
         public void Runbook_ExplainsTheWorkspaceRecoveries()
         {
@@ -42,6 +57,25 @@ namespace AzureDesignStudio.Core.Tests
 
             Assert.True(missing.Count == 0,
                 $"{RunbookRelativePath} lost required recovery statements: {string.Join(" | ", missing)}");
+        }
+
+        [Fact]
+        public void Runbook_ExplainsTheSqlServerUpgradeBackupAndRollback()
+        {
+            var text = ReadRunbook();
+            var missing = ServerStatements.Where(s => !text.Contains(s, StringComparison.Ordinal)).ToList();
+
+            Assert.True(missing.Count == 0,
+                $"{RunbookRelativePath} lost required SQL Server statements: {string.Join(" | ", missing)}");
+        }
+
+        [Fact]
+        public void Runbook_StatesThatDownMethodsAreNotTheRollback()
+        {
+            var text = ReadRunbook();
+
+            Assert.True(text.Contains("Down()", StringComparison.Ordinal),
+                "The runbook must say that the generated Down() methods are not the supported rollback.");
         }
 
         [Fact]
