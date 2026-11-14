@@ -6,6 +6,8 @@ using AzureDesignStudio.Services.Models;
 using AzureDesignStudio.Workspace;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Xunit;
 
 namespace AzureDesignStudio.Server.Tests.Persistence;
@@ -32,12 +34,43 @@ public sealed class DeployDbMigrationTests : IDisposable
     private static string ConnectionString(string path) =>
         new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString();
 
-    /// <summary>The file a build before migrations produced: created from the model.</summary>
+    /// <summary>The file created from today's model. Only the parity comparison uses it: since the
+    /// TenantGuardrails migration the model is no longer the shape any shipped build produced.</summary>
     private static void CreateFromModel(string path)
     {
         using var db = new DesignDbContext(
             new DbContextOptionsBuilder<DesignDbContext>().UseSqlite(ConnectionString(path)).Options);
         db.Database.EnsureCreated();
+    }
+
+    /// <summary>
+    /// The shape a build before the tenant column produced: the SQLite set migrated to the Baseline
+    /// only. With <paramref name="keepHistory"/> false the history table is dropped afterwards, which
+    /// emulates a file a build before migrations existed created.
+    /// </summary>
+    private static void CreateBaselineEraFile(string path, bool keepHistory)
+    {
+        using (var db = new SqliteDesignDbContext(
+                   new DbContextOptionsBuilder<SqliteDesignDbContext>().UseSqlite(ConnectionString(path)).Options))
+        {
+            var baseline = db.Database.GetMigrations().First();
+            Assert.EndsWith("_Baseline", baseline);
+            db.GetService<IMigrator>().Migrate(baseline);
+        }
+
+        if (!keepHistory)
+        {
+            SqliteConnection.ClearAllPools();
+            Exec(path, "DROP TABLE __EFMigrationsHistory;");
+        }
+    }
+
+    /// <summary>How many migrations the SQLite set holds; history rows are compared with this, never a literal.</summary>
+    private static int MigrationCount()
+    {
+        using var db = new SqliteDesignDbContext(
+            new DbContextOptionsBuilder<SqliteDesignDbContext>().UseSqlite("Data Source=:memory:").Options);
+        return db.Database.GetMigrations().Count();
     }
 
     private static void MigrateWithSqliteSet(string path)
@@ -65,15 +98,17 @@ public sealed class DeployDbMigrationTests : IDisposable
         MigrateWithSqliteSet(migrated);
         CreateFromModel(modelBuilt);
 
-        Assert.Equal(SqliteSchemaDescriber.Describe(modelBuilt), SqliteSchemaDescriber.Describe(migrated));
-        Assert.Equal(7, SqliteSchemaDescriber.TableNames(migrated).Count);
+        // SQLite can only append a column, so the tenant column sits last in the migrated file and in
+        // model order in the model-built one; the logical schema is what must agree.
+        Assert.Equal(DescribeIgnoringColumnOrder(modelBuilt), DescribeIgnoringColumnOrder(migrated));
+        Assert.Equal(9, SqliteSchemaDescriber.TableNames(migrated).Count);
     }
 
     [Fact]
-    public void ModelCreatedFile_AdoptsTheBaseline()
+    public void FileFromABuildBeforeMigrations_AdoptsTheMigrationSet()
     {
         var path = NewPath();
-        CreateFromModel(path);
+        CreateBaselineEraFile(path, keepHistory: false);
         using (var connection = new SqliteConnection(ConnectionString(path)))
         {
             connection.Open();
@@ -86,8 +121,8 @@ public sealed class DeployDbMigrationTests : IDisposable
 
         MigrateWithSqliteSet(path);
 
-        Assert.Equal(1, Scalar(path, "SELECT COUNT(*) FROM __EFMigrationsHistory"));
-        Assert.EndsWith("_Baseline", ScalarText(path, "SELECT MigrationId FROM __EFMigrationsHistory"));
+        Assert.Equal(MigrationCount(), Scalar(path, "SELECT COUNT(*) FROM __EFMigrationsHistory"));
+        Assert.EndsWith("_Baseline", ScalarText(path, "SELECT MigrationId FROM __EFMigrationsHistory ORDER BY MigrationId LIMIT 1"));
         Assert.Equal(1, Scalar(path, "SELECT COUNT(*) FROM AdsDesigns WHERE Name = 'keep me'"));
     }
 
@@ -128,7 +163,7 @@ public sealed class DeployDbMigrationTests : IDisposable
     /// <summary>A model-built file that lost what the oldest releases lacked, one row in each surviving table.</summary>
     private void BuildOldFile(string path)
     {
-        CreateFromModel(path);
+        CreateBaselineEraFile(path, keepHistory: false);
         Exec(path, """
             INSERT INTO AdsDesigns (Name, UserId, DesignData, LastModified)
                 VALUES ('keep me', '11111111-1111-1111-1111-111111111111', '{}', '2026-01-01 00:00:00');
@@ -200,11 +235,49 @@ public sealed class DeployDbMigrationTests : IDisposable
         Assert.Equal(1, Scalar(path, "SELECT COUNT(*) FROM AzureSubscriptions WHERE ClientSecret = 'secret'"));
         Assert.Equal(1, Scalar(path, "SELECT COUNT(*) FROM AdsPlanApprovals"));
         Assert.Equal(1, Scalar(path, "SELECT COUNT(*) FROM AdsPlanApplyEvents WHERE EventType = 'Started'"));
-        Assert.Equal(7, SqliteSchemaDescriber.TableNames(path).Count);
+        Assert.Equal(9, SqliteSchemaDescriber.TableNames(path).Count);
         Assert.Contains("RevertPlanJson", SqliteSchemaDescriber.ColumnNames(path, "AdsPlanApprovals"));
         Assert.Contains("TargetScope", SqliteSchemaDescriber.ColumnNames(path, "AdsPlanApplyEvents"));
         Assert.Equal(DescribeIgnoringColumnOrder(fresh), DescribeIgnoringColumnOrder(path));
-        Assert.Equal(1, Scalar(path, "SELECT COUNT(*) FROM __EFMigrationsHistory"));
+        Assert.Equal(MigrationCount(), Scalar(path, "SELECT COUNT(*) FROM __EFMigrationsHistory"));
+    }
+
+    [Fact]
+    public void PreTenantFile_KeepsItsGuardrailRow_AndGainsTheTenantTables()
+    {
+        var path = NewPath();
+        var backups = Path.Combine(_dir, "backups", "deploy");
+        CreateBaselineEraFile(path, keepHistory: true);
+        Exec(path, """
+            INSERT INTO AdsGuardrailPolicies (Id, Json, UpdatedBy, UpdatedByUserId, UpdatedAtUtc)
+                VALUES (1, '{"scopes":["/subscriptions/x"]}', 'operator', '11111111-1111-1111-1111-111111111111',
+                        '2026-01-01 00:00:00');
+            """);
+        Assert.DoesNotContain("TenantId", SqliteSchemaDescriber.ColumnNames(path, "AdsGuardrailPolicies"));
+        Assert.Equal(7, SqliteSchemaDescriber.TableNames(path).Count);
+
+        StartupMigrate(path, backups, T0);
+
+        Assert.Equal(1, Scalar(path, "SELECT COUNT(*) FROM AdsGuardrailPolicies"));
+        Assert.Equal(1, Scalar(path, "SELECT COUNT(*) FROM AdsGuardrailPolicies WHERE Id = 1 AND TenantId IS NULL AND UpdatedBy = 'operator'"));
+        Assert.Equal(0, Scalar(path, "SELECT COUNT(*) FROM AdsTenantSettings"));
+        Assert.Equal(0, Scalar(path, "SELECT COUNT(*) FROM AdsSecurityEvents"));
+        Assert.Equal(9, SqliteSchemaDescriber.TableNames(path).Count);
+        Assert.Equal(MigrationCount(), Scalar(path, "SELECT COUNT(*) FROM __EFMigrationsHistory"));
+        Assert.Single(WorkspaceBackup.List(backups, "deploy"));
+    }
+
+    [Fact]
+    public void TheUniqueTenantIndex_AllowsManyNullRowsAndRefusesATenantTwice()
+    {
+        var path = NewPath();
+        MigrateWithSqliteSet(path);
+        const string insert = "INSERT INTO AdsGuardrailPolicies (Id, TenantId, Json, UpdatedBy, UpdatedByUserId, UpdatedAtUtc) VALUES ";
+        Exec(path, insert + "(1, NULL, '{}', 'a', 'a', '2026-01-01 00:00:00'), (2, NULL, '{}', 'a', 'a', '2026-01-01 00:00:00');");
+        Exec(path, insert + "(3, '55555555-5555-5555-5555-555555555555', '{}', 'a', 'a', '2026-01-01 00:00:00');");
+
+        Assert.Throws<SqliteException>(() =>
+            Exec(path, insert + "(4, '55555555-5555-5555-5555-555555555555', '{}', 'a', 'a', '2026-01-01 00:00:00');"));
     }
 
     [Fact]
@@ -278,7 +351,7 @@ public sealed class DeployDbMigrationTests : IDisposable
 
         StartupMigrate(path, backups, T0);
 
-        Assert.Equal(7, SqliteSchemaDescriber.TableNames(path).Count);
+        Assert.Equal(9, SqliteSchemaDescriber.TableNames(path).Count);
         Assert.False(Directory.Exists(backups));
     }
 

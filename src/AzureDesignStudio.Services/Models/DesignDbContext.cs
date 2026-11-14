@@ -19,6 +19,11 @@ namespace AzureDesignStudio.Services.Models
                     .ToTable(t => t.HasCheckConstraint("ADS_CHECK_JSON", "ISJSON(DesignData)=1"));
             modelBuilder.Entity<PlanApplyEventModel>().HasIndex(e => e.ApplyId);
             modelBuilder.Entity<DecomWindowEventModel>().HasIndex(e => e.ApplyId);
+            // One policy row per scope. A nullable unique index admits any number of NULL rows on
+            // SQLite and is filtered to non-NULL values on SQL Server; the NULL-tenant default row
+            // is the single row with Id 1 (seeded by the operator), never written by an RPC.
+            modelBuilder.Entity<GuardrailPolicyModel>().HasIndex(e => e.TenantId).IsUnique();
+            modelBuilder.Entity<SecurityEventModel>().HasIndex(e => e.TenantId);
         }
 
         public DbSet<DesignModel> AdsDesigns { get; set; } = null!;
@@ -28,6 +33,8 @@ namespace AzureDesignStudio.Services.Models
         public DbSet<GuardrailPolicyModel> AdsGuardrailPolicies { get; set; } = null!;
         public DbSet<DecomApprovalModel> AdsDecomApprovals { get; set; } = null!;
         public DbSet<DecomWindowEventModel> AdsDecomWindowEvents { get; set; } = null!;
+        public DbSet<TenantSettingsModel> AdsTenantSettings { get; set; } = null!;
+        public DbSet<SecurityEventModel> AdsSecurityEvents { get; set; } = null!;
     }
 
     public record DesignModel
@@ -80,9 +87,10 @@ namespace AzureDesignStudio.Services.Models
         public string? RevertPlanJson { get; set; }
     }
 
-    /// <summary>Server-side do-not-touch list (v2 13.1/[36-final]): one row (Id=1), the policy every
-    /// review and apply is judged against. Written only through SetGuardrailPolicy by an
-    /// authenticated principal; deploys never consult a client-supplied copy.</summary>
+    /// <summary>Server-side do-not-touch list (v2 13.1/[36-final]): one row per scope, the policy
+    /// every review and apply of that scope is judged against. The row with a NULL tenant (Id 1) is
+    /// the inherited default that governs a scope with no row of its own. Written only through
+    /// SetGuardrailPolicy by an authenticated principal; deploys never consult a client-supplied copy.</summary>
     public record GuardrailPolicyModel
     {
         // The single row is written with an explicit Id. By convention an int key is an
@@ -91,6 +99,10 @@ namespace AzureDesignStudio.Services.Models
         [Key]
         [System.ComponentModel.DataAnnotations.Schema.DatabaseGenerated(System.ComponentModel.DataAnnotations.Schema.DatabaseGeneratedOption.None)]
         public int Id { get; set; }
+
+        /// <summary>The scope this policy belongs to (tenant id, or the user's object id for a personal
+        /// account). NULL marks the operator-seeded default row; no RPC writes it.</summary>
+        public Guid? TenantId { get; set; }
 
         /// <summary>GuardrailPolicy.FromJson shape (scopes/tags/types). Validated on write.</summary>
         [Required]
