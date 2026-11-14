@@ -1,3 +1,4 @@
+using System.Net;
 using AzureDesignStudio.Discovery.Unmanaged;
 using AzureDesignStudio.Services;
 using AzureDesignStudio.Services.Auth;
@@ -672,4 +673,296 @@ public sealed class TenantIsolationTests
         Assert.StartsWith("WHAT_IF_STALE", other.ErrorMessage);
         Assert.Equal(200, own.StatusCode);
     }
+
+    // --- approvals belong to the scope that gave them (D-06, D-09, D-17) ---
+
+    private static ServerCallContext Approver(Guid user, Guid tenant, string? name = null) =>
+        TestServerCallContext.ForUser(user, name, tenant, [AdsIdentity.GuardrailAdminRole, AdsIdentity.DeployApproverRole]);
+
+    private static readonly string DecomExecutionHash = "sha256:" + new string('b', 64);
+    private static readonly string DecomPlanHash = "sha256:" + new string('c', 64);
+
+    [Fact]
+    public async Task TwoScopesApproveTheSamePlanHashAndNeitherOverwritesTheOther()
+    {
+        var gate = new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl);
+        var service = ServiceOn(gate);
+        var requesterA = Guid.NewGuid();
+        var requesterB = Guid.NewGuid();
+        var approverA = Approver(Guid.NewGuid(), TestTenants.Contoso, "Ada");
+        var approverB = Approver(Guid.NewGuid(), TestTenants.Fabrikam, "Bob");
+        gate.Issue("sub", "rg", "tpl", "prm", OneCreate(), "{\"plan\":\"a\"}", PlanHash,
+            requestedByUserId: requesterA.ToString("D"), scopeId: TestTenants.Contoso);
+        gate.Issue("sub", "rg", "tpl", "prm", OneCreate(), "{\"plan\":\"b\"}", PlanHash,
+            requestedByUserId: requesterB.ToString("D"), scopeId: TestTenants.Fabrikam);
+
+        Assert.Equal(200, (await Approve(service, approverA)).StatusCode);
+        Assert.Equal(200, (await Approve(service, approverB)).StatusCode);
+
+        var rows = await _db.AdsPlanApprovals.AsNoTracking().OrderBy(r => r.ApprovedBy).ToListAsync();
+        Assert.Equal(2, rows.Count);
+        var a = Assert.Single(rows, r => r.TenantId == TestTenants.Contoso);
+        var b = Assert.Single(rows, r => r.TenantId == TestTenants.Fabrikam);
+        Assert.Equal(PlanHash, a.PlanHash);
+        Assert.Equal(PlanHash, b.PlanHash);
+        Assert.Equal(requesterA.ToString("D"), a.RequestedByUserId);
+        Assert.Equal(requesterB.ToString("D"), b.RequestedByUserId);
+        Assert.Equal("{\"plan\":\"a\"}", a.PlanJson);
+        Assert.Equal("{\"plan\":\"b\"}", b.PlanJson);
+        Assert.NotEqual(a.ApprovedByUserId, b.ApprovedByUserId);
+        Assert.NotEqual(requesterA.ToString("D"), a.ApprovedByUserId);
+
+        // A approves again: only A's row is replaced, B's is the row it was.
+        await Task.Delay(5);
+        Assert.Equal(200, (await Approve(service, approverA)).StatusCode);
+
+        var after = await _db.AdsPlanApprovals.AsNoTracking().ToListAsync();
+        Assert.Equal(2, after.Count);
+        Assert.Equal(b, Assert.Single(after, r => r.TenantId == TestTenants.Fabrikam));
+        Assert.True(Assert.Single(after, r => r.TenantId == TestTenants.Contoso).ApprovedAtUtc > a.ApprovedAtUtc);
+    }
+
+    [Fact]
+    public async Task TheApprovalRecordsTheRequesterOfThePreviewNotTheApprover()
+    {
+        var gate = new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl);
+        var requester = Guid.NewGuid();
+        var approver = Guid.NewGuid();
+        gate.Issue("sub", "rg", "tpl", "prm", OneCreate(), "{}", PlanHash,
+            requestedByUserId: requester.ToString("D"), scopeId: TestTenants.Contoso);
+
+        await Approve(ServiceOn(gate), Approver(approver, TestTenants.Contoso));
+
+        var row = await _db.AdsPlanApprovals.AsNoTracking().SingleAsync();
+        Assert.Equal(requester.ToString("D"), row.RequestedByUserId);
+        Assert.Equal(approver.ToString("D"), row.ApprovedByUserId);
+        Assert.Equal(TestTenants.Contoso, row.TenantId);
+    }
+
+    private sealed class Rig
+    {
+        public required ScriptedArm Arm { get; init; }
+        public required DeployService Service { get; init; }
+        public required Guid Subscription { get; init; }
+
+        public StackWhatIfRequest Preview() => new()
+        {
+            SubscriptionId = Subscription.ToString(), ResourceGroupName = ResourceGroup, StackName = "ads-stack",
+            ArmTemplate = StackTemplate, Parameters = "{}", ResourcesAction = "detach",
+        };
+
+        public CreateStackRequest Create(StackWhatIfResponse preview) => new()
+        {
+            SubscriptionId = Subscription.ToString(), ResourceGroupName = ResourceGroup, StackName = "ads-stack",
+            ArmTemplate = StackTemplate, Parameters = "{}", ResourcesAction = "detach",
+            WhatIfToken = preview.WhatIfToken, PlanHash = preview.PlanHash,
+        };
+    }
+
+    private Rig NewRig()
+    {
+        var subscription = Guid.NewGuid();
+        var arm = new ScriptedArm(subscription.ToString(), ResourceGroup)
+        {
+            WhatIfResult = """{"properties":{"provisioningState":"succeeded","changes":{"resourceChanges":[{"id":"/subscriptions/"""
+                + subscription + """/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/sa1","type":"Microsoft.Storage/storageAccounts","changeType":"create","changeCertainty":"definite"}]}}}""",
+        };
+        return new Rig
+        {
+            Arm = arm, Subscription = subscription,
+            Service = new DeployService(_db, NullLogger<DeployService>.Instance, new FakeCryptoService(),
+                new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl), arm, new AmbientCredential()),
+        };
+    }
+
+    [Fact]
+    public async Task AnotherScopesApprovalIsNotFoundAndTheOwnersTokenStillWorksForTheOwner()
+    {
+        var rig = NewRig();
+        var requester = Member(Guid.NewGuid(), TestTenants.Contoso, "Ray");
+        var ada = Approver(Guid.NewGuid(), TestTenants.Contoso, "Ada");
+        var bob = Approver(Guid.NewGuid(), TestTenants.Fabrikam, "Bob");
+
+        var previewA = await rig.Service.StackWhatIf(rig.Preview(), requester);
+        Assert.NotEqual("", previewA.WhatIfToken);
+        Assert.Equal(200, (await rig.Service.ApprovePlan(new PlanApprovalRequest { PlanHash = previewA.PlanHash }, ada)).StatusCode);
+
+        // B holds A's preview but has approved nothing in its own scope.
+        var refused = await rig.Service.CreateStack(rig.Create(previewA), bob);
+
+        Assert.Equal(400, refused.StatusCode);
+        Assert.StartsWith("PLAN_NOT_APPROVED", refused.ErrorMessage);
+        Assert.Equal(1, await _db.AdsPlanApprovals.CountAsync(r => r.TenantId == TestTenants.Contoso));
+
+        // B previews and approves the same hash in its own scope; A's token is still not B's to spend.
+        var previewB = await rig.Service.StackWhatIf(rig.Preview(), bob);
+        Assert.Equal(previewA.PlanHash, previewB.PlanHash);
+        Assert.Equal(200, (await rig.Service.ApprovePlan(new PlanApprovalRequest { PlanHash = previewB.PlanHash }, bob)).StatusCode);
+        Assert.Equal(2, await _db.AdsPlanApprovals.CountAsync());
+
+        var stale = await rig.Service.CreateStack(rig.Create(previewA), bob);
+
+        Assert.Equal(400, stale.StatusCode);
+        Assert.StartsWith("WHAT_IF_STALE", stale.ErrorMessage);
+        Assert.Equal(2, await _db.AdsPlanApprovals.CountAsync());   // a refused call consumed nothing
+
+        // The token works for its own scope; the approval it consumed is A's and B's stays.
+        var applied = await rig.Service.CreateStack(rig.Create(previewA), ada);
+
+        Assert.True(applied.StatusCode == 200, applied.ErrorMessage);
+        Assert.Equal(TestTenants.Fabrikam, (await _db.AdsPlanApprovals.AsNoTracking().SingleAsync()).TenantId);
+    }
+
+    [Fact]
+    public async Task ALegacyApprovalInTheEmptyScopeIsFoundByNoRealCaller()
+    {
+        var rig = NewRig();
+        var ada = Approver(Guid.NewGuid(), TestTenants.Contoso, "Ada");
+        var preview = await rig.Service.StackWhatIf(rig.Preview(), ada);
+        // What the TenantApprovals migration leaves for an approval that was pending at upgrade.
+        _db.AdsPlanApprovals.Add(new PlanApprovalModel
+        {
+            TenantId = Guid.Empty, PlanHash = preview.PlanHash, PlanJson = "{}", Status = "Approved",
+            ApprovedBy = "Ada (legacy)", ApprovedByUserId = Guid.NewGuid().ToString("D"),
+            ApprovedAtUtc = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+
+        var response = await rig.Service.CreateStack(rig.Create(preview), ada);
+        var other = await rig.Service.CreateStack(rig.Create(preview), Approver(Guid.NewGuid(), TestTenants.Fabrikam));
+        var personal = await rig.Service.CreateStack(rig.Create(preview), Personal(Guid.NewGuid()));
+
+        Assert.StartsWith("PLAN_NOT_APPROVED", response.ErrorMessage);
+        Assert.StartsWith("PLAN_NOT_APPROVED", other.ErrorMessage);
+        Assert.StartsWith("PLAN_NOT_APPROVED", personal.ErrorMessage);
+        Assert.Single(_db.AdsPlanApprovals);   // it is not adopted, consumed or rewritten
+
+        // Approving again creates the caller's own row beside it: re-approval is the way forward.
+        Assert.Equal(200, (await rig.Service.ApprovePlan(new PlanApprovalRequest { PlanHash = preview.PlanHash }, ada)).StatusCode);
+        Assert.Equal(2, await _db.AdsPlanApprovals.CountAsync());
+        Assert.Equal(1, await _db.AdsPlanApprovals.CountAsync(r => r.TenantId == Guid.Empty));
+    }
+
+    private sealed class Collector<T> : IServerStreamWriter<T>
+    {
+        public List<T> Items { get; } = [];
+        public WriteOptions? WriteOptions { get; set; }
+        public Task WriteAsync(T message)
+        {
+            Items.Add(message);
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task ADeploymentFindsOnlyTheCallersScopeApprovalAndALegacyRowFailsClosed()
+    {
+        var subscription = Guid.NewGuid();
+        var group = $"/subscriptions/{subscription}/resourceGroups/rg";
+        var arm = new RouteTableHttp();
+        var storage = $"{group}/providers/Microsoft.Storage/storageAccounts/sa1";
+        arm.Answer(HttpMethod.Get, $"/subscriptions/{subscription}", HttpStatusCode.OK,
+                "{\"id\":\"/subscriptions/" + subscription + "\",\"subscriptionId\":\"" + subscription + "\",\"displayName\":\"t\",\"state\":\"Enabled\"}")
+            .Answer(HttpMethod.Get, group, HttpStatusCode.OK,
+                "{\"id\":\"" + group + "\",\"name\":\"rg\",\"location\":\"westeurope\",\"properties\":{\"provisioningState\":\"Succeeded\"}}")
+            .Answer(HttpMethod.Post, $"{group}/providers/Microsoft.Resources/deployments/{WhatIfClient.DeploymentName}/whatIf",
+                HttpStatusCode.OK,
+                "{\"status\":\"Succeeded\",\"properties\":{\"changes\":[{\"resourceId\":\"" + storage
+                + "\",\"changeType\":\"Create\",\"after\":{\"id\":\"" + storage
+                + "\",\"name\":\"sa1\",\"type\":\"Microsoft.Storage/storageAccounts\",\"apiVersion\":\"2023-01-01\","
+                + "\"location\":\"westeurope\",\"sku\":{\"name\":\"Standard_LRS\"},\"kind\":\"StorageV2\"}}]}}");
+        var service = new DeployService(_db, NullLogger<DeployService>.Instance, new FakeCryptoService(),
+            new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl), arm, new AmbientCredential());
+        var ada = Approver(Guid.NewGuid(), TestTenants.Contoso, "Ada");
+        var bob = Approver(Guid.NewGuid(), TestTenants.Fabrikam, "Bob");
+        var whatIf = await service.WhatIf(new DeploymentRequest
+        {
+            SubscriptionId = subscription.ToString(), ResourceGroupName = "rg", ArmTemplate = StackTemplate, Parameters = "{}",
+        }, ada);
+        Assert.True(whatIf.StatusCode == 200, whatIf.ErrorMessage);
+        Assert.Equal(200, (await service.ApprovePlan(new PlanApprovalRequest { PlanHash = whatIf.PlanHash }, ada)).StatusCode);
+        var request = new DeploymentRequest
+        {
+            SubscriptionId = subscription.ToString(), ResourceGroupName = "rg", ArmTemplate = StackTemplate, Parameters = "{}",
+            WhatIfToken = whatIf.WhatIfToken, PlanHash = whatIf.PlanHash,
+        };
+
+        var foreign = new Collector<DeploymentResponse>();
+        await service.CreateDeployment(request, foreign, bob);
+
+        var refused = Assert.Single(foreign.Items);
+        Assert.Equal(400, refused.StatusCode);
+        Assert.StartsWith("PLAN_NOT_APPROVED", refused.ErrorMessage);
+
+        // Swap A's row for the legacy empty-scope one: the owner is refused too.
+        var row = await _db.AdsPlanApprovals.SingleAsync();
+        _db.AdsPlanApprovals.Remove(row);
+        _db.AdsPlanApprovals.Add(row with { TenantId = Guid.Empty });
+        await _db.SaveChangesAsync();
+        var legacy = new Collector<DeploymentResponse>();
+
+        await service.CreateDeployment(request, legacy, ada);
+
+        Assert.StartsWith("PLAN_NOT_APPROVED", Assert.Single(legacy.Items).ErrorMessage);
+    }
+
+    [Fact]
+    public async Task TwoScopesApproveTheSameDecommissionExecutionAndEachOnlyExecutesItsOwn()
+    {
+        var subscription = Guid.NewGuid();
+        var service = new DeployService(_db, NullLogger<DeployService>.Instance, new FakeCryptoService(),
+            new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl), new ScriptedHttp(_ => null), new AmbientCredential());
+        var ada = Approver(Guid.NewGuid(), TestTenants.Contoso, "Ada");
+        var bob = Approver(Guid.NewGuid(), TestTenants.Fabrikam, "Bob");
+        ApproveDecomWindowRequest Approval() => new()
+        {
+            SubscriptionId = subscription.ToString(), WindowId = "w1", PlanHash = DecomPlanHash, ExecutionHash = DecomExecutionHash,
+        };
+
+        Assert.Equal(200, (await service.ApproveDecomWindow(Approval(), ada)).StatusCode);
+        var adaRow = await _db.AdsDecomApprovals.AsNoTracking().SingleAsync();
+
+        // Only A has approved: B's execute does not see A's row.
+        var missing = await service.ExecuteDecomWindow(ExecuteRequest(subscription), bob);
+        Assert.Equal(412, missing.StatusCode);
+        Assert.StartsWith("DECOM_APPROVAL_MISSING", missing.ErrorMessage);
+
+        Assert.Equal(200, (await service.ApproveDecomWindow(Approval(), bob)).StatusCode);
+        var rows = await _db.AdsDecomApprovals.AsNoTracking().ToListAsync();
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(adaRow, Assert.Single(rows, r => r.TenantId == TestTenants.Contoso));
+        Assert.Single(rows, r => r.TenantId == TestTenants.Fabrikam);
+        Assert.Equal(DecomExecutionHash, rows[0].ExecutionHash);
+        Assert.Equal(DecomExecutionHash, rows[1].ExecutionHash);
+    }
+
+    [Fact]
+    public async Task ALegacyDecommissionApprovalInTheEmptyScopeIsFoundByNoRealCaller()
+    {
+        var subscription = Guid.NewGuid();
+        var service = new DeployService(_db, NullLogger<DeployService>.Instance, new FakeCryptoService(),
+            new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl), new ScriptedHttp(_ => null), new AmbientCredential());
+        var ada = Approver(Guid.NewGuid(), TestTenants.Contoso, "Ada");
+        _db.AdsDecomApprovals.Add(new DecomApprovalModel
+        {
+            TenantId = Guid.Empty, ExecutionHash = DecomExecutionHash, WindowId = "w1", PlanHash = DecomPlanHash,
+            SubscriptionId = subscription.ToString(), ApprovedBy = "Ada (legacy)",
+            ApprovedByUserId = Guid.NewGuid().ToString("D"), ApprovedAtUtc = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+
+        var response = await service.ExecuteDecomWindow(ExecuteRequest(subscription), ada);
+
+        Assert.Equal(412, response.StatusCode);
+        Assert.StartsWith("DECOM_APPROVAL_MISSING", response.ErrorMessage);
+        Assert.Single(_db.AdsDecomApprovals);   // untouched
+    }
+
+    private static ExecuteDecomWindowRequest ExecuteRequest(Guid subscription) => new()
+    {
+        SubscriptionId = subscription.ToString(), ScanId = Guid.NewGuid().ToString(), WindowId = "w1",
+        PlanHash = DecomPlanHash, ExecutionHash = DecomExecutionHash,
+        WindowStartUtc = "2026-01-01T00:00:00.0000000+00:00", WindowEndUtc = "2026-01-02T00:00:00.0000000+00:00",
+        PurgeNotBeforeUtc = "2026-01-03T00:00:00.0000000+00:00",
+    };
 }
