@@ -1,0 +1,202 @@
+@inherits FeedbackComponent<string, string>
+@using AntDesign
+@using AzureDesignStudio.Workspace
+@inject WorkspaceBackupService Backups
+@inject WorkspaceStartupReport Report
+@inject MessageService Message
+
+@* Workspace data drawer: how the workspace came up, backups (take, list, reveal) and restore. Desktop-only;
+   opened through AdsHostFeatures.OpenWorkspaceData. Lists only workspace backups - the private deploy
+   database backups live in their own folder and are never offered here. *@
+
+<div style="padding:0 4px;">
+    <h4>Where the data lives</h4>
+    <p style="margin-bottom:4px;">Workspace folder: <code>@MauiProgram.DataDirectory</code></p>
+    <p style="margin-bottom:8px;">Backups folder: <code>@Backups.BackupsDirectory</code></p>
+    <Button Size="ButtonSize.Small" OnClick="@(() => OpenBackupsFolderAsync())">Open backups folder</Button>
+
+    <div style="margin-top:16px;">
+        @if (Report.Notice is { } notice)
+        {
+            <Alert Type="@AlertType.Warning" ShowIcon="true" Message="Workspace recovered" Description="@notice.Message" Style="margin-bottom:8px;white-space:pre-wrap;" />
+        }
+        @if (Report.Restore is { Applied: true } restored)
+        {
+            <Alert Type="@AlertType.Info" ShowIcon="true" Message="Workspace restored"
+                   Description="@RestoreText(restored)" Style="margin-bottom:8px;white-space:pre-wrap;" />
+        }
+        else if (Report.Restore is { Applied: false, Problem: { } restoreProblem } notApplied)
+        {
+            <Alert Type="@AlertType.Error" ShowIcon="true" Message="A staged restore was not applied"
+                   Description="@($"{notApplied.SourceName}: {restoreProblem}")" Style="margin-bottom:8px;white-space:pre-wrap;" />
+        }
+        @foreach (var repair in Report.Upgrade.UniqueIndexRepairs)
+        {
+            <Alert Type="@AlertType.Info" ShowIcon="true" Message="Duplicate rows removed by the upgrade"
+                   Description="@($"{repair.Table}: {repair.RowsRemoved} row(s) removed for the unique index {repair.IndexName}. Report: {repair.ReportPath}")"
+                   Style="margin-bottom:8px;white-space:pre-wrap;" />
+        }
+        @if (Backups.PendingRestore is { } pending)
+        {
+            <Alert Type="@AlertType.Warning" ShowIcon="true" Message="A restore is waiting"
+                   Description="@($"{pending.SourceName} was verified and is applied the next time the app starts. Quit the app now to apply it, or cancel it.")"
+                   Style="margin-bottom:8px;" />
+            <div style="display:flex;gap:8px;margin-bottom:8px;">
+                <Button Size="ButtonSize.Small" OnClick="@(() => CancelPendingAsync())">Cancel pending restore</Button>
+                <Button Size="ButtonSize.Small" Type="@ButtonType.Primary" OnClick="@(() => QuitNowAsync())">Quit now</Button>
+            </div>
+        }
+        @if (rejected is { Count: > 0 })
+        {
+            <Alert Type="@AlertType.Error" ShowIcon="true" Message="That file cannot be restored"
+                   Description="@string.Join("\n", rejected)" Style="margin-bottom:8px;white-space:pre-wrap;" />
+        }
+    </div>
+
+    <h4 style="margin-top:16px;">Backups</h4>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <Button Type="@ButtonType.Primary" Loading="@busy" OnClick="@(() => BackUpNowAsync())">Back up now</Button>
+        <Button Loading="@busy" OnClick="@(() => RestoreFromFileAsync())">Restore from file...</Button>
+    </div>
+
+    @if (backupFiles.Count == 0)
+    {
+        <p>No backups yet. A backup is taken automatically once a day while the app runs, and before a schema upgrade.</p>
+    }
+    else
+    {
+        <table style="width:100%;border-collapse:collapse;">
+            <thead>
+                <tr style="text-align:left;">
+                    <th>When (local)</th><th>Reason</th><th>Size</th><th>File</th><th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var backup in backupFiles)
+                {
+                    <tr>
+                        <td>@backup.CreatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td>@backup.Reason</td>
+                        <td>@FormatSize(backup.SizeBytes)</td>
+                        <td style="word-break:break-all;">@System.IO.Path.GetFileName(backup.Path)</td>
+                        <td style="white-space:nowrap;">
+                            <Button Size="ButtonSize.Small" Disabled="@busy" OnClick="@(() => RestoreAsync(backup.Path))">Restore</Button>
+                            <Button Size="ButtonSize.Small" OnClick="@(() => RevealAsync(backup.Path))">Reveal</Button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<BackupFile> backupFiles = [];
+    private IReadOnlyList<string>? rejected;
+    private bool busy;
+
+    protected override void OnInitialized()
+    {
+        backupFiles = Backups.List();
+    }
+
+    private static string RestoreText(RestoreOutcome outcome) =>
+        $"Restored from the backup {outcome.SourceName}." +
+        (outcome.PreRestorePath is null ? string.Empty : $"\nThe previous workspace was kept as {System.IO.Path.GetFileName(outcome.PreRestorePath)} ({outcome.PreRestorePath}).");
+
+    private static string FormatSize(long bytes) =>
+        bytes >= 1024 * 1024
+            ? string.Create(System.Globalization.CultureInfo.CurrentCulture, $"{bytes / 1024.0 / 1024.0:0.0} MB")
+            : string.Create(System.Globalization.CultureInfo.CurrentCulture, $"{Math.Max(1, bytes / 1024)} KB");
+
+    private Task OpenBackupsFolderAsync()
+    {
+        if (!FolderReveal.OpenFolder(Backups.BackupsDirectory))
+            Message.Warning("The backups folder could not be opened.");
+        return Task.CompletedTask;
+    }
+
+    private Task RevealAsync(string path)
+    {
+        if (!FolderReveal.Reveal(path))
+            Message.Warning("The file could not be shown in the file manager.");
+        return Task.CompletedTask;
+    }
+
+    private async Task BackUpNowAsync()
+    {
+        busy = true;
+        try
+        {
+            var result = await Backups.CreateManualAsync();
+            backupFiles = Backups.List();
+            Message.Success($"Backup written to {result.Path}");
+        }
+        catch (Exception e)
+        {
+            Message.Error($"The backup could not be written: {e.Message}");
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task RestoreAsync(string path)
+    {
+        busy = true;
+        try
+        {
+            await StageAsync(path);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task RestoreFromFileAsync()
+    {
+        busy = true;
+        try
+        {
+            var result = await MainThread.InvokeOnMainThreadAsync(() =>
+                FilePicker.Default.PickAsync(new PickOptions { PickerTitle = "Choose a workspace backup" }));
+            if (result is null) return;
+            await StageAsync(result.FullPath);
+        }
+        catch (Exception e)
+        {
+            Message.Error($"The file could not be chosen: {e.Message}");
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    // The staged copy is verified inside StageRestoreAsync; this only shows its verdict.
+    private async Task StageAsync(string path)
+    {
+        try
+        {
+            var verdict = await Backups.StageRestoreAsync(path);
+            rejected = verdict.Accepted ? null : verdict.Reasons;
+            if (verdict.Accepted)
+                Message.Success("The backup was verified. It is applied the next time the app starts.");
+        }
+        catch (Exception e)
+        {
+            rejected = [e.Message];
+        }
+    }
+
+    private Task CancelPendingAsync()
+    {
+        Backups.CancelPendingRestore();
+        return Task.CompletedTask;
+    }
+
+    private Task QuitNowAsync() =>
+        MainThread.InvokeOnMainThreadAsync(() => Microsoft.Maui.Controls.Application.Current?.Quit());
+}

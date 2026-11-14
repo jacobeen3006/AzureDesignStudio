@@ -127,8 +127,45 @@ namespace AzureDesignStudio.Services
             return await _deployClient.SetGuardrailPolicyAsync(new GuardrailPolicyRequest { Json = json });
         }
 
-        /// <summary>Deploys the reviewed payload as a deployment-stack (v2 12.3): same what-if token
-        /// and plan hash the review produced; resources the stack stops managing are detached
+        /// <summary>Reads the tenant's two settings (allow self-approval, guardrail policy mode). The
+        /// server alone decides who may call it (Guardrail.Admin, a personal account or the single-user
+        /// host); a 401 or 403 comes back untouched with its coded <c>ErrorMessage</c>. Null = the server
+        /// could not be asked, not "nothing set". No screen uses this until the Phase 9 settings UI.</summary>
+        public async Task<TenantSettingsResponse?> GetTenantSettingsAsync()
+        {
+            try
+            {
+                return await _deployClient.GetTenantSettingsAsync(new Empty());
+            }
+            catch (Exception e) when (IsCallFailure(e))
+            {
+                return null;
+            }
+        }
+
+        /// <summary>Replaces both tenant settings in one request (read, edit, write back) - the server
+        /// alone decides who may call it and answers 400 <c>TENANT_SETTINGS_INVALID</c> for an unknown mode
+        /// (<c>replace</c> or <c>merge</c>). Every server status comes back untouched; null = the server
+        /// could not be asked, so nothing is known to be stored. No screen uses this until the Phase 9
+        /// settings UI.</summary>
+        public async Task<TenantSettingsResponse?> SetTenantSettingsAsync(bool allowSelfApproval, string guardrailPolicyMode)
+        {
+            try
+            {
+                return await _deployClient.SetTenantSettingsAsync(new TenantSettingsRequest
+                {
+                    AllowSelfApproval = allowSelfApproval,
+                    GuardrailPolicyMode = guardrailPolicyMode,
+                });
+            }
+            catch (Exception e) when (IsCallFailure(e))
+            {
+                return null;
+            }
+        }
+
+        /// <summary>Deploys the reviewed payload as a deployment-stack (v2 12.3): the stack what-if token
+        /// (<see cref="StackWhatIfAsync"/>) and plan hash the review produced; resources the stack stops managing are detached
         /// (kept in Azure) - delete is refused server-side until the Phase 13 gates ship. <paramref name="bypassOutOfSync"/> is
         /// the review-gated out-of-sync override, only ever sent after the review screen showed
         /// the managed list and the user ticked the box.</summary>
@@ -154,6 +191,31 @@ namespace AzureDesignStudio.Services
             catch (Exception ex) when (ex is Grpc.Core.RpcException or InvalidOperationException or HttpRequestException)
             {
                 // A transport break never proves what ARM did: the server audit carries the truth.
+                return null;
+            }
+        }
+
+        /// <summary>Deployment-stacks what-if: the preview whose token (and plan hash, which the approval
+        /// binds) <see cref="CreateStackAsync"/> needs. Same stack fields as the create call; nothing is
+        /// deployed. Null on a transport break - the review then has no token and cannot deploy.</summary>
+        public async Task<StackWhatIfResponse?> StackWhatIfAsync(string subscriptionId, string rgName, string stackName,
+            string armTemplate, string parameters, string resourcesAction = "detach", bool bypassOutOfSync = false)
+        {
+            try
+            {
+                return await _deployClient.StackWhatIfAsync(new StackWhatIfRequest
+                {
+                    SubscriptionId = subscriptionId,
+                    ResourceGroupName = rgName,
+                    StackName = stackName,
+                    ArmTemplate = armTemplate,
+                    Parameters = parameters,
+                    ResourcesAction = resourcesAction,
+                    BypassOutOfSync = bypassOutOfSync,
+                });
+            }
+            catch (Exception ex) when (ex is Grpc.Core.RpcException or InvalidOperationException or HttpRequestException)
+            {
                 return null;
             }
         }

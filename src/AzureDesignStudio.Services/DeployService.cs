@@ -4,9 +4,11 @@ using AzureDesignStudio.Discovery.Arm;
 using SubscriptionInfo = AzureDesignStudio.SharedModels.Protos.SubscriptionInfo;
 using AzureDesignStudio.Discovery.Iac;
 using AzureDesignStudio.Discovery.Iac.WhatIf;
+using AzureDesignStudio.Discovery.Preflight;
 using AzureDesignStudio.Discovery.ResourceGraph;
 using AzureDesignStudio.Discovery.Decommission;
 using AzureDesignStudio.Discovery.Unmanaged;
+using AzureDesignStudio.Services.Auth;
 using AzureDesignStudio.Services.Models;
 using Grpc.Core;
 using Microsoft.EntityFrameworkCore;
@@ -18,6 +20,8 @@ using Azure;
 using Azure.ResourceManager.Resources.Deployments;
 using Azure.ResourceManager.Resources.Deployments.Models;
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace AzureDesignStudio.Services
@@ -30,6 +34,11 @@ namespace AzureDesignStudio.Services
         private readonly WhatIfTokenGate _whatIfGate;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IAmbientAzureCredential? _ambient;
+
+        /// <summary>How long the advisory preflights of a what-if review may take; what they have
+        /// not finished by then is reported as not checked. Settable so tests can shorten it.</summary>
+        internal TimeSpan PreflightBudget { get; set; } = TimeSpan.FromSeconds(30);
+
         public DeployService(DesignDbContext context, ILogger<DeployService> logger, ICryptoService cryptoService,
             WhatIfTokenGate whatIfGate, IHttpClientFactory httpClientFactory, IAmbientAzureCredential? ambient = null)
         {
@@ -45,14 +54,13 @@ namespace AzureDesignStudio.Services
         {
             var response = new SaveSubInfoResponse();
             // Get user id
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
                 return response;
             }
-            var userId = new Guid(userIdClaim);
+            var userId = caller.UserId;
 
             if (!ServiceTools.IsValidSubscriptionName(request.SubscriptionName))
             {
@@ -135,14 +143,13 @@ namespace AzureDesignStudio.Services
         {
             var response = new LoadSubInfoResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
                 return response;
             }
-            var userId = new Guid(userIdClaim);
+            var userId = caller.UserId;
 
             // Newest link per subscription: rows saved before links were upserted can repeat one.
             var subResources = _designContext.AzureSubscriptions.AsNoTracking()
@@ -223,10 +230,15 @@ namespace AzureDesignStudio.Services
         /// throws for a missing group (it never returns null), for a rejected or expired
         /// credential and for a network failure; called bare, each of those ended the RPC with
         /// an unhandled exception instead of the "cannot find the resource group" reply.
+        /// The lookup rides the shared "arm" HttpClient, like the ARM calls that follow it, so
+        /// the host's handler (and a test's) sees it.
         /// </summary>
         private async Task<(Azure.ResourceManager.Resources.ResourceGroupResource? Group, int StatusCode, string Error)>
-            FindResourceGroupAsync(ArmClient armClient, string resourceGroupName, CancellationToken cancellationToken)
+            FindResourceGroupAsync(Azure.Core.TokenCredential credential, Guid subscriptionId, string resourceGroupName,
+                CancellationToken cancellationToken)
         {
+            var armClient = new ArmClient(credential, subscriptionId.ToString(),
+                new ArmClientOptions { Transport = new Azure.Core.Pipeline.HttpClientTransport(_httpClientFactory.CreateClient("arm")) });
             try
             {
                 var subscription = await armClient.GetDefaultSubscriptionAsync(cancellationToken);
@@ -339,6 +351,15 @@ namespace AzureDesignStudio.Services
         {
             var response = new WhatIfResponse();
 
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
+            {
+                _logger.LogWarning("Access denied. {Failure}", failure);
+                response.StatusCode = StatusCodes.Status401Unauthorized;
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
+                return response;
+            }
+            var userId = caller.UserId;
+
             if (string.IsNullOrWhiteSpace(request.ArmTemplate))
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -370,15 +391,6 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
-            {
-                response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
-                return response;
-            }
-            var userId = new Guid(userIdClaim);
-
             Guid subscriptionId;
             try
             {
@@ -404,11 +416,11 @@ namespace AzureDesignStudio.Services
 
             try
             {
-                var armClient = new ArmClient(credential, subscriptionId.ToString());
                 string location;
                 if (target.Kind == DeployScopeKind.ResourceGroup)
                 {
-                    var (rg, rgStatus, rgError) = await FindResourceGroupAsync(armClient, request.ResourceGroupName, context.CancellationToken);
+                    var (rg, rgStatus, rgError) = await FindResourceGroupAsync(credential, subscriptionId,
+                        request.ResourceGroupName, context.CancellationToken);
                     if (rg == null)
                     {
                         response.StatusCode = rgStatus;
@@ -425,8 +437,8 @@ namespace AzureDesignStudio.Services
                     location = request.Location;
                 }
 
-                var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), credential,
-                    ArmEndpointSet.AzureCloud);
+                var http = _httpClientFactory.CreateClient("arm");
+                var transport = new ArmTransport(http, credential, ArmEndpointSet.AzureCloud);
                 var preview = StagedPreviewPlanner.Select(stagedPlan, target, request.ArmTemplate, parametersJson);
                 if (preview.Unsupported)
                 {
@@ -449,7 +461,7 @@ namespace AzureDesignStudio.Services
                 // resolved ids and payloads are the match surface. A protected plan earns no
                 // token, so it can never be approved or applied; the review still shows every
                 // row with its flag, and tightening the list later cannot be reviewed around.
-                var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(context.CancellationToken);
+                var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(caller.ScopeId, context.CancellationToken);
                 if (guardrailPolicy is null)
                 {
                     _logger.LogWarning("Guardrail policy unreadable: {Error}", policyError);
@@ -471,7 +483,8 @@ namespace AzureDesignStudio.Services
                 {
                     token = _whatIfGate.Issue(target, request.ArmTemplate, parametersJson, summary,
                         plan.CanonicalJson, plan.PlanHash, revert.DocumentJson,
-                        GuardrailEnforcement.Targets(summary.Changes));
+                        GuardrailEnforcement.Targets(summary.Changes),
+                        requestedByUserId: caller.UserIdText, scopeId: caller.ScopeId);
                 }
 
                 response.StatusCode = StatusCodes.Status200OK;
@@ -492,6 +505,15 @@ namespace AzureDesignStudio.Services
                 response.Caveats = string.Join("\n", caveats);
                 response.PlanHash = plan.PlanHash;
                 response.WhatIfToken = token ?? "";
+
+                // Waves B2 and B4: advisory only, and only once the what-if has succeeded - they add
+                // flags and notes, never touch the token, the plan hash or the status code. They
+                // run at once, each on its own transport and within the same budget, and each fills
+                // only its own fields of the response.
+                await Task.WhenAll(
+                    AddPolicyPreflightAsync(response, target, summary, http, credential,
+                        request.ArmTemplate, parametersJson, context.CancellationToken),
+                    AddQuotaPreflightAsync(response, target, summary, http, credential, context.CancellationToken));
                 return response;
             }
             catch (WhatIfException ex)
@@ -517,6 +539,120 @@ namespace AzureDesignStudio.Services
             }
         }
 
+        private const string PolicyTargetNote = "Policy is not checked for management-group or tenant deployments.";
+        private const string PolicyFailedNote = "Azure Policy was not checked: the check failed unexpectedly.";
+
+        /// <summary>
+        /// Wave B2 policy preflight over a successful what-if: asks Azure Policy about each resource
+        /// the previewed batch creates or modifies and puts the findings in
+        /// <c>policy_flags</c>, the engine's notes followed by its caveats in <c>policy_notes</c>.
+        /// It runs on its own <see cref="ArmTransport"/> (same "arm" HttpClient and credential) so
+        /// other preflights do not queue behind it. Management-group and tenant targets get a note,
+        /// not a check. Advisory: nothing it does - no permission, throttling, the time limit -
+        /// changes the token, plan hash or status code; only the caller's cancellation propagates.
+        /// </summary>
+        private async Task AddPolicyPreflightAsync(WhatIfResponse response, DeployTargetScope target, WhatIfSummary summary,
+            HttpClient http, Azure.Core.TokenCredential credential, string templateJson, string parametersJson,
+            CancellationToken ct)
+        {
+            if (target.Kind is DeployScopeKind.ManagementGroup or DeployScopeKind.Tenant)
+            {
+                response.PolicyNotes.Add(PolicyTargetNote);
+                return;
+            }
+
+            PolicyPreflightResult result;
+            try
+            {
+                var transport = new ArmTransport(http, credential, ArmEndpointSet.AzureCloud);
+                result = await new PolicyPreflight(transport).CheckAsync(summary.Changes, templateJson, parametersJson,
+                    PreflightBudget, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // The engine turns every failure into a note; this only guards the review against a bug in it.
+                _logger.LogWarning(ex, "Policy preflight failed.");
+                response.PolicyNotes.Add(PolicyFailedNote);
+                return;
+            }
+
+            foreach (var finding in result.Findings)
+            {
+                response.PolicyFlags.Add(new PolicyFlag
+                {
+                    ResourceId = finding.ResourceId,
+                    Verdict = finding.Verdict.ToString(),
+                    Effect = finding.Effect,
+                    PolicyAssignmentId = finding.PolicyAssignmentId ?? "",
+                    PolicyDefinitionId = finding.PolicyDefinitionId ?? "",
+                    PolicyDefinitionReferenceId = finding.PolicyDefinitionReferenceId ?? "",
+                    Reason = finding.Reason,
+                });
+            }
+            response.PolicyNotes.AddRange(result.Notes);
+            response.PolicyNotes.AddRange(PolicyPreflight.Caveats);
+            _logger.LogInformation("Policy preflight: {Checked} checked, {NotChecked} not checked, {Findings} finding(s).",
+                result.Checked, result.NotChecked, result.Findings.Count);
+        }
+
+        private const string QuotaTargetNote = "Quota is not checked for management-group or tenant deployments.";
+        private const string QuotaFailedNote = "Quota was not checked: the check failed unexpectedly.";
+
+        /// <summary>
+        /// Wave B4 quota preflight over a successful what-if: counts the vCPUs and public IPs the
+        /// previewed batch asks for and checks them against the Resource SKUs and the usages of the
+        /// target's subscription, putting the findings in <c>quota_flags</c> (status = the
+        /// <see cref="QuotaStatus"/> name) and the engine's notes followed by its caveats in
+        /// <c>quota_notes</c>. It runs on its own <see cref="ArmTransport"/> (same "arm" HttpClient
+        /// and credential) beside the policy preflight. Management-group and tenant targets get a
+        /// note, not a check. Advisory: nothing it does changes the token, plan hash or status code;
+        /// only the caller's cancellation propagates.
+        /// </summary>
+        private async Task AddQuotaPreflightAsync(WhatIfResponse response, DeployTargetScope target, WhatIfSummary summary,
+            HttpClient http, Azure.Core.TokenCredential credential, CancellationToken ct)
+        {
+            if (target.Kind is DeployScopeKind.ManagementGroup or DeployScopeKind.Tenant)
+            {
+                response.QuotaNotes.Add(QuotaTargetNote);
+                return;
+            }
+
+            QuotaPreflightResult result;
+            try
+            {
+                var transport = new ArmTransport(http, credential, ArmEndpointSet.AzureCloud);
+                result = await new QuotaPreflight(transport).CheckAsync(target.SubscriptionId, summary.Changes,
+                    PreflightBudget, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // The engine turns every failure into a note; this only guards the review against a bug in it.
+                _logger.LogWarning(ex, "Quota preflight failed.");
+                response.QuotaNotes.Add(QuotaFailedNote);
+                return;
+            }
+
+            foreach (var finding in result.Findings)
+            {
+                response.QuotaFlags.Add(new QuotaFlag
+                {
+                    Location = finding.Location,
+                    QuotaName = finding.QuotaName,
+                    DisplayName = finding.DisplayName,
+                    Current = finding.Current,
+                    Limit = finding.Limit,
+                    Requested = finding.Requested,
+                    Status = finding.Status.ToString(),
+                    VmSize = finding.VmSize ?? "",
+                    Detail = finding.Detail ?? "",
+                });
+            }
+            response.QuotaNotes.AddRange(result.Notes);
+            response.QuotaNotes.AddRange(QuotaPreflight.Caveats);
+            _logger.LogInformation("Quota preflight: {Findings} finding(s), {NotOk} not Ok.",
+                result.Findings.Count, result.Findings.Count(f => f.Status != QuotaStatus.Ok));
+        }
+
         /// <summary>
         /// Read-only per-resource monitor for the pipeline's deployment on (subscription, RG)
         /// (v2 plan 11.2/[56]): GETs deployment + operations over ArmTransport and folds them
@@ -527,14 +663,14 @@ namespace AzureDesignStudio.Services
         {
             var response = new DeploymentOperationsResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
                 return response;
             }
-            var userId = new Guid(userIdClaim);
+            var userId = caller.UserId;
 
             // The subscription id names the credential (the linked subscription) for every target -
             // management-group and tenant deployments still authenticate through one. The scope
@@ -696,11 +832,11 @@ namespace AzureDesignStudio.Services
         {
             var response = new PrepareRetryResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
                 return Task.FromResult(response);
             }
 
@@ -729,12 +865,21 @@ namespace AzureDesignStudio.Services
         {
             var response = new PlanApprovalResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
+                return response;
+            }
+
+            // The role comes before any hash, preview or setting lookup (D-02, D-04), so a caller
+            // without it cannot probe which hashes have a live preview.
+            if (!caller.CanApprove)
+            {
+                _logger.LogWarning("Plan approval refused: the caller lacks {Role}.", AdsIdentity.DeployApproverRole);
+                response.StatusCode = StatusCodes.Status403Forbidden;
+                response.ErrorMessage = "PLAN_APPROVER_ROLE_REQUIRED: the Deploy.Approver app role is required to approve a plan. If the role was just assigned, sign out and back in to get a new token.";
                 return response;
             }
 
@@ -746,27 +891,65 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            if (!_whatIfGate.TryPeekPlan(planHash, out var planJson, out var revertJson))
+            // Only a preview issued for the caller's own scope is approvable (D-07). The requester it
+            // names is kept for the approval row (plan 05-08) and the approver rules (plan 05-09).
+            if (!_whatIfGate.TryPeekPlan(planHash, caller.ScopeId, out var planJson, out var revertJson, out var requestedByUserId))
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
                 response.ErrorMessage = "WHAT_IF_STALE: no live What-If preview exists for this plan; run What-If first.";
                 return response;
             }
 
-            var displayName = ServiceTools.GetUser(context).FindFirst("name")?.Value;
-            var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
+            // Self-approval is a second, independent rule with its own code (D-02, D-07). It runs after
+            // the role rule: the principal whose what-if produced the preview needs the tenant's
+            // setting (or the single-user host) to approve it.
+            if (AdsIdentity.SameUser(requestedByUserId, caller.UserId)
+                && !caller.MaySelfApprove(await IsSelfApprovalAllowedAsync(caller.ScopeId, context.CancellationToken)))
+            {
+                _logger.LogWarning("Plan {PlanHash} approval refused: the approver requested the review.", planHash);
+                response.StatusCode = StatusCodes.Status403Forbidden;
+                response.ErrorMessage = "PLAN_SELF_APPROVAL_REFUSED: the principal that requested this review cannot approve it. Another Deploy.Approver can approve it, or a Guardrail.Admin can allow self-approval for this tenant.";
+                return response;
+            }
 
-            var existing = await _designContext.AdsPlanApprovals.FindAsync([planHash], context.CancellationToken);
+            var principal = caller.Principal;
+
+            var existing = await _designContext.AdsPlanApprovals.FindAsync([caller.ScopeId, planHash], context.CancellationToken);
             if (existing != null)
+            {
+                // An approval is never silently taken over (WR-06): another approver cannot replace
+                // it - the named requester deploys it, or its own approver approves again - and the
+                // same approver replacing it leaves an audit event that names the requester change.
+                if (!AdsIdentity.SameUser(existing.ApprovedByUserId, caller.UserId))
+                {
+                    _logger.LogWarning("Plan {PlanHash} approval refused: the plan already has an approval by another principal.", planHash);
+                    response.StatusCode = StatusCodes.Status409Conflict;
+                    response.ErrorMessage = "PLAN_ALREADY_APPROVED: this plan already has an approval by another principal. The approval stays as it is: its requester deploys it, or the principal that approved it approves again.";
+                    return response;
+                }
+
                 _designContext.AdsPlanApprovals.Remove(existing);
+                _designContext.AdsSecurityEvents.Add(new SecurityEventModel
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = caller.ScopeId,
+                    EventType = SecurityEventTypes.PlanApprovalReplaced,
+                    Principal = principal,
+                    PrincipalUserId = caller.UserIdText,
+                    Detail = $"plan={planHash[..19]}; requester={existing.RequestedByUserId ?? "-"} -> {requestedByUserId ?? "-"}",
+                    AtUtc = DateTime.UtcNow,
+                });
+            }
 
             var approval = new PlanApprovalModel
             {
+                TenantId = caller.ScopeId,
                 PlanHash = planHash,
                 PlanJson = planJson,
                 Status = PlanApprovalGate.ApprovedStatus,
                 ApprovedBy = principal,
-                ApprovedByUserId = userIdClaim,
+                ApprovedByUserId = caller.UserIdText,
+                RequestedByUserId = requestedByUserId,
                 ApprovedAtUtc = DateTime.UtcNow,
                 RevertPlanJson = revertJson,
             };
@@ -782,9 +965,46 @@ namespace AzureDesignStudio.Services
             return response;
         }
 
+        /// <summary>Whether the scope's tenant settings allow a requester to approve their own review;
+        /// false (the default) when the scope has no settings row.</summary>
+        internal async Task<bool> IsSelfApprovalAllowedAsync(Guid scopeId, CancellationToken ct)
+        {
+            var settings = await _designContext.AdsTenantSettings.AsNoTracking()
+                .FirstOrDefaultAsync(e => e.TenantId == scopeId, ct);
+            return settings?.AllowSelfApproval ?? false;
+        }
+
+        /// <summary>
+        /// Who may deploy an approval (D-07): the principal recorded as the requester of the review, not
+        /// the approver. A row with no recorded requester (one seeded without it) keeps the old rule -
+        /// only the approver may deploy. A recorded requester that is not a usable id matches nobody.
+        /// Returns the refusal text, or null when the caller may deploy.
+        /// </summary>
+        private static string? DeployerRefusal(PlanApprovalModel approval, Guid callerUserId)
+        {
+            if (!string.IsNullOrWhiteSpace(approval.RequestedByUserId))
+                return AdsIdentity.SameUser(approval.RequestedByUserId, callerUserId)
+                    ? null
+                    : "PLAN_REQUESTER_MISMATCH: only the principal that requested this review may deploy it.";
+
+            return AdsIdentity.SameUser(approval.ApprovedByUserId, callerUserId)
+                ? null
+                : "PLAN_APPROVER_MISMATCH: only the principal that approved this plan may deploy it.";
+        }
+
         public override async Task CreateDeployment(DeploymentRequest request, IServerStreamWriter<DeploymentResponse> responseStream, ServerCallContext context)
         {
             var response = new DeploymentResponse();
+
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
+            {
+                _logger.LogWarning("Access denied. {Failure}", failure);
+                response.StatusCode = StatusCodes.Status401Unauthorized;
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
+                await responseStream.WriteAsync(response);
+                return;
+            }
+            var userId = caller.UserId;
 
             if (string.IsNullOrWhiteSpace(request.ArmTemplate))
             {
@@ -822,17 +1042,6 @@ namespace AzureDesignStudio.Services
                 return;
             }
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
-            {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
-                response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
-                await responseStream.WriteAsync(response);
-                return;
-            }
-            var userId = new Guid(userIdClaim);
-
             Guid subscriptionId;
             try
             {
@@ -847,8 +1056,8 @@ namespace AzureDesignStudio.Services
                 return;
             }
 
-            var armClient = await GetArmClient(userId, subscriptionId);
-            if (armClient == null)
+            var credential = await GetCredentialAsync(userId, subscriptionId);
+            if (credential == null)
             {
                 _logger.LogWarning("No subscription is found.");
                 response.StatusCode = StatusCodes.Status404NotFound;
@@ -856,11 +1065,15 @@ namespace AzureDesignStudio.Services
                 await responseStream.WriteAsync(response);
                 return;
             }
+            // The deployments keep the SDK's own transport; only the group lookup below rides the
+            // "arm" HttpClient.
+            var armClient = new ArmClient(credential, subscriptionId.ToString());
 
             string location;
             if (target.Kind == DeployScopeKind.ResourceGroup)
             {
-                var (rg, rgStatus, rgError) = await FindResourceGroupAsync(armClient, request.ResourceGroupName, context.CancellationToken);
+                var (rg, rgStatus, rgError) = await FindResourceGroupAsync(credential, subscriptionId,
+                    request.ResourceGroupName, context.CancellationToken);
                 if (rg == null)
                 {
                     response.StatusCode = rgStatus;
@@ -906,7 +1119,7 @@ namespace AzureDesignStudio.Services
                 return;
             }
 
-            var approval = await _designContext.AdsPlanApprovals.FindAsync([planHash], context.CancellationToken);
+            var approval = await _designContext.AdsPlanApprovals.FindAsync([caller.ScopeId, planHash], context.CancellationToken);
             if (approval == null)
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -915,11 +1128,13 @@ namespace AzureDesignStudio.Services
                 return;
             }
 
-            if (!string.Equals(approval.ApprovedByUserId, userIdClaim, StringComparison.Ordinal))
+            // The requester deploys what someone else approved (D-07): any other principal is refused
+            // with PLAN_REQUESTER_MISMATCH, an approval with no requester with PLAN_APPROVER_MISMATCH.
+            if (DeployerRefusal(approval, caller.UserId) is { } deployerRefusal)
             {
                 _logger.LogWarning("Plan {PlanHash} approved by {Approver} but deployed by a different principal", planHash, approval.ApprovedBy);
                 response.StatusCode = StatusCodes.Status403Forbidden;
-                response.ErrorMessage = "PLAN_APPROVER_MISMATCH: only the principal that approved this plan may deploy it.";
+                response.ErrorMessage = deployerRefusal;
                 await responseStream.WriteAsync(response);
                 return;
             }
@@ -936,7 +1151,7 @@ namespace AzureDesignStudio.Services
             // Guardrails are re-judged at apply time against the live policy, so a list tightened
             // after the review still stops the apply - the veto runs before consumption and never
             // burns the single-use token.
-            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(context.CancellationToken);
+            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(caller.ScopeId, context.CancellationToken);
             if (guardrailPolicy is null)
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -947,7 +1162,7 @@ namespace AzureDesignStudio.Services
             }
             var whatIfCheck = _whatIfGate.ValidateAndConsume(request.WhatIfToken, target,
                 request.ArmTemplate, parametersJson,
-                targets => GuardrailVeto(guardrailPolicy, targets));
+                targets => GuardrailVeto(guardrailPolicy, targets), scopeId: caller.ScopeId);
             if (!whatIfCheck.IsOk)
             {
                 _logger.LogWarning("Deploy blocked by what-if gate: {Code}", whatIfCheck.Code);
@@ -990,85 +1205,66 @@ namespace AzureDesignStudio.Services
                 location: batches[0].Kind == DeployScopeKind.ResourceGroup && target.Kind == DeployScopeKind.ResourceGroup ? null : location,
                 targetScope: target.ScopePath);
         }
-        /// <summary>
-        /// v2 plan 12.3: deploy the design as a deployment-stack under the same double gate as
-        /// CreateDeployment - a fresh what-if token plus a named principal's approval bound to the
-        /// canonical scope+template+parameters identity. The stack name and unmanage policy ride
-        /// beside the hash (the revert-plan convention), are validated fail-closed by the engine
-        /// before anything is sent, and land in the append-only apply trail keyed by stack name.
-        /// </summary>
-        public override async Task<CreateStackResponse> CreateStack(CreateStackRequest request, ServerCallContext context)
+        /// <summary>Everything CreateStack and StackWhatIf validate identically before the gate.</summary>
+        private sealed record StackPlan(AdsCaller Caller, Guid SubscriptionId, Azure.Core.TokenCredential Credential,
+            string ParametersJson, DeployPlanArtifact Plan, DeploymentStackBody Body, GuardrailPolicy Guardrails)
         {
-            var response = new CreateStackResponse();
+            /// <summary>The approvable identity of this stack: scope + template + parameters + the stack body
+            /// hash, so an approval binds the unmanage policy, deny settings and bypass flag too (WR-04).</summary>
+            public string PlanHash => Plan.PlanHash;
+        }
+
+        /// <summary>
+        /// The request validation and guardrail-policy load shared by CreateStack and StackWhatIf:
+        /// template and scope checks, wire-form stack policy, caller, subscription, credential, the
+        /// plan identity, the stack body (the engine refuses a delete policy here) and the
+        /// do-not-touch list. Every local refusal comes before the one ARM call it makes, the
+        /// resource-group lookup, so a refused request touches nothing in Azure.
+        /// </summary>
+        private async Task<(StackPlan? Plan, int StatusCode, string Error)> PrepareStackAsync(
+            CreateStackRequest request, ServerCallContext context)
+        {
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
+            {
+                _logger.LogWarning("Access denied. {Failure}", failure);
+                return (null, StatusCodes.Status401Unauthorized, ServiceTools.IdentityInvalidMessage);
+            }
+            var userId = caller.UserId;
 
             if (string.IsNullOrWhiteSpace(request.ArmTemplate))
-            {
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "Template is empty.";
-                return response;
-            }
+                return (null, StatusCodes.Status400BadRequest, "Template is empty.");
 
             if (ArmTemplateValidator.TryFindBlockingErrors(request.ArmTemplate, request.Parameters, out var validationErrors))
             {
                 _logger.LogWarning("Template blocked before stack deploy: {Errors}", validationErrors);
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = validationErrors;
-                return response;
+                return (null, StatusCodes.Status400BadRequest, validationErrors);
             }
 
             if (DeployScopePlanner.TryStageForApply(request.ArmTemplate, request.SubscriptionId, request.ResourceGroupName,
                     out _, out var scopeErrors))
             {
                 _logger.LogWarning("Staged plan blocked before stack deploy: {Errors}", scopeErrors);
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = scopeErrors;
-                return response;
+                return (null, StatusCodes.Status400BadRequest, scopeErrors);
             }
 
             // Wire-form policy before anything is spent: unknown values answer 400, never a surprise
             // mid-apply. Blank optional slots mean detach; resources_action is required.
             if (!DeploymentStack.TryParseAction(request.ResourcesAction, out var resourcesAction))
-            {
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "resources_action must be detach (delete is disabled until the decommissioning gates ship).";
-                return response;
-            }
+                return (null, StatusCodes.Status400BadRequest, "resources_action must be detach (delete is disabled until the decommissioning gates ship).");
             var resourceGroupsAction = StackUnmanageAction.Detach;
             if (!string.IsNullOrWhiteSpace(request.ResourceGroupsAction) && !DeploymentStack.TryParseAction(request.ResourceGroupsAction, out resourceGroupsAction))
-            {
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "resource_groups_action must be detach or delete when set.";
-                return response;
-            }
+                return (null, StatusCodes.Status400BadRequest, "resource_groups_action must be detach or delete when set.");
             var managementGroupsAction = StackUnmanageAction.Detach;
             if (!string.IsNullOrWhiteSpace(request.ManagementGroupsAction) && !DeploymentStack.TryParseAction(request.ManagementGroupsAction, out managementGroupsAction))
-            {
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "management_groups_action must be detach or delete when set.";
-                return response;
-            }
+                return (null, StatusCodes.Status400BadRequest, "management_groups_action must be detach or delete when set.");
             StackDenySettings? denySettings = null;
             if (!string.IsNullOrWhiteSpace(request.DenyMode) || request.DenyApplyToChildScopes)
             {
                 var denyMode = StackDenyMode.None;
                 if (!string.IsNullOrWhiteSpace(request.DenyMode) && !DeploymentStack.TryParseDenyMode(request.DenyMode, out denyMode))
-                {
-                    response.StatusCode = StatusCodes.Status400BadRequest;
-                    response.ErrorMessage = "deny_mode must be none, denyDelete or denyWriteAndDelete.";
-                    return response;
-                }
+                    return (null, StatusCodes.Status400BadRequest, "deny_mode must be none, denyDelete or denyWriteAndDelete.");
                 denySettings = new StackDenySettings(denyMode, request.DenyApplyToChildScopes);
             }
-
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
-            {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
-                response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
-                return response;
-            }
-            var userId = new Guid(userIdClaim);
 
             Guid subscriptionId;
             try
@@ -1078,57 +1274,228 @@ namespace AzureDesignStudio.Services
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Exception occurred.");
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "Bad request.";
-                return response;
+                return (null, StatusCodes.Status400BadRequest, "Bad request.");
             }
 
             var credential = await GetCredentialAsync(userId, subscriptionId);
             if (credential == null)
             {
                 _logger.LogWarning("No subscription is found.");
-                response.StatusCode = StatusCodes.Status404NotFound;
-                response.ErrorMessage = "No subscription is found.";
-                return response;
-            }
-
-            // The stack lives in the resource group's region - the same honest ArmClient lookup
-            // the WhatIf path uses; a stack location is never guessed or defaulted.
-            var armClient = new ArmClient(credential, subscriptionId.ToString());
-            var (rg, rgStatus, rgError) = await FindResourceGroupAsync(armClient, request.ResourceGroupName, context.CancellationToken);
-            if (rg == null)
-            {
-                response.StatusCode = rgStatus;
-                response.ErrorMessage = rgError;
-                return response;
+                return (null, StatusCodes.Status404NotFound, "No subscription is found.");
             }
 
             var parametersJson = string.IsNullOrWhiteSpace(request.Parameters) ? "{}" : request.Parameters;
 
-            // Same identity as WhatIf/ApprovePlan/CreateDeployment: scope + template + parameters.
-            string planHash;
+            // Scope + template + parameters must canonicalize before anything else is built; the stack's
+            // own approvable identity adds the stack body hash below.
             try
             {
-                planHash = DeployPlanArtifact.Create(subscriptionId.ToString(), request.ResourceGroupName,
-                    request.ArmTemplate, parametersJson).PlanHash;
+                _ = DeployPlanArtifact.Create(subscriptionId.ToString(), request.ResourceGroupName,
+                    request.ArmTemplate, parametersJson);
             }
             catch (Exception ex) when (ex is System.Text.Json.JsonException or ArgumentException)
             {
                 _logger.LogWarning(ex, "Stack payload is not canonicalizable.");
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "Template or parameters are not valid JSON.";
+                return (null, StatusCodes.Status400BadRequest, "Template or parameters are not valid JSON.");
+            }
+
+            // Engine validation before any single-use token is spent: refuse-with-diagnostics, never warn.
+            var body = DeploymentStack.Build(request.StackName,
+                request.ArmTemplate, new StackPolicy(resourcesAction, resourceGroupsAction, managementGroupsAction, denySettings),
+                parametersJson, bypassOutOfSyncError: request.BypassOutOfSync);
+            if (!body.Success)
+            {
+                var errors = string.Join(" ", body.Diagnostics
+                    .Where(d => d.Severity == ArmDiagnosticSeverity.Error).Select(d => $"{d.Code}: {d.Message}"));
+                _logger.LogWarning("Stack body refused: {Errors}", errors);
+                return (null, StatusCodes.Status400BadRequest, errors);
+            }
+
+            // The approvable identity of a stack (WR-04): scope + template + parameters + the stack body
+            // hash. A plain what-if approval (which carries none of the unmanage policy, deny settings or
+            // bypass flag) and a stack approval with other settings both hash differently, so neither can
+            // be redeemed here by a requester who changed the settings after the approver looked.
+            var stackPlan = DeployPlanArtifact.CreateForStack(subscriptionId.ToString(), request.ResourceGroupName,
+                request.ArmTemplate, parametersJson, body.PlanHash);
+
+            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(caller.ScopeId, context.CancellationToken);
+            if (guardrailPolicy is null)
+                return (null, StatusCodes.Status400BadRequest, policyError ?? "The guardrail policy could not be read.");
+
+            // The stack lives in the resource group's region - the same honest lookup the WhatIf
+            // path uses; a stack location is never guessed or defaulted.
+            var (rg, rgStatus, rgError) = await FindResourceGroupAsync(credential, subscriptionId,
+                request.ResourceGroupName, context.CancellationToken);
+            if (rg == null)
+                return (null, rgStatus, rgError);
+
+            return (new StackPlan(caller, subscriptionId, credential, parametersJson, stackPlan, body, guardrailPolicy),
+                StatusCodes.Status200OK, string.Empty);
+        }
+
+        /// <summary>
+        /// Deployment-stacks what-if: the preview that gates <see cref="CreateStack"/>. It runs the
+        /// request validation and guardrail-policy load CreateStack runs (one shared method), asks ARM for the
+        /// stack's predicted resource changes (nothing is deployed; the temporary result is deleted),
+        /// and issues a stack token bound to the exact stack body. The result also makes the
+        /// stack plan hash (scope + template + parameters + the stack body hash) approvable. No token is issued when the prediction
+        /// cannot be trusted (<c>indeterminacy_reason</c>) or a guardrail protects a touched
+        /// resource: the reason comes back so the review can show it, but nothing is deployable.
+        /// </summary>
+        public override async Task<StackWhatIfResponse> StackWhatIf(StackWhatIfRequest request, ServerCallContext context)
+        {
+            var response = new StackWhatIfResponse();
+
+            var (prepared, prepareStatus, prepareError) = await PrepareStackAsync(new CreateStackRequest
+            {
+                SubscriptionId = request.SubscriptionId,
+                ResourceGroupName = request.ResourceGroupName,
+                StackName = request.StackName,
+                ArmTemplate = request.ArmTemplate,
+                Parameters = request.Parameters,
+                ResourcesAction = request.ResourcesAction,
+                ResourceGroupsAction = request.ResourceGroupsAction,
+                ManagementGroupsAction = request.ManagementGroupsAction,
+                BypassOutOfSync = request.BypassOutOfSync,
+                DenyMode = request.DenyMode,
+                DenyApplyToChildScopes = request.DenyApplyToChildScopes,
+            }, context);
+            if (prepared is null)
+            {
+                response.StatusCode = prepareStatus;
+                response.ErrorMessage = prepareError;
                 return response;
             }
+
+            StackWhatIfSummary summary;
+            try
+            {
+                var transport = new ArmTransport(_httpClientFactory.CreateClient("arm"), prepared.Credential, ArmEndpointSet.AzureCloud);
+                summary = await new StackWhatIfClient(transport).RunAsync(prepared.SubscriptionId.ToString(),
+                    request.ResourceGroupName, request.StackName, prepared.Body.Json, prepared.Body.PlanHash, context.CancellationToken);
+            }
+            catch (WhatIfException ex)
+            {
+                _logger.LogWarning(ex, "Stack what-if failed.");
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.ErrorMessage = $"{ex.Code}: {ex.Message}";
+                return response;
+            }
+            catch (ResourceGraphException ex)
+            {
+                _logger.LogWarning(ex, "Stack what-if ARM call failed.");
+                response.StatusCode = ex.StatusCode == 0 ? StatusCodes.Status502BadGateway : ex.StatusCode;
+                response.ErrorMessage = $"{ex.Code}: {ex.Message}";
+                return response;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or AuthenticationFailedException)
+            {
+                _logger.LogWarning(ex, "Stack what-if could not reach Azure.");
+                response.StatusCode = StatusCodes.Status502BadGateway;
+                response.ErrorMessage = "Azure could not be reached for the stack what-if; nothing was deployed.";
+                return response;
+            }
+
+            // Guardrails: the stack what-if rows carry ids and types, never tags. Scope and type rules
+            // judge exactly as for a plain what-if; a tag rule cannot be judged, so any row that touches
+            // an EXISTING resource (modify, detach, delete) is held back while tag rules exist.
+            var targets = StackGuardrailTargets(summary.Changes);
+            var flags = JudgeStackTargets(prepared.Guardrails, targets);
+            var tagRules = prepared.Guardrails.ProtectedTags.Count > 0;
+
+            var reason = summary.IndeterminacyReason;
+            string? token = null;
+            if (flags.Count > 0)
+            {
+                response.GuardrailBlocked = true;
+                foreach (var finding in flags)
+                    response.GuardrailFlags.Add(new GuardrailFlag { ResourceId = finding.ResourceId, Reason = finding.Reason });
+                _logger.LogWarning("Stack plan blocked by guardrails: {Count} protected resource(s), hash={PlanHash}",
+                    flags.Count, prepared.PlanHash);
+            }
+            else if (reason is null)
+            {
+                var plan = prepared.Plan;
+                token = _whatIfGate.IssueForStack(prepared.SubscriptionId.ToString(), request.ResourceGroupName,
+                    prepared.Body.PlanHash, summary.HasDelete, summary.DeleteResourceIds,
+                    plan.PlanHash, plan.CanonicalJson, targets,
+                    requestedByUserId: prepared.Caller.UserIdText, scopeId: prepared.Caller.ScopeId);
+            }
+            else
+                _logger.LogWarning("Stack what-if is indeterminate; no token issued: {Reason}", reason);
+
+            response.StatusCode = StatusCodes.Status200OK;
+            response.Creates = summary.Changes.Count(c => c.Kind == StackChangeKind.Create);
+            response.Modifies = summary.Changes.Count(c => c.Kind == StackChangeKind.Modify);
+            response.Detaches = summary.Changes.Count(c => c.Kind == StackChangeKind.Detach);
+            response.Deletes = summary.Changes.Count(c => c.Kind == StackChangeKind.Delete);
+            response.ChangesJson = JsonSerializer.Serialize(
+                summary.Changes.Where(c => c.Kind != StackChangeKind.NoChange).Select(c => new
+                {
+                    changeType = c.Kind.ToString().ToLowerInvariant(),
+                    resourceId = c.Id,
+                    type = c.Type,
+                    managementBefore = c.ManagementBefore,
+                    managementAfter = c.ManagementAfter,
+                    denyBefore = c.DenyBefore,
+                    denyAfter = c.DenyAfter,
+                    potential = c.Potential,
+                    unsupportedReason = c.UnsupportedReason,
+                }), new JsonSerializerOptions(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
+            if (reason is not null)
+            {
+                response.IndeterminacyReason = reason;
+                response.Caveats.Add($"This stack what-if cannot be trusted ({reason}); no review token was issued, so nothing can be deployed from it.");
+            }
+            if (summary.DenyModeBefore != summary.DenyModeAfter && (summary.DenyModeBefore ?? summary.DenyModeAfter) is not null)
+                response.Caveats.Add($"Deny settings: {summary.DenyModeBefore ?? "(none)"} -> {summary.DenyModeAfter ?? "(none)"}.");
+            foreach (var diagnostic in summary.Diagnostics.Where(d => d.Severity != ArmDiagnosticSeverity.Error))
+                response.Caveats.Add($"{diagnostic.Code}: {diagnostic.Message}");
+            response.Caveats.Add("The stack what-if lists resource-level changes only; property-level changes are not shown.");
+            if (tagRules)
+                response.Caveats.Add("Tag-based guardrails cannot be checked against a stack what-if; changes to existing resources are held back while such rules exist.");
+            if (response.GuardrailBlocked)
+                response.Caveats.Add($"Guardrails: {flags.Count} protected resource(s) - this plan is not deployable until the do-not-touch policy changes.");
+            response.PlanHash = prepared.PlanHash;
+            response.WhatIfToken = token ?? "";
+            return response;
+        }
+
+        /// <summary>
+        /// v2 plan 12.3: deploy the design as a deployment-stack under the same double gate as
+        /// CreateDeployment - a fresh token plus a named principal's approval bound to the
+        /// canonical scope+template+parameters identity. The token must come from <see cref="StackWhatIf"/>
+        /// (the deployment-stacks what-if) and binds the exact stack body; a plain WhatIf token is
+        /// refused. The stack name and unmanage policy ride
+        /// beside the hash (the revert-plan convention), are validated fail-closed by the engine
+        /// before anything is sent, and land in the append-only apply trail keyed by stack name.
+        /// </summary>
+        public override async Task<CreateStackResponse> CreateStack(CreateStackRequest request, ServerCallContext context)
+        {
+            var response = new CreateStackResponse();
+
+            var (prepared, prepareStatus, prepareError) = await PrepareStackAsync(request, context);
+            if (prepared is null)
+            {
+                response.StatusCode = prepareStatus;
+                response.ErrorMessage = prepareError;
+                return response;
+            }
+            var caller = prepared.Caller;
+            var subscriptionId = prepared.SubscriptionId;
+            var credential = prepared.Credential;
+            var planHash = prepared.PlanHash;
+            var body = prepared.Body;
 
             if (!string.Equals(request.PlanHash, planHash, StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogWarning("Stack payload differs from approved plan {PlanHash}", planHash);
                 response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "PLAN_APPROVAL_REQUIRED: the deployed payload differs from the approved plan hash. Run What-If and approve this exact template and parameters.";
+                response.ErrorMessage = "PLAN_APPROVAL_REQUIRED: the deployed payload differs from the approved plan hash. Run the stack What-If and approve this exact template, parameters and stack settings (unmanage actions, deny mode, bypass flag, stack name).";
                 return response;
             }
 
-            var approval = await _designContext.AdsPlanApprovals.FindAsync([planHash], context.CancellationToken);
+            var approval = await _designContext.AdsPlanApprovals.FindAsync([caller.ScopeId, planHash], context.CancellationToken);
             if (approval == null)
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -1136,11 +1503,12 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            if (!string.Equals(approval.ApprovedByUserId, userIdClaim, StringComparison.Ordinal))
+            // Same deployer rule as CreateDeployment: PLAN_REQUESTER_MISMATCH for anyone but the requester.
+            if (DeployerRefusal(approval, caller.UserId) is { } deployerRefusal)
             {
                 _logger.LogWarning("Plan {PlanHash} approved by {Approver} but stacked by a different principal", planHash, approval.ApprovedBy);
                 response.StatusCode = StatusCodes.Status403Forbidden;
-                response.ErrorMessage = "PLAN_APPROVER_MISMATCH: only the principal that approved this plan may deploy it.";
+                response.ErrorMessage = deployerRefusal;
                 return response;
             }
 
@@ -1152,30 +1520,12 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            // Engine validation before the single-use token burns: refuse-with-diagnostics, never warn.
-            var body = DeploymentStack.Build(request.StackName,
-                request.ArmTemplate, new StackPolicy(resourcesAction, resourceGroupsAction, managementGroupsAction, denySettings),
-                parametersJson, bypassOutOfSyncError: request.BypassOutOfSync);
-            if (!body.Success)
-            {
-                var errors = string.Join(" ", body.Diagnostics
-                    .Where(d => d.Severity == ArmDiagnosticSeverity.Error).Select(d => $"{d.Code}: {d.Message}"));
-                _logger.LogWarning("Stack body refused: {Errors}", errors);
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = errors;
-                return response;
-            }
-
-            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(context.CancellationToken);
-            if (guardrailPolicy is null)
-            {
-                response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = policyError;
-                return response;
-            }
-            var whatIfCheck = _whatIfGate.ValidateAndConsume(request.WhatIfToken, subscriptionId.ToString(),
-                request.ResourceGroupName, request.ArmTemplate, parametersJson,
-                targets => GuardrailVeto(guardrailPolicy, targets));
+            // The token must be a stack what-if token bound to this exact stack body (template,
+            // parameters, policy, bypass flag, stack name): a plain What-If token, or a stack one
+            // from before the policy changed, is refused here without being spent.
+            var whatIfCheck = _whatIfGate.ValidateAndConsumeForStack(request.WhatIfToken, subscriptionId.ToString(),
+                request.ResourceGroupName, body.PlanHash,
+                targets => StackGuardrailVeto(prepared.Guardrails, targets), scopeId: prepared.Caller.ScopeId);
             if (!whatIfCheck.IsOk)
             {
                 _logger.LogWarning("Stack deploy blocked by what-if gate: {Code}", whatIfCheck.Code);
@@ -1294,6 +1644,15 @@ namespace AzureDesignStudio.Services
         {
             var response = new GetStackResponse();
 
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
+            {
+                _logger.LogWarning("Access denied. {Failure}", failure);
+                response.StatusCode = StatusCodes.Status401Unauthorized;
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
+                return response;
+            }
+            var userId = caller.UserId;
+
             if (string.IsNullOrWhiteSpace(request.StackName))
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -1307,16 +1666,6 @@ namespace AzureDesignStudio.Services
                 response.ErrorMessage = @"STACK_NAME_INVALID: stack name must match ^[-\w._()]{1,63}$.";
                 return response;
             }
-
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
-            {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
-                response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
-                return response;
-            }
-            var userId = new Guid(userIdClaim);
 
             Guid subscriptionId;
             try
@@ -1384,29 +1733,105 @@ namespace AzureDesignStudio.Services
             return response;
         }
 
+        /// <summary>The operator-seeded row with a NULL tenant: the inherited default. No RPC writes it.</summary>
         private const int GuardrailRowId = 1;
 
         /// <summary>
-        /// Loads the server-side do-not-touch list. A missing row is an empty policy (vacuous
-        /// enforcement); an unreadable one fails closed - deploys refuse rather than guess the list.
+        /// The row that governs <paramref name="scopeId"/>: the scope's own row, else the NULL-tenant
+        /// default, else null. This is the replace semantics (D-05): an own row stands for the whole
+        /// list and is never combined with the default.
         /// </summary>
-        private async Task<(GuardrailPolicy? Policy, string? Error)> LoadGuardrailPolicy(CancellationToken ct)
+        private async Task<GuardrailPolicyModel?> FindEffectiveGuardrailRow(Guid scopeId, CancellationToken ct)
         {
-            var row = await _designContext.AdsGuardrailPolicies.AsNoTracking()
-                .FirstOrDefaultAsync(e => e.Id == GuardrailRowId, ct);
-            if (row is null || string.IsNullOrWhiteSpace(row.Json)) return (GuardrailPolicy.Empty, null);
+            var own = await _designContext.AdsGuardrailPolicies.AsNoTracking()
+                .FirstOrDefaultAsync(e => e.TenantId == scopeId, ct);
+            if (own is not null) return own;
+            return await _designContext.AdsGuardrailPolicies.AsNoTracking()
+                .FirstOrDefaultAsync(e => e.TenantId == null && e.Id == GuardrailRowId, ct);
+        }
+
+        private const string GuardrailPolicyUnreadableMessage =
+            "GUARDRAIL_POLICY_UNREADABLE: the stored do-not-touch policy is not a valid guardrail JSON object - repair it via the guardrails editor before deploying.";
+
+        /// <summary>
+        /// Loads the server-side do-not-touch list of one scope (D-05). In replace mode - the default,
+        /// also when the scope has no settings row - it is the scope's own row, else the inherited
+        /// default row, else the empty policy (vacuous enforcement). In merge mode it is the union of the
+        /// default row and the scope's own row (<see cref="GuardrailPolicy.Merge"/>), a missing side
+        /// counting as empty. A stored mode that is not recognised is judged as merge: the safe failure
+        /// is more protection. A row that cannot be read fails closed - deploys refuse rather than guess
+        /// the list - and an unreadable row affects only the scope that resolves to it.
+        /// </summary>
+        internal async Task<(GuardrailPolicy? Policy, string? Error)> LoadGuardrailPolicy(Guid scopeId, CancellationToken ct)
+        {
+            var settings = await _designContext.AdsTenantSettings.AsNoTracking()
+                .FirstOrDefaultAsync(e => e.TenantId == scopeId, ct);
+            var mode = settings?.GuardrailPolicyMode;
+            var merge = settings is not null
+                && !string.Equals(mode, GuardrailPolicyModes.Replace, StringComparison.OrdinalIgnoreCase);
+
             try
             {
-                return (GuardrailPolicy.FromJson(row.Json), null);
+                if (!merge)
+                {
+                    var row = await FindEffectiveGuardrailRow(scopeId, ct);
+                    return (ParseGuardrailRow(row), null);
+                }
+
+                var own = await _designContext.AdsGuardrailPolicies.AsNoTracking()
+                    .FirstOrDefaultAsync(e => e.TenantId == scopeId, ct);
+                var inherited = await _designContext.AdsGuardrailPolicies.AsNoTracking()
+                    .FirstOrDefaultAsync(e => e.TenantId == null && e.Id == GuardrailRowId, ct);
+                return (GuardrailPolicy.Merge(ParseGuardrailRow(inherited), ParseGuardrailRow(own)), null);
             }
             catch (Exception ex) when (ex is JsonException or InvalidOperationException)
             {
-                return (null, "GUARDRAIL_POLICY_UNREADABLE: the stored do-not-touch policy is not a valid guardrail JSON object - repair it via the guardrails editor before deploying.");
+                return (null, GuardrailPolicyUnreadableMessage);
             }
         }
 
+        private static GuardrailPolicy ParseGuardrailRow(GuardrailPolicyModel? row) =>
+            row is null || string.IsNullOrWhiteSpace(row.Json) ? GuardrailPolicy.Empty : GuardrailPolicy.FromJson(row.Json);
+
         /// <summary>Apply-time veto: the plan's bound targets against the live policy. The message
         /// lists every protected resource so the operator sees exactly what the list shields.</summary>
+        private const string TouchesExistingMarker = "ads:stack-touches-existing";
+        private const string TagRuleHoldBackReason = "tag guardrails cannot be checked against a stack what-if (it carries no tags)";
+
+        /// <summary>Guardrail targets for stack what-if rows. Rows carry ids and types, never tags; a row
+        /// that touches an EXISTING resource (modify, detach, delete) is marked, so the tag-rule hold-back
+        /// can be re-judged at apply time from the bound targets alone.</summary>
+        private static IReadOnlyList<GuardrailTarget> StackGuardrailTargets(IEnumerable<StackResourceChange> changes) =>
+            changes.Where(c => c.Id.Length > 0).Select(c =>
+            {
+                var tags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (c.Kind is StackChangeKind.Modify or StackChangeKind.Detach or StackChangeKind.Delete)
+                    tags[TouchesExistingMarker] = "true";
+                return new GuardrailTarget(c.Id, GuardrailEnforcement.TypeFromArmId(c.Id), tags);
+            }).ToList();
+
+        /// <summary>The one stack guardrail judgement, used by the preview and the apply so they cannot
+        /// drift: scope and type rules as for a plain what-if, and while the policy has tag rules every
+        /// marked (existing-resource) target is held back.</summary>
+        private static List<GuardrailFinding> JudgeStackTargets(GuardrailPolicy policy, IReadOnlyList<GuardrailTarget> targets)
+        {
+            var flags = GuardrailEnforcement.EvaluateTargets(policy, targets).ToList();
+            if (policy.ProtectedTags.Count > 0)
+                foreach (var touched in targets.Where(t => t.Tags.ContainsKey(TouchesExistingMarker))
+                             .Select(t => t.ResourceId).Distinct(StringComparer.OrdinalIgnoreCase))
+                    if (!flags.Any(f => string.Equals(f.ResourceId, touched, StringComparison.OrdinalIgnoreCase)))
+                        flags.Add(new GuardrailFinding(touched, TagRuleHoldBackReason));
+            return flags;
+        }
+
+        private static string? StackGuardrailVeto(GuardrailPolicy policy, IReadOnlyList<GuardrailTarget> targets)
+        {
+            var findings = JudgeStackTargets(policy, targets);
+            return findings.Count == 0
+                ? null
+                : "the plan touches do-not-touch resources: " + string.Join("; ", findings.Select(f => $"{f.ResourceId} ({f.Reason})"));
+        }
+
         private static string? GuardrailVeto(GuardrailPolicy policy, IReadOnlyList<GuardrailTarget> targets)
         {
             var findings = GuardrailEnforcement.EvaluateTargets(policy, targets);
@@ -1415,26 +1840,43 @@ namespace AzureDesignStudio.Services
                 : "the plan touches do-not-touch resources: " + string.Join("; ", findings.Select(f => $"{f.ResourceId} ({f.Reason})"));
         }
 
+        /// <summary>Answer to a caller who may not read or change the guardrail policy (D-01, D-04).
+        /// App roles are not retroactive, hence the re-sign-in hint.</summary>
+        private const string GuardrailAdminRequiredMessage =
+            "GUARDRAIL_ADMIN_REQUIRED: the Guardrail.Admin app role is required to read or change the guardrail policy. If the role was just assigned, sign out and back in to get a new token.";
+
         /// <summary>
         /// Reads the server-side do-not-touch list (v2 13.1). 200 with empty json = no policy stored.
         /// </summary>
         public override async Task<GuardrailPolicyResponse> GetGuardrailPolicy(Empty request, ServerCallContext context)
         {
             var response = new GuardrailPolicyResponse();
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
                 return response;
             }
 
-            var row = await _designContext.AdsGuardrailPolicies.AsNoTracking()
-                .FirstOrDefaultAsync(e => e.Id == GuardrailRowId, context.CancellationToken);
+            if (!caller.CanAdministerGuardrails)
+            {
+                response.StatusCode = StatusCodes.Status403Forbidden;
+                response.ErrorMessage = GuardrailAdminRequiredMessage;
+                return response;
+            }
+
+            // A scope without a row of its own is judged by the inherited default, so it may read that
+            // body (the editor and the scan drawer need the effective list). The default's author and
+            // time are never returned: the row may predate tenancy and was written by anyone then, so
+            // its UpdatedBy can name another tenant's user (CR-01). The response says it is inherited.
+            var row = await FindEffectiveGuardrailRow(caller.ScopeId, context.CancellationToken);
+            var inherited = row is not null && row.TenantId is null;
             response.StatusCode = StatusCodes.Status200OK;
             response.Json = row?.Json ?? "";
-            response.UpdatedBy = row?.UpdatedBy ?? "";
-            response.UpdatedAt = row?.UpdatedAtUtc.ToString("O") ?? "";
+            response.Inherited = inherited;
+            response.UpdatedBy = inherited ? "" : row?.UpdatedBy ?? "";
+            response.UpdatedAt = inherited ? "" : row?.UpdatedAtUtc.ToString("O") ?? "";
             return response;
         }
 
@@ -1448,11 +1890,18 @@ namespace AzureDesignStudio.Services
         public override async Task<GuardrailPolicyResponse> SetGuardrailPolicy(GuardrailPolicyRequest request, ServerCallContext context)
         {
             var response = new GuardrailPolicyResponse();
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
+                return response;
+            }
+
+            if (!caller.CanAdministerGuardrails)
+            {
+                response.StatusCode = StatusCodes.Status403Forbidden;
+                response.ErrorMessage = GuardrailAdminRequiredMessage;
                 return response;
             }
 
@@ -1475,29 +1924,251 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var displayName = ServiceTools.GetUser(context).FindFirst("name")?.Value;
-            var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
+            var principal = caller.Principal;
 
-            var row = await _designContext.AdsGuardrailPolicies.FindAsync([GuardrailRowId], context.CancellationToken);
-            if (row is null)
+            // The caller's own row, found by scope - never the NULL-tenant default, which is
+            // operator-seeded data. A first write by a scope creates its row; if a concurrent first
+            // write by the same scope wins the unique index, re-read and update that row once.
+            var (written, failed) = await WriteWithRaceRetryAsync("Guardrail policy",
+                (attempt, ct) => UpsertGuardrailRowAsync(caller, json, attempt, ct), context.CancellationToken);
+            if (failed)
             {
-                row = new GuardrailPolicyModel { Id = GuardrailRowId };
-                _designContext.AdsGuardrailPolicies.Add(row);
+                response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                response.ErrorMessage = "GUARDRAIL_POLICY_NOT_SAVED: the policy could not be stored and nothing was changed. Try again; if it keeps failing, ask the operator to check the server log.";
+                return response;
             }
-
-            row.Json = json;
-            row.UpdatedBy = principal;
-            row.UpdatedByUserId = userIdClaim;
-            row.UpdatedAtUtc = DateTime.UtcNow;
-            await _designContext.SaveChangesAsync(context.CancellationToken);
+            var updatedAtUtc = written;
 
             _logger.LogInformation("Guardrail policy updated by {Principal} ({Length} bytes).", principal, json.Length);
             response.StatusCode = StatusCodes.Status200OK;
             response.Json = json;
             response.UpdatedBy = principal;
-            response.UpdatedAt = row.UpdatedAtUtc.ToString("O");
+            response.UpdatedAt = updatedAtUtc.ToString("O");
             return response;
         }
+
+        /// <summary>Marks whether one write attempt was an insert of a scope's first row.</summary>
+        private sealed class WriteAttempt
+        {
+            public bool Inserting { get; set; }
+        }
+
+        /// <summary>
+        /// Runs a per-scope upsert (WR-08). Only a failed INSERT is retried, once, after clearing the
+        /// tracker: that is a concurrent first write by the same scope winning the unique key, and the
+        /// second pass finds that row and updates it. Any other save failure - a failed update, a second
+        /// failed insert, a lost connection, a failed audit insert in the same commit - is logged
+        /// (critical when the commit carried a security event) and returned as <c>Failed</c> for an in-band
+        /// answer, never rethrown as an unhandled RPC fault.
+        /// </summary>
+        private async Task<(T Result, bool Failed)> WriteWithRaceRetryAsync<T>(
+            string what, Func<WriteAttempt, CancellationToken, Task<T>> write, CancellationToken ct)
+        {
+            var attempt = new WriteAttempt();
+            try
+            {
+                return (await write(attempt, ct), false);
+            }
+            catch (DbUpdateException ex) when (attempt.Inserting)
+            {
+                _logger.LogWarning(ex, "{What}: the first insert failed; re-reading once in case a concurrent first write by the same scope won the key.", what);
+                _designContext.ChangeTracker.Clear();
+            }
+            catch (DbUpdateException ex)
+            {
+                return (default!, FailedWrite(ex, what));
+            }
+
+            try
+            {
+                return (await write(new WriteAttempt(), ct), false);
+            }
+            catch (DbUpdateException ex)
+            {
+                return (default!, FailedWrite(ex, what));
+            }
+        }
+
+        private bool FailedWrite(DbUpdateException ex, string what)
+        {
+            var withAudit = _designContext.ChangeTracker.Entries<SecurityEventModel>().Any(e => e.State == EntityState.Added);
+            if (withAudit)
+                _logger.LogCritical(ex, "{What}: the commit that carried its security event failed; the change was not stored.", what);
+            else
+                _logger.LogError(ex, "{What}: the change could not be stored.", what);
+            _designContext.ChangeTracker.Clear();
+            return true;
+        }
+
+        private async Task<DateTime> UpsertGuardrailRowAsync(AdsCaller caller, string json, WriteAttempt attempt, CancellationToken ct)
+        {
+            var row = await _designContext.AdsGuardrailPolicies.FirstOrDefaultAsync(e => e.TenantId == caller.ScopeId, ct);
+            if (row is null)
+            {
+                attempt.Inserting = true;
+                // The key is explicit on this table (see GuardrailPolicyModel); the default row is Id 1.
+                var maxId = await _designContext.AdsGuardrailPolicies.Select(e => (int?)e.Id).MaxAsync(ct) ?? GuardrailRowId;
+                row = new GuardrailPolicyModel { Id = Math.Max(maxId, GuardrailRowId) + 1, TenantId = caller.ScopeId };
+                _designContext.AdsGuardrailPolicies.Add(row);
+            }
+
+            row.Json = json;
+            row.UpdatedBy = caller.Principal;
+            row.UpdatedByUserId = caller.UserIdText;
+            row.UpdatedAtUtc = DateTime.UtcNow;
+
+            // The audit event rides in the same SaveChanges as the row (D-15): one commit, so a
+            // change never exists without its record. The detail is a size and a hash prefix of
+            // the body - never the body, which is the tenant's own do-not-touch list.
+            var bytes = Encoding.UTF8.GetBytes(json);
+            var hashPrefix = Convert.ToHexString(SHA256.HashData(bytes))[..16].ToLowerInvariant();
+            _designContext.AdsSecurityEvents.Add(new SecurityEventModel
+            {
+                Id = Guid.NewGuid(),
+                TenantId = caller.ScopeId,
+                EventType = SecurityEventTypes.GuardrailPolicyChanged,
+                Principal = caller.Principal,
+                PrincipalUserId = caller.UserIdText,
+                Detail = $"bytes={bytes.Length}; sha256={hashPrefix}",
+                AtUtc = row.UpdatedAtUtc,
+            });
+            await _designContext.SaveChangesAsync(ct);
+            return row.UpdatedAtUtc;
+        }
+
+        /// <summary>Answer to a caller who may not read or change the tenant settings (D-01, D-04).
+        /// The same administrators as the guardrail policy; app roles are not retroactive.</summary>
+        private const string TenantSettingsAdminRequiredMessage =
+            "TENANT_SETTINGS_ADMIN_REQUIRED: the Guardrail.Admin app role is required to read or change tenant settings. If the role was just assigned, sign out and back in to get a new token.";
+
+        private static TenantSettingsResponse SettingsResponse(TenantSettingsModel? row) => new()
+        {
+            StatusCode = StatusCodes.Status200OK,
+            AllowSelfApproval = row?.AllowSelfApproval ?? false,
+            GuardrailPolicyMode = string.IsNullOrWhiteSpace(row?.GuardrailPolicyMode) ? GuardrailPolicyModes.Replace : row!.GuardrailPolicyMode,
+            UpdatedBy = row?.UpdatedBy ?? "",
+            UpdatedAt = row is null ? "" : row.UpdatedAtUtc.ToString("O"),
+        };
+
+        /// <summary>
+        /// Reads the caller's tenant settings (D-02, D-05). 200 with the defaults (self-approval off,
+        /// mode replace, empty author) when the scope has no row. The tenant is the caller's scope -
+        /// the request names none.
+        /// </summary>
+        public override async Task<TenantSettingsResponse> GetTenantSettings(Empty request, ServerCallContext context)
+        {
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
+            {
+                _logger.LogWarning("Access denied. {Failure}", failure);
+                return new TenantSettingsResponse
+                {
+                    StatusCode = StatusCodes.Status401Unauthorized,
+                    ErrorMessage = ServiceTools.IdentityInvalidMessage,
+                };
+            }
+
+            if (!caller.CanAdministerGuardrails)
+                return new TenantSettingsResponse
+                {
+                    StatusCode = StatusCodes.Status403Forbidden,
+                    ErrorMessage = TenantSettingsAdminRequiredMessage,
+                };
+
+            var row = await _designContext.AdsTenantSettings.AsNoTracking()
+                .FirstOrDefaultAsync(e => e.TenantId == caller.ScopeId, context.CancellationToken);
+            return SettingsResponse(row);
+        }
+
+        /// <summary>
+        /// Replaces both tenant settings (a client reads, edits and writes back). Every changed
+        /// setting appends one audit event in the same SaveChanges as the row (D-15), so a change never
+        /// exists without its record and a failed audit insert stores nothing. Nothing changed = no
+        /// write. The mode is validated: an unknown mode is rejected, never guessed.
+        /// </summary>
+        public override async Task<TenantSettingsResponse> SetTenantSettings(TenantSettingsRequest request, ServerCallContext context)
+        {
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
+            {
+                _logger.LogWarning("Access denied. {Failure}", failure);
+                return new TenantSettingsResponse
+                {
+                    StatusCode = StatusCodes.Status401Unauthorized,
+                    ErrorMessage = ServiceTools.IdentityInvalidMessage,
+                };
+            }
+
+            if (!caller.CanAdministerGuardrails)
+                return new TenantSettingsResponse
+                {
+                    StatusCode = StatusCodes.Status403Forbidden,
+                    ErrorMessage = TenantSettingsAdminRequiredMessage,
+                };
+
+            if (!GuardrailPolicyModes.TryNormalize(request.GuardrailPolicyMode, out var mode))
+                return new TenantSettingsResponse
+                {
+                    StatusCode = StatusCodes.Status400BadRequest,
+                    ErrorMessage = $"TENANT_SETTINGS_INVALID: guardrail_policy_mode must be '{GuardrailPolicyModes.Replace}' or '{GuardrailPolicyModes.Merge}'.",
+                };
+
+            var (row, failed) = await WriteWithRaceRetryAsync("Tenant settings",
+                (attempt, ct) => UpsertTenantSettingsAsync(caller, request.AllowSelfApproval, mode, attempt, ct), context.CancellationToken);
+            if (failed)
+                return new TenantSettingsResponse
+                {
+                    StatusCode = StatusCodes.Status503ServiceUnavailable,
+                    ErrorMessage = "TENANT_SETTINGS_NOT_SAVED: the settings could not be stored and nothing was changed. Try again; if it keeps failing, ask the operator to check the server log.",
+                };
+
+            return SettingsResponse(row);
+        }
+
+        private async Task<TenantSettingsModel?> UpsertTenantSettingsAsync(
+            AdsCaller caller, bool allowSelfApproval, string mode, WriteAttempt attempt, CancellationToken ct)
+        {
+            var row = await _designContext.AdsTenantSettings.FirstOrDefaultAsync(e => e.TenantId == caller.ScopeId, ct);
+            var oldSelfApproval = row?.AllowSelfApproval ?? false;
+            var oldMode = string.IsNullOrWhiteSpace(row?.GuardrailPolicyMode) ? GuardrailPolicyModes.Replace : row!.GuardrailPolicyMode;
+            var selfApprovalChanged = oldSelfApproval != allowSelfApproval;
+            var modeChanged = !string.Equals(oldMode, mode, StringComparison.Ordinal);
+            if (!selfApprovalChanged && !modeChanged) return row;
+
+            var now = DateTime.UtcNow;
+            if (row is null)
+            {
+                attempt.Inserting = true;
+                row = new TenantSettingsModel { TenantId = caller.ScopeId };
+                _designContext.AdsTenantSettings.Add(row);
+            }
+
+            row.AllowSelfApproval = allowSelfApproval;
+            row.GuardrailPolicyMode = mode;
+            row.UpdatedBy = caller.Principal;
+            row.UpdatedByUserId = caller.UserIdText;
+            row.UpdatedAtUtc = now;
+
+            if (selfApprovalChanged)
+                AddSecurityEvent(caller, SecurityEventTypes.SelfApprovalChanged, $"{oldSelfApproval} -> {allowSelfApproval}", now);
+            if (modeChanged)
+                AddSecurityEvent(caller, SecurityEventTypes.PolicyModeChanged, $"{oldMode} -> {mode}", now);
+
+            await _designContext.SaveChangesAsync(ct);
+            _logger.LogInformation("Tenant settings changed by {Principal}: self-approval {SelfApproval}, mode {Mode}.",
+                caller.Principal, allowSelfApproval, mode);
+            return row;
+        }
+
+        private void AddSecurityEvent(AdsCaller caller, string eventType, string detail, DateTime atUtc) =>
+            _designContext.AdsSecurityEvents.Add(new SecurityEventModel
+            {
+                Id = Guid.NewGuid(),
+                TenantId = caller.ScopeId,
+                EventType = eventType,
+                Principal = caller.Principal,
+                PrincipalUserId = caller.UserIdText,
+                Detail = detail,
+                AtUtc = atUtc,
+            });
 
 
         private static string? TryGetProvisioningState(string json)
@@ -1844,14 +2515,13 @@ namespace AzureDesignStudio.Services
         {
             var response = new GetRgsResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
                 return response;
             }
-            var userId = new Guid(userIdClaim);
+            var userId = caller.UserId;
 
             Guid subscriptionId;
             try
@@ -1909,12 +2579,21 @@ namespace AzureDesignStudio.Services
         {
             var response = new ApproveDecomWindowResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
+                return response;
+            }
+
+            // Tenant scope and Deploy.Approver only (D-06): the decommission window has no requester, so
+            // there is no separate self-approval rule here. The role comes before anything is read.
+            if (!caller.CanApprove)
+            {
+                _logger.LogWarning("Decom window approval refused: the caller lacks {Role}.", AdsIdentity.DeployApproverRole);
+                response.StatusCode = StatusCodes.Status403Forbidden;
+                response.ErrorMessage = "DECOM_APPROVER_ROLE_REQUIRED: the Deploy.Approver app role is required to approve a decommission window.";
                 return response;
             }
 
@@ -1947,7 +2626,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var credential = await GetCredentialAsync(new Guid(userIdClaim), subscriptionId);
+            var credential = await GetCredentialAsync(caller.UserId, subscriptionId);
             if (credential == null)
             {
                 _logger.LogWarning("No subscription is found.");
@@ -1956,21 +2635,21 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var displayName = ServiceTools.GetUser(context).FindFirst("name")?.Value;
-            var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
+            var principal = caller.Principal;
 
-            var existing = await _designContext.AdsDecomApprovals.FindAsync([executionHash], context.CancellationToken);
+            var existing = await _designContext.AdsDecomApprovals.FindAsync([caller.ScopeId, executionHash], context.CancellationToken);
             if (existing != null)
                 _designContext.AdsDecomApprovals.Remove(existing);
 
             var approval = new DecomApprovalModel
             {
+                TenantId = caller.ScopeId,
                 ExecutionHash = executionHash,
                 WindowId = request.WindowId,
                 PlanHash = planHash,
                 SubscriptionId = subscriptionId.ToString(),
                 ApprovedBy = principal,
-                ApprovedByUserId = userIdClaim,
+                ApprovedByUserId = caller.UserIdText,
                 ApprovedAtUtc = DateTime.UtcNow,
             };
             _designContext.AdsDecomApprovals.Add(approval);
@@ -1998,12 +2677,11 @@ namespace AzureDesignStudio.Services
         {
             var response = new ExecuteDecomWindowResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
                 return response;
             }
 
@@ -2029,7 +2707,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var credential = await GetCredentialAsync(new Guid(userIdClaim), subscriptionId);
+            var credential = await GetCredentialAsync(caller.UserId, subscriptionId);
             if (credential == null)
             {
                 _logger.LogWarning("No subscription is found.");
@@ -2056,7 +2734,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var approval = await _designContext.AdsDecomApprovals.FindAsync([executionHash], context.CancellationToken);
+            var approval = await _designContext.AdsDecomApprovals.FindAsync([caller.ScopeId, executionHash], context.CancellationToken);
             if (approval == null)
             {
                 response.StatusCode = StatusCodes.Status412PreconditionFailed;
@@ -2065,7 +2743,7 @@ namespace AzureDesignStudio.Services
             }
 
             // Same rule as CreateDeployment: the approval belongs to the principal who gave it.
-            if (!string.Equals(approval.ApprovedByUserId, userIdClaim, StringComparison.Ordinal))
+            if (!AdsIdentity.SameUser(approval.ApprovedByUserId, caller.UserId))
             {
                 _logger.LogWarning("Decom execution {ExecutionHash} approved by {Approver} but executed by a different principal", executionHash, approval.ApprovedBy);
                 response.StatusCode = StatusCodes.Status403Forbidden;
@@ -2099,14 +2777,13 @@ namespace AzureDesignStudio.Services
             // Guardrail re-judgement BEFORE any ARM mutation: the scope ids and the resources under
             // them against the live policy. A match refuses with the offending ids; the approval is
             // never consumed and no lock is touched.
-            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(context.CancellationToken);
+            var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(caller.ScopeId, context.CancellationToken);
             if (guardrailPolicy is null)
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
                 response.ErrorMessage = policyError;
                 return response;
             }
-
 
             var findings = new List<string>();
             var emptyTags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -2152,8 +2829,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var displayName = ServiceTools.GetUser(context).FindFirst("name")?.Value;
-            var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
+            var principal = caller.Principal;
 
             // Consume the approval and land the Started row before any ARM mutation; a failed audit
             // write aborts the run - fail closed, the run has no durable trail without it.
@@ -2256,12 +2932,11 @@ namespace AzureDesignStudio.Services
         {
             var response = new ReleaseDecomWindowResponse();
 
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrWhiteSpace(userIdClaim))
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                _logger.LogWarning("Access denied. userIdClaim is empty.");
+                _logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
-                response.ErrorMessage = "Access denied.";
+                response.ErrorMessage = ServiceTools.IdentityInvalidMessage;
                 return response;
             }
 
@@ -2285,7 +2960,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var credential = await GetCredentialAsync(new Guid(userIdClaim), subscriptionId);
+            var credential = await GetCredentialAsync(caller.UserId, subscriptionId);
             if (credential == null)
             {
                 _logger.LogWarning("No subscription is found.");
@@ -2301,8 +2976,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var displayName = ServiceTools.GetUser(context).FindFirst("name")?.Value;
-            var principal = string.IsNullOrWhiteSpace(displayName) ? userIdClaim : $"{displayName} <{userIdClaim}>";
+            var principal = caller.Principal;
             var applyId = Guid.NewGuid();
 
             // The Aborted event lands before the first delete; a failed write is logged critical

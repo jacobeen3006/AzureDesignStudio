@@ -46,12 +46,25 @@ public class DesignServiceTests
     public async Task ShortOidClaimIdentifiesTheCaller()
     {
         // What arrives when inbound claim mapping is switched off.
-        var context = TestServerCallContext.WithClaims(new Claim("oid", _user.ToString()));
+        var context = TestServerCallContext.WithClaims(
+            new Claim("oid", _user.ToString()), new Claim("tid", TestTenants.Contoso.ToString()));
 
         var response = await Service.Save(new SaveDesignRequest { Name = "a", Data = "{}" }, context);
 
         Assert.Equal(200, response.StatusCode);
         Assert.Equal(_user, Assert.Single(_db.AdsDesigns).UserId);
+    }
+
+    [Fact]
+    public async Task CallerWithoutATenantIsRefusedByEveryDesignRpc()
+    {
+        var context = TestServerCallContext.WithoutTenant(_user);
+
+        Assert.Equal(401, (await Service.Save(new SaveDesignRequest { Name = "a", Data = "{}" }, context)).StatusCode);
+        Assert.Equal(401, (await Service.GetSaved(new Empty(), context)).StatusCode);
+        Assert.Equal(401, (await Service.Load(new LoadDesignRequest { Name = "a" }, context)).StatusCode);
+        Assert.Equal(401, (await Service.Delete(new DeleteDesignRequest { Name = "a" }, context)).StatusCode);
+        Assert.Empty(_db.AdsDesigns);
     }
 
     // --- save ---

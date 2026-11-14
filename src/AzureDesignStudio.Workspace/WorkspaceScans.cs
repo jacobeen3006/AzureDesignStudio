@@ -7,6 +7,12 @@ public sealed record InventorySnapshotRow(
     string Id, string Name, string ResourceType, string? Location,
     string? ResourceGroup, string? SubscriptionId, string? TagsJson, string? PropertiesJson);
 
+/// <summary>Storage-neutral governance finding row (Wave B3); the host maps Discovery's
+/// findings onto it, enum values by name.</summary>
+public sealed record GovernanceFindingRow(
+    string Source, string RecordId, string ResourceId, string SubscriptionId, string Severity,
+    string Category, string Title, string? Detail, string? PolicyAssignmentId, string? PolicyDefinitionId);
+
 /// <summary>
 /// Scan persistence (plan 7.5): one ScanRecord per run with manifest + durable checkpoint;
 /// snapshots per page so a killed scan keeps its partial inventory and a resumed scan skips
@@ -90,6 +96,67 @@ public sealed class WorkspaceScans(WorkspaceDb db)
         scan.ResourceCount += rows.Count - replaced;
         await ctx.SaveChangesAsync();
         await transaction.CommitAsync();
+    }
+
+    /// <summary>
+    /// One governance source group (Wave B3): its findings and the checkpoint that names the
+    /// group complete, in a single transaction - a page that cannot be stored leaves both as
+    /// they were. Findings are upserted on (scan, source, record id), so a group stored a second
+    /// time replaces its rows instead of doubling them; a record listed twice in one page is
+    /// stored once, the later one winning. <see cref="ScanRecord.ResourceCount"/> counts the
+    /// inventory and is not touched.
+    /// </summary>
+    public async Task PersistSourcePageAsync(string scanId, IReadOnlyList<GovernanceFindingRow> rows, string checkpointJson, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        await using var ctx = db.CreateContext();
+        await using var transaction = await ctx.Database.BeginTransactionAsync(ct);
+        var scan = await ctx.Scans.SingleAsync(s => s.Id == scanId, ct);
+
+        // Keys compare ordinally, as SQLite compares the TEXT primary key.
+        rows = rows.GroupBy(r => (r.Source, r.RecordId)).Select(g => g.Last()).ToList();
+        foreach (var bySource in rows.GroupBy(r => r.Source, StringComparer.Ordinal))
+        {
+            var source = bySource.Key;
+            foreach (var ids in bySource.Select(r => r.RecordId).Chunk(500))
+                await ctx.GovernanceFindings
+                    .Where(f => f.ScanId == scanId && f.Source == source && ids.Contains(f.RecordId))
+                    .ExecuteDeleteAsync(ct);
+        }
+
+        ctx.GovernanceFindings.AddRange(rows.Select(r => new GovernanceFindingRecord
+        {
+            ScanId = scanId,
+            Source = r.Source,
+            RecordId = r.RecordId,
+            ResourceId = r.ResourceId,
+            SubscriptionId = r.SubscriptionId,
+            Severity = r.Severity,
+            Category = r.Category,
+            Title = r.Title,
+            Detail = r.Detail,
+            PolicyAssignmentId = r.PolicyAssignmentId,
+            PolicyDefinitionId = r.PolicyDefinitionId,
+        }));
+        scan.CheckpointJson = checkpointJson;
+        await ctx.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    /// <summary>The governance findings stored with one scan (none for a scan that collected
+    /// none, or that predates them - its manifest tells the two apart), ordered by resource id
+    /// (case-insensitive), then source and record id.</summary>
+    public async Task<IReadOnlyList<GovernanceFindingRow>> GetGovernanceAsync(string scanId, CancellationToken ct = default)
+    {
+        await using var ctx = db.CreateContext();
+        var records = await ctx.GovernanceFindings.AsNoTracking().Where(f => f.ScanId == scanId).ToListAsync(ct);
+        return records
+            .OrderBy(f => f.ResourceId, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(f => f.Source, StringComparer.Ordinal)
+            .ThenBy(f => f.RecordId, StringComparer.Ordinal)
+            .Select(f => new GovernanceFindingRow(f.Source, f.RecordId, f.ResourceId, f.SubscriptionId, f.Severity,
+                f.Category, f.Title, f.Detail, f.PolicyAssignmentId, f.PolicyDefinitionId))
+            .ToList();
     }
 
     public async Task FinishAsync(string scanId, string status, string checkpointJson, string manifestJson, string? error)

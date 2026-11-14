@@ -18,6 +18,11 @@ namespace AzureDesignStudio.Components.MenuDrawer
     internal sealed record WhatIfChangeRow(string ChangeType, string? ResourceId, int Delta,
         string? Before = null, string? After = null, bool BeforeTruncated = false, bool AfterTruncated = false);
 
+    /// <summary>One row of the deployment-stacks what-if (<c>StackWhatIfResponse.ChangesJson</c>).</summary>
+    internal sealed record StackChangeRow(string ChangeType, string? ResourceId, string? Type,
+        string? ManagementBefore = null, string? ManagementAfter = null, string? DenyBefore = null, string? DenyAfter = null,
+        bool Potential = false, string? UnsupportedReason = null);
+
     public partial class CodeDrawerTemplate
     {
         private static AntDesign.StepsStatus GetStepsStatus(string status) => status switch
@@ -79,6 +84,15 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private string? _whatIfError = null;
         private IReadOnlyList<WhatIfChangeRow> _whatIfChanges = [];
         private Dictionary<string, string> _guardrailFlags = new(StringComparer.OrdinalIgnoreCase);
+        // Azure Policy preflight (advisory): the review's findings, Deny first, then Audit, then
+        // the rest; and the ids that would be denied, for the per-row tag (ids case-insensitive).
+        private IReadOnlyList<PolicyFlag> _policyFlags = [];
+        private HashSet<string> _policyDenied = new(StringComparer.OrdinalIgnoreCase);
+        // Quota preflight (advisory): the findings that need a look - Exceeds and SkuUnavailable,
+        // then NearLimit, then Unknown (and any status this client does not know) - and the Ok
+        // ones, which the review shows collapsed.
+        private IReadOnlyList<QuotaFlag> _quotaAttention = [];
+        private IReadOnlyList<QuotaFlag> _quotaOk = [];
         private bool _deployAsStack = false;
         private string _stackName = "ads-stack";
         // v2 12.3 closer: the review-screen stack probe (null = availability unknown), whether a
@@ -87,6 +101,12 @@ namespace AzureDesignStudio.Components.MenuDrawer
         private bool _stackProbed;
         private bool _stackChecking;
         private bool _bypassOutOfSync;
+        // The stack path is gated on the deployment-stacks what-if, not the plain one: its own token,
+        // bound to the exact stack body (template, parameters, policy, bypass flag, stack name).
+        private SharedModels.Protos.StackWhatIfResponse? _stackWhatIf;
+        private IReadOnlyList<StackChangeRow> _stackChanges = [];
+        private bool _stackWhatIfLoading;
+        private string? _stackWhatIfError;
         private string? _approverName = null;
         private IReadOnlyList<ResourceOperationRow> _monitorRows = [];
         private string _monitorStatus = "";
@@ -228,10 +248,15 @@ namespace AzureDesignStudio.Components.MenuDrawer
             _whatIfError = null;
             _whatIfChanges = [];
             _guardrailFlags = new(StringComparer.OrdinalIgnoreCase);
+            _policyFlags = [];
+            _policyDenied = new(StringComparer.OrdinalIgnoreCase);
+            _quotaAttention = [];
+            _quotaOk = [];
             // A new preview means new bytes and maybe a new scope: the old probe proves nothing.
             _stackProbe = null;
             _stackProbed = false;
             _bypassOutOfSync = false;
+            ClearStackWhatIf();
             _whatIfLoading = true;
             _showWhatIfReview = true;
 
@@ -249,6 +274,11 @@ namespace AzureDesignStudio.Components.MenuDrawer
                     _guardrailFlags = new(StringComparer.OrdinalIgnoreCase);
                     foreach (var flag in response.GuardrailFlags)
                         _guardrailFlags[flag.ResourceId] = flag.Reason;
+                    _policyFlags = [.. response.PolicyFlags.OrderBy(f => PolicyRank(f.Verdict))];
+                    _policyDenied = new(response.PolicyFlags.Where(f => PolicyRank(f.Verdict) == 0).Select(f => f.ResourceId),
+                        StringComparer.OrdinalIgnoreCase);
+                    _quotaAttention = [.. response.QuotaFlags.Where(f => QuotaRank(f.Status) < QuotaOkRank).OrderBy(f => QuotaRank(f.Status))];
+                    _quotaOk = [.. response.QuotaFlags.Where(f => QuotaRank(f.Status) == QuotaOkRank)];
                 }
             }
             catch (Exception ex) when (ex is Grpc.Core.RpcException or InvalidOperationException or HttpRequestException)
@@ -281,10 +311,91 @@ namespace AzureDesignStudio.Components.MenuDrawer
             }
         }
 
+        /// <summary>Deny 0, Audit 1, anything else 2 - the order and the tag of a policy finding.</summary>
+        private static int PolicyRank(string verdict) =>
+            string.Equals(verdict, "Deny", StringComparison.OrdinalIgnoreCase) ? 0
+            : string.Equals(verdict, "Audit", StringComparison.OrdinalIgnoreCase) ? 1
+            : 2;
+
+        private static string PolicyTagColor(string verdict) => PolicyRank(verdict) switch
+        {
+            0 => "red",
+            1 => "orange",
+            _ => "default",
+        };
+
+        private static string PolicyTagText(string verdict) => PolicyRank(verdict) switch
+        {
+            0 => "Would be denied",
+            1 => "Audit",
+            _ => "Check",
+        };
+
+        private const int QuotaOkRank = 3;
+
+        /// <summary>Exceeds and SkuUnavailable 0, NearLimit 1, Ok 3, anything else (Unknown, or a
+        /// status this client does not know) 2 - never Ok by default.</summary>
+        private static int QuotaRank(string status) =>
+            string.Equals(status, "Exceeds", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "SkuUnavailable", StringComparison.OrdinalIgnoreCase) ? 0
+            : string.Equals(status, "NearLimit", StringComparison.OrdinalIgnoreCase) ? 1
+            : string.Equals(status, "Ok", StringComparison.OrdinalIgnoreCase) ? QuotaOkRank
+            : 2;
+
+        private static string QuotaTagColor(string status) => QuotaRank(status) switch
+        {
+            0 => "red",
+            1 => "orange",
+            _ => "default",
+        };
+
+        private static string QuotaTagText(string status) =>
+            string.Equals(status, "SkuUnavailable", StringComparison.OrdinalIgnoreCase) ? "Size unavailable"
+            : QuotaRank(status) switch
+            {
+                0 => "Exceeds",
+                1 => "Near limit",
+                _ => "Unknown",
+            };
+
+        /// <summary>"{DisplayName} in {location}: {current} used + {requested} requested of {limit}";
+        /// a size that cannot be deployed shows its detail instead (it names the location), and so
+        /// does an Unknown check, whose numbers were not (all) read.</summary>
+        private static string QuotaLine(QuotaFlag flag)
+        {
+            if (flag.Detail.Length > 0 && string.Equals(flag.Status, "SkuUnavailable", StringComparison.OrdinalIgnoreCase))
+                return $"{flag.DisplayName}: {flag.Detail}";
+            if (flag.Detail.Length > 0 && QuotaRank(flag.Status) == 2)
+                return $"{flag.DisplayName} in {flag.Location}: {flag.Detail}";
+            return $"{flag.DisplayName} in {flag.Location}: {flag.Current} used + {flag.Requested} requested of {flag.Limit}";
+        }
+
+        private string QuotaRoomSummary => _quotaOk.Count == 1 ? "1 quota has room" : $"{_quotaOk.Count} quotas have room";
+
+        /// <summary>The name an ARM id ends with: a resource's name, a policy assignment's name.</summary>
+        private static string LastSegment(string id)
+        {
+            var trimmed = id.TrimEnd('/');
+            return trimmed[(trimmed.LastIndexOf('/') + 1)..];
+        }
+
         private bool WhatIfDeployAllowed => _whatIfResult is not null && _whatIfResult.Deletes == 0 && !_whatIfResult.GuardrailBlocked;
 
+        /// <summary>A stack deploys only from a stack what-if that earned a token: no deletes, no guardrail
+        /// block and no indeterminacy (the server issues no token for those).</summary>
+        private bool StackDeployAllowed => _stackWhatIf is { StatusCode: 200 } r && r.WhatIfToken.Length > 0
+            && r.Deletes == 0 && !r.GuardrailBlocked && r.IndeterminacyReason.Length == 0;
+
+        private bool ReviewDeployAllowed => _deployAsStack
+            ? !_stackWhatIfLoading && WhatIfDeployAllowed && StackDeployAllowed
+            : WhatIfDeployAllowed;
+
+        /// <summary>The bypass flag lands in the hashed stack body, so the preview and the apply send the same value.</summary>
+        private bool EffectiveBypass => _bypassOutOfSync && _stackProbe?.Exists == true;
+
         /// <summary>Plan touches do-not-touch resources: server issued no token, approval is moot.</summary>
-        private bool GuardrailBlocked => _whatIfResult?.GuardrailBlocked ?? false;
+        private bool GuardrailBlocked => (_whatIfResult?.GuardrailBlocked ?? false)
+            || (_deployAsStack && (_stackWhatIf?.GuardrailBlocked ?? false));
 
         private async Task ApproveAndDeployAsync(MouseEventArgs e)
         {
@@ -302,8 +413,15 @@ namespace AzureDesignStudio.Components.MenuDrawer
                 _whatIfError = "Deployment stacks deploy at resource-group scope only - switch the target back to Resource group to use stack mode.";
                 return;
             }
+            if (_deployAsStack && !StackDeployAllowed)
+            {
+                _whatIfError = _stackWhatIf?.IndeterminacyReason is { Length: > 0 } reason
+                    ? $"The stack what-if cannot be trusted: {reason}"
+                    : "Run the stack what-if (set the stack name) before approving a stack deployment.";
+                return;
+            }
             var result = _whatIfResult;
-            var approval = await _deployService.ApprovePlanAsync(result.PlanHash);
+            var approval = await _deployService.ApprovePlanAsync(_deployAsStack ? _stackWhatIf!.PlanHash : result.PlanHash);
             if (approval is null || approval.StatusCode != 200)
             {
                 _whatIfError = approval?.ErrorMessage ?? "Approval failed; nothing was deployed.";
@@ -314,7 +432,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
             _showWhatIfReview = false;
             _whatIfResult = null;
             if (_deployAsStack)
-                await RunStackDeployment(result);
+                await RunStackDeployment(_stackWhatIf!);
             else
                 await RunDeployment(result.WhatIfToken, result.PlanHash);
         }
@@ -322,7 +440,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
         /// <summary>Applies the approved plan as a deployment stack. The wrapper swallows transport
         /// breaks into a null response, so the outcomes here are exhaustive: confirmed success, an
         /// ARM-confirmed refusal, or OutcomeUnknown - a break is never rendered as a failure.</summary>
-        private async Task RunStackDeployment(SharedModels.Protos.WhatIfResponse result)
+        private async Task RunStackDeployment(SharedModels.Protos.StackWhatIfResponse result)
         {
             _stepsStatus = new() { Status = "started" };
             _showDeployStatus = true;
@@ -330,7 +448,7 @@ namespace AzureDesignStudio.Components.MenuDrawer
             var response = await _deployService.CreateStackAsync(_linkedSubscription!.SubscriptionId,
                 _deployParams.ResourceGroup, _stackName.Trim(), EffectiveTemplate,
                 _deployParams.ParametersJson, result.WhatIfToken, result.PlanHash,
-                bypassOutOfSync: _bypassOutOfSync && _stackProbe?.Exists == true);
+                bypassOutOfSync: EffectiveBypass);
 
             _stepsStatus = response switch
             {
@@ -368,18 +486,80 @@ namespace AzureDesignStudio.Components.MenuDrawer
             await ProbeStackAsync();
         }
 
+        private void ClearStackWhatIf()
+        {
+            _stackWhatIf = null;
+            _stackChanges = [];
+            _stackWhatIfError = null;
+            _stackWhatIfLoading = false;
+        }
+
+        /// <summary>Runs the deployment-stacks what-if for the stack name and policy now on screen. Any
+        /// earlier token is dropped first: a token for other bytes proves nothing about these.</summary>
+        private async Task RunStackWhatIfAsync()
+        {
+            ClearStackWhatIf();
+            var name = (_stackName ?? "").Trim();
+            if (!_deployAsStack || ScopeTarget != DeployTarget.ResourceGroup || _linkedSubscription is null
+                || _deployParams is null || name.Length == 0)
+                return;
+            _stackWhatIfLoading = true;
+            StateHasChanged();
+            try
+            {
+                var response = await _deployService.StackWhatIfAsync(_linkedSubscription.SubscriptionId,
+                    _deployParams.ResourceGroup, name, EffectiveTemplate, _deployParams.ParametersJson,
+                    bypassOutOfSync: EffectiveBypass);
+                if (response is null || response.StatusCode != 200)
+                    _stackWhatIfError = response?.ErrorMessage is { Length: > 0 } message
+                        ? message
+                        : "The stack What-If is not available right now.";
+                else
+                {
+                    _stackWhatIf = response;
+                    _stackChanges = ParseStackChanges(response.ChangesJson);
+                    // The stack review shows protected resources the way the plain review does.
+                    foreach (var flag in response.GuardrailFlags)
+                        _guardrailFlags[flag.ResourceId] = flag.Reason;
+                }
+            }
+            finally
+            {
+                _stackWhatIfLoading = false;
+            }
+        }
+
+        private static IReadOnlyList<StackChangeRow> ParseStackChanges(string changesJson)
+        {
+            if (string.IsNullOrWhiteSpace(changesJson))
+                return [];
+            try
+            {
+                return System.Text.Json.JsonSerializer.Deserialize<List<StackChangeRow>>(changesJson,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return [];
+            }
+        }
+
         private async Task ProbeStackAsync()
         {
             var name = (_stackName ?? "").Trim();
             if (!_deployAsStack || ScopeTarget != DeployTarget.ResourceGroup || _linkedSubscription is null
                 || _deployParams is null || name.Length == 0)
+            {
+                ClearStackWhatIf();
                 return;
+            }
             _stackChecking = true;
             StateHasChanged();
             _stackProbe = await _deployService.GetStackAsync(_linkedSubscription.SubscriptionId,
                 _deployParams.ResourceGroup, name, EffectiveTemplate);
             _stackProbed = true;
             _stackChecking = false;
+            await RunStackWhatIfAsync();
         }
 
         private async Task RunDeployment(string whatIfToken, string planHash)

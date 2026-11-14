@@ -63,7 +63,7 @@ AzureDesignStudio/                      # repo root
 │   │   ├── Pages/Error.cshtml.cs
 │   │   └── Dockerfile                  # multi-stage .NET 10 image with wasm-tools
 │   ├── AzureDesignStudio.Desktop/      # MAUI Blazor Hybrid shell (Windows)
-│   │   ├── Components/                 # TenantScanDrawerTemplate, TopologyView
+│   │   ├── Components/                 # TenantScanDrawerTemplate, TopologyView, GovernanceFindingsView
 │   │   ├── Platforms/{Windows,Android,iOS,MacCatalyst}/
 │   │   ├── Resources/                  # app icon, fonts, raw assets
 │   │   ├── wwwroot/app.html            # host page for BlazorWebView
@@ -93,12 +93,12 @@ AzureDesignStudio/                      # repo root
 │   │   ├── Iac/                        # ARM validation, Bicep/Terraform text, stacks, staged plans, WhatIf/
 │   │   ├── Security/                   # locks, data holdings, expiry watch, orphan detector
 │   │   ├── Unmanaged/                  # detector + guardrail policy/enforcement
-│   │   ├── Naming/, Preflight/, Report/, Analysis/
+│   │   ├── Naming/, Preflight/, Report/, Analysis/, Governance/
 │   │   └── Mcp/                        # AdsToolEngine (pure), AdsToolEngineViews
 │   ├── AzureDesignStudio.Mcp/          # stdio MCP server
 │   │   ├── Program.cs                  # host + db path resolution
 │   │   ├── AdsWorkspace.cs             # read-only SQLite window
-│   │   └── AdsMcpTools.cs              # 13 [McpServerTool] methods
+│   │   └── AdsMcpTools.cs              # 15 [McpServerTool] methods
 │   └── AzureDesignStudio.Core.Tests/   # flat xUnit project (one file per engine)
 ├── AGENTS.md                           # repo knowledge base (structure/conventions/anti-patterns)
 ├── README.md
@@ -150,8 +150,8 @@ AzureDesignStudio/                      # repo root
 
 **`src/AzureDesignStudio.Desktop/`:**
 - Purpose: Windows desktop shell around the shared UI.
-- Contains: MAUI bootstrap, native auth, token broker, workspace/scan wiring, two desktop-only Blazor components.
-- Key files: `src/AzureDesignStudio.Desktop/MauiProgram.cs`, `src/AzureDesignStudio.Desktop/MsalAccountService.cs`, `src/AzureDesignStudio.Desktop/AdsTokenBroker.cs`, `src/AzureDesignStudio.Desktop/Components/TenantScanDrawerTemplate.razor`.
+- Contains: MAUI bootstrap, native auth, token broker, workspace/scan wiring, three desktop-only Blazor components.
+- Key files: `src/AzureDesignStudio.Desktop/MauiProgram.cs`, `src/AzureDesignStudio.Desktop/MsalAccountService.cs`, `src/AzureDesignStudio.Desktop/AdsTokenBroker.cs`, `src/AzureDesignStudio.Desktop/Components/TenantScanDrawerTemplate.razor`, `src/AzureDesignStudio.Desktop/Components/GovernanceFindingsView.razor`.
 
 **`src/AzureDesignStudio.Workspace/`:**
 - Purpose: offline-first local persistence for the desktop host (and read-only truth for MCP).

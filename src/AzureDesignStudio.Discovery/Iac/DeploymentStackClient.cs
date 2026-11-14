@@ -15,7 +15,7 @@ public sealed class DeploymentStackClient(ArmTransport transport)
     /// <summary>The stack API moniker the List operation is verified against (the managed
     /// list + policy read shape; also the fallback the PUT bumps to if the pinned
     /// <see cref="DeploymentStack.ApiVersion"/> ever refuses the policy members).</summary>
-    public const string ListApiVersion = "2024-03-01";
+    public const string ListApiVersion = "2025-07-01";
     public string StackUrl(string subscriptionId, string resourceGroupName, string stackName) =>
         $"{transport.Endpoints.ManagementEndpoint}/subscriptions/{subscriptionId}/resourcegroups/{resourceGroupName}"
         + $"/providers/Microsoft.Resources/deploymentStacks/{stackName}?api-version={DeploymentStack.ApiVersion}";

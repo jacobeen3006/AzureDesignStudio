@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Azure.Core;
+using AzureDesignStudio.Discovery.Governance;
 using AzureDesignStudio.Discovery.Inventory;
 using AzureDesignStudio.Discovery.ResourceGraph;
 using AzureDesignStudio.Discovery.Scan;
@@ -399,5 +400,619 @@ public class ScanEngineTests
 
         Assert.Equal("Canceled", sink.FinishStatus);
         Assert.False(sink.FinishToken.IsCancellationRequested);
+    }
+
+    // ---------- governance sources (Wave B3) ----------
+    // Each subscription group gets one extra worker per requested source. A source that fails
+    // or comes back truncated is recorded in FailedSourceGroups only: the scan's status, rows,
+    // content hash and inventory failures never see it.
+
+    private const string SubA = "00000000-0000-0000-0000-0000000000a1";
+    private const string SubB = "00000000-0000-0000-0000-0000000000b2";
+
+    private static string Vm(string sub) => $"/subscriptions/{sub}/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm1";
+
+    /// <summary>The Resource Graph query a recorded request body carries.</summary>
+    private static string QueryOf(string body)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(body);
+        return doc.RootElement.GetProperty("query").GetString()!;
+    }
+
+    private static string KindOf(string body)
+    {
+        var query = QueryOf(body);
+        return query.StartsWith("advisorresources ", StringComparison.Ordinal) ? "advisor"
+            : query.StartsWith("policyresources ", StringComparison.Ordinal) ? "policy"
+            : query.Contains("'microsoft.security/assessments'", StringComparison.Ordinal) ? "defender-assessments"
+            : query.Contains("'microsoft.security/pricings'", StringComparison.Ordinal) ? "defender-plans"
+            : query.StartsWith("Resources ", StringComparison.Ordinal) ? "inventory"
+            : "unknown";
+    }
+
+    /// <summary>The single subscription a groupSize-1 query filters on.</summary>
+    private static string SubOf(string body) =>
+        System.Text.RegularExpressions.Regex.Match(QueryOf(body), @"subscriptionId in \('([^']*)'\)").Groups[1].Value;
+
+    private static string Rows(bool truncated, params object[] rows) =>
+        System.Text.Json.JsonSerializer.Serialize(new { data = rows, count = rows.Length, totalRecords = rows.Length, resultTruncated = truncated ? "true" : "false" });
+
+    private static object AdvisorRow(string sub, string name, string status = "") => new
+    {
+        id = $"{Vm(sub)}/providers/Microsoft.Advisor/recommendations/{name}",
+        subscriptionId = sub,
+        resourceId = Vm(sub),
+        source = Vm(sub),
+        category = "HighAvailability",
+        impact = "High",
+        problem = $"Enable backup ({name})",
+        solution = "Protect the virtual machine with Azure Backup",
+        status,
+        suppressions = "",
+    };
+
+    private static object PolicyRow(string sub, string stateName) => new
+    {
+        id = $"{Vm(sub)}/providers/Microsoft.PolicyInsights/policyStates/{stateName}",
+        subscriptionId = sub,
+        resourceId = Vm(sub),
+        assignmentId = $"/subscriptions/{sub}/providers/Microsoft.Authorization/policyAssignments/require-tags",
+        assignmentName = "require-tags",
+        definitionId = "/providers/Microsoft.Authorization/policyDefinitions/871b6d14-10aa-478d-b590-94f262ecfa99",
+        referenceId = "",
+    };
+
+    private static object AssessmentRow(string sub) => new
+    {
+        id = $"{Vm(sub)}/providers/Microsoft.Security/assessments/d57a4221-a804-52ca-3dea-768284f06bb7",
+        subscriptionId = sub,
+        targetId = Vm(sub),
+        name = "Machines should have vulnerability findings resolved",
+        severity = "High",
+    };
+
+    private static object PlanRow(string sub, string plan, string tier) => new
+    {
+        id = $"/subscriptions/{sub}/providers/Microsoft.Security/pricings/{plan}",
+        subscriptionId = sub,
+        plan,
+        tier,
+    };
+
+    /// <summary>
+    /// Answers every query for the subscription it filters on: one inventory row; Advisor one
+    /// open and one dismissed recommendation; Policy the same non-compliance twice (two policy
+    /// states); Defender one unhealthy assessment and two plans. <paramref name="answer"/> may
+    /// replace the answer for a (kind, subscription).
+    /// </summary>
+    private static FakeHandler GovernanceHandler(Func<string, string, HttpResponseMessage?>? answer = null) =>
+        new((body, _) =>
+        {
+            var kind = KindOf(body);
+            var sub = SubOf(body);
+            if (answer?.Invoke(kind, sub) is { } replaced)
+                return replaced;
+            return Arg(kind switch
+            {
+                "inventory" => Page([$"/subscriptions/{sub}/resourceGroups/rg-app/providers/Microsoft.Test/widgets/w1"]),
+                "advisor" => Rows(false, AdvisorRow(sub, "rec1"), AdvisorRow(sub, "rec2", status: "Dismissed")),
+                "policy" => Rows(false, PolicyRow(sub, "state1"), PolicyRow(sub, "state2")),
+                "defender-assessments" => Rows(false, AssessmentRow(sub)),
+                "defender-plans" => Rows(false, PlanRow(sub, "VirtualMachines", "Standard"), PlanRow(sub, "CloudPosture", "free")),
+                _ => throw new InvalidOperationException("unexpected query: " + QueryOf(body)),
+            });
+        });
+
+    private static HttpResponseMessage Forbidden() =>
+        Arg("""{"error":{"code":"AuthorizationFailed","message":"The client does not have authorization to perform action 'Microsoft.ResourceGraph/resources/read'."}}""", HttpStatusCode.Forbidden);
+
+    private static ScanRequest SourcesRequest(IReadOnlyList<string>? sources, params string[] subs) => new("tenant", "SubscriptionSet", subs, sources);
+
+    private sealed record StoredSourcePage(string Source, string Key, IReadOnlyList<GovernanceFinding> Findings, ScanCheckpoint Stored);
+
+    /// <summary>A sink that stores what a real one would: each page with a serialized copy
+    /// of the checkpoint handed with it.</summary>
+    private sealed class GovernanceSink : IScanSink
+    {
+        public readonly List<string> InventoryPages = [];
+        public readonly List<StoredSourcePage> SourcePages = [];
+        /// <summary>The checkpoint JSON stored with the last inventory page.</summary>
+        public string? InventoryCheckpointJson;
+        public ScanCheckpoint? Started;
+        public string? Status;
+        public Func<int, Task>? OnSourcePage;
+
+        public Task ScanStartedAsync(ScanRequest request, ScanCheckpoint checkpoint, bool isResume, CancellationToken ct)
+        {
+            Started = ScanCheckpoint.FromJson(checkpoint.ToJson());
+            return Task.CompletedTask;
+        }
+
+        public Task PagePersistedAsync(string queryKey, IReadOnlyList<InventoryItem> page, ScanCheckpoint checkpoint, CancellationToken ct)
+        {
+            lock (InventoryPages)
+            {
+                InventoryPages.Add(queryKey);
+                InventoryCheckpointJson = checkpoint.ToJson();
+            }
+            return Task.CompletedTask;
+        }
+
+        public async Task SourcePagePersistedAsync(string source, string queryKey, IReadOnlyList<GovernanceFinding> findings, ScanCheckpoint checkpoint, CancellationToken ct)
+        {
+            var stored = ScanCheckpoint.FromJson(checkpoint.ToJson())!;
+            int count;
+            lock (SourcePages)
+            {
+                SourcePages.Add(new(source, queryKey, findings, stored));
+                count = SourcePages.Count;
+            }
+            if (OnSourcePage is { } cb) await cb(count);
+        }
+
+        public Task ScanFinishedAsync(string status, ScanCheckpoint checkpoint, CancellationToken ct)
+        {
+            Status = status;
+            return Task.CompletedTask;
+        }
+    }
+
+    private static string InventoryKey(ScanCheckpoint checkpoint) => Assert.Single(checkpoint.CompletedQueries, k => !k.Contains(':'));
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Sources_NotRequested_NoExtraQueries(bool emptyList)
+    {
+        var handler = GovernanceHandler();
+        var sink = new GovernanceSink();
+        var engine = new ScanEngine(Graph(handler), groupSize: 1);
+
+        var checkpoint = await engine.RunAsync(SourcesRequest(emptyList ? [] : null, SubA, SubB), sink);
+
+        Assert.Equal("Completed", sink.Status);
+        Assert.Equal(2, handler.RequestBodies.Count);
+        Assert.All(handler.RequestBodies, b => Assert.Equal("inventory", KindOf(b)));
+        Assert.Empty(sink.SourcePages);
+        Assert.Equal(2, checkpoint.CompletedQueries.Count);
+        Assert.DoesNotContain(checkpoint.CompletedQueries, k => k.Contains(':'));
+        Assert.Empty(checkpoint.RequestedSources);
+        Assert.Empty(checkpoint.SourceRows);
+        Assert.Empty(checkpoint.FailedSourceGroups);
+        Assert.Empty(checkpoint.DefenderPlans);
+    }
+
+    [Fact]
+    public async Task Sources_Requested_RowsReachTheSink()
+    {
+        var handler = GovernanceHandler();
+        var sink = new GovernanceSink();
+        var engine = new ScanEngine(Graph(handler), groupSize: 1);
+
+        var checkpoint = await engine.RunAsync(SourcesRequest(["defender", "advisor", "policy"], SubA), sink);
+
+        Assert.Equal("Completed", sink.Status);
+        // RequestedSources is recorded before the scan starts, in canonical order.
+        Assert.Equal(["advisor", "policy", "defender"], sink.Started!.RequestedSources);
+        Assert.Equal(["advisor", "policy", "defender"], checkpoint.RequestedSources);
+        // One inventory query, one per source, and Defender's two in its one worker.
+        Assert.Equal(["advisor", "defender-assessments", "defender-plans", "inventory", "policy"],
+            handler.RequestBodies.Select(KindOf).Order(StringComparer.Ordinal).ToArray());
+        Assert.All(handler.RequestBodies, b => Assert.Equal(SubA, SubOf(b)));
+
+        var group = InventoryKey(checkpoint);
+        Assert.Equal(["advisor", "defender", "policy"], sink.SourcePages.Select(p => p.Source).Order(StringComparer.Ordinal).ToArray());
+        Assert.All(sink.SourcePages, p => Assert.Equal($"{p.Source}:{group}", p.Key));
+
+        // Normalized (the dismissed recommendation is dropped) and deduped (two policy states,
+        // one finding).
+        var advisor = Assert.Single(sink.SourcePages.Single(p => p.Source == "advisor").Findings);
+        Assert.Equal(GovernanceSource.Advisor, advisor.Source);
+        Assert.Equal("Enable backup (rec1)", advisor.Title);
+        var policy = Assert.Single(sink.SourcePages.Single(p => p.Source == "policy").Findings);
+        Assert.Equal("require-tags", policy.Title);
+        var defender = Assert.Single(sink.SourcePages.Single(p => p.Source == "defender").Findings);
+        Assert.Equal(Vm(SubA), defender.ResourceId);
+        Assert.Equal(GovernanceSeverity.High, defender.Severity);
+
+        Assert.Equal(new Dictionary<string, int> { ["advisor"] = 1, ["policy"] = 1, ["defender"] = 1 }, checkpoint.SourceRows);
+        Assert.Equal(new[] { new DefenderPlan(SubA, "CloudPosture", "Free"), new DefenderPlan(SubA, "VirtualMachines", "Standard") },
+            checkpoint.DefenderPlans);
+        Assert.Contains($"advisor:{group}", checkpoint.CompletedQueries);
+        Assert.Contains($"policy:{group}", checkpoint.CompletedQueries);
+        Assert.Contains($"defender:{group}", checkpoint.CompletedQueries);
+        Assert.Empty(checkpoint.FailedSourceGroups);
+        Assert.Single(sink.InventoryPages);
+        Assert.Equal(1, checkpoint.Rows); // findings are not inventory rows
+    }
+
+    [Fact]
+    public async Task SourcePage_CheckpointNamesTheSourceGroup()
+    {
+        var sink = new GovernanceSink();
+        var engine = new ScanEngine(Graph(GovernanceHandler()), groupSize: 1, maxParallel: 1);
+
+        await engine.RunAsync(SourcesRequest(["advisor", "policy", "defender"], SubA, SubB), sink);
+
+        Assert.Equal(6, sink.SourcePages.Count);
+        foreach (var page in sink.SourcePages)
+        {
+            // What the sink stores with the findings already says they are stored: a kill right
+            // after this write resumes without querying the group again.
+            Assert.Contains(page.Key, page.Stored.CompletedQueries);
+            Assert.DoesNotContain(page.Key, page.Stored.FailedSourceGroups.Keys);
+            Assert.True(page.Stored.SourceRows[page.Source] >= page.Findings.Count);
+            Assert.Equal(["advisor", "policy", "defender"], page.Stored.RequestedSources);
+        }
+
+        // The plans of a Defender group are in the checkpoint stored with its assessments.
+        foreach (var page in sink.SourcePages.Where(p => p.Source == "defender"))
+        {
+            var sub = page.Findings.Single().SubscriptionId;
+            Assert.Contains(page.Stored.DefenderPlans, p => p.SubscriptionId == sub && p.Plan == "VirtualMachines");
+        }
+
+        // SourceRows counts each source over its stored groups.
+        var last = sink.SourcePages[^1].Stored;
+        Assert.Equal(new Dictionary<string, int> { ["advisor"] = 2, ["policy"] = 2, ["defender"] = 2 }, last.SourceRows);
+    }
+
+    [Fact]
+    public async Task SourceSinkThrows_RollsBack()
+    {
+        var sink = new GovernanceSink { OnSourcePage = n => n == 2 ? throw new InvalidOperationException("database is locked") : Task.CompletedTask };
+        var engine = new ScanEngine(Graph(GovernanceHandler()), groupSize: 1, maxParallel: 1);
+
+        var checkpoint = await engine.RunAsync(SourcesRequest(["defender"], SubA, SubB), sink);
+
+        Assert.Equal(2, sink.SourcePages.Count);
+        var storedSub = sink.SourcePages[0].Findings.Single().SubscriptionId;
+        var lost = sink.SourcePages[1];
+
+        // The page that could not be stored is not complete, its rows and plans are taken back,
+        // and it is this source group's failure - not the scan's.
+        Assert.DoesNotContain(lost.Key, checkpoint.CompletedQueries);
+        Assert.Contains(sink.SourcePages[0].Key, checkpoint.CompletedQueries);
+        Assert.Equal(1, checkpoint.SourceRows["defender"]);
+        Assert.Equal(2, checkpoint.DefenderPlans.Count);
+        Assert.All(checkpoint.DefenderPlans, p => Assert.Equal(storedSub, p.SubscriptionId));
+        var failure = Assert.Single(checkpoint.FailedSourceGroups);
+        Assert.Equal(lost.Key, failure.Key);
+        Assert.Contains("database is locked", failure.Value);
+        Assert.Equal("Completed", sink.Status);
+        Assert.Empty(checkpoint.FailedQueries);
+        Assert.Equal(2, checkpoint.Rows);
+    }
+
+    [Fact]
+    public async Task SourceSinkThrows_OnTheOnlyGroup_LeavesNoSourceRows()
+    {
+        var sink = new GovernanceSink { OnSourcePage = _ => throw new InvalidOperationException("disk full") };
+        var engine = new ScanEngine(Graph(GovernanceHandler()), groupSize: 1);
+
+        var checkpoint = await engine.RunAsync(SourcesRequest(["defender"], SubA), sink);
+
+        Assert.DoesNotContain(checkpoint.CompletedQueries, k => k.StartsWith("defender:", StringComparison.Ordinal));
+        Assert.False(checkpoint.SourceRows.ContainsKey("defender"));
+        Assert.Empty(checkpoint.DefenderPlans);
+        Assert.Contains("disk full", Assert.Single(checkpoint.FailedSourceGroups).Value);
+        Assert.Equal("Completed", sink.Status);
+    }
+
+    [Fact]
+    public async Task SourceFailure_MarksOnlyThatSourceUnavailable_ScanCompleted()
+    {
+        var handler = GovernanceHandler((kind, _) => kind == "policy" ? Forbidden() : null);
+        var sink = new GovernanceSink();
+        var engine = new ScanEngine(Graph(handler), groupSize: 1);
+
+        var checkpoint = await engine.RunAsync(SourcesRequest(GovernanceSourcesAll, SubA), sink);
+
+        var group = InventoryKey(checkpoint);
+        Assert.Equal("Completed", sink.Status);
+        Assert.Empty(checkpoint.FailedQueries);
+        Assert.False(checkpoint.AnyTruncated);
+        var failure = Assert.Single(checkpoint.FailedSourceGroups);
+        Assert.Equal($"policy:{group}", failure.Key);
+        Assert.Contains("AuthorizationFailed", failure.Value);
+        Assert.DoesNotContain($"policy:{group}", checkpoint.CompletedQueries);
+        Assert.Contains($"advisor:{group}", checkpoint.CompletedQueries);
+        Assert.Contains($"defender:{group}", checkpoint.CompletedQueries);
+        Assert.DoesNotContain(sink.SourcePages, p => p.Source == "policy");
+        Assert.False(checkpoint.SourceRows.ContainsKey("policy"));
+
+        var manifest = ScanManifest.Build("Completed", checkpoint, 1);
+        Assert.Equal(SourceState.Unavailable, manifest.Sources!["policy"].State);
+        Assert.Contains("AuthorizationFailed", manifest.Sources["policy"].Detail);
+        Assert.Equal(new SourceState(SourceState.Collected, 1, null), manifest.Sources["advisor"]);
+        Assert.Equal(new SourceState(SourceState.Collected, 1, null), manifest.Sources["defender"]);
+    }
+
+    [Fact]
+    public async Task SourceTruncation_MarksUnavailable()
+    {
+        var handler = GovernanceHandler((kind, sub) => kind == "advisor" ? Arg(Rows(true, AdvisorRow(sub, "rec1"))) : null);
+        var sink = new GovernanceSink();
+        var engine = new ScanEngine(Graph(handler), groupSize: 1);
+
+        var checkpoint = await engine.RunAsync(SourcesRequest(["advisor", "policy"], SubA), sink);
+
+        var group = InventoryKey(checkpoint);
+        Assert.Equal("Completed", sink.Status);
+        Assert.False(checkpoint.AnyTruncated); // the inventory was complete
+        Assert.Empty(checkpoint.FailedQueries);
+        var failure = Assert.Single(checkpoint.FailedSourceGroups);
+        Assert.Equal($"advisor:{group}", failure.Key);
+        Assert.StartsWith("Truncated", failure.Value);
+        // A cut-short listing is not stored as if it were the whole one.
+        Assert.DoesNotContain($"advisor:{group}", checkpoint.CompletedQueries);
+        Assert.DoesNotContain(sink.SourcePages, p => p.Source == "advisor");
+        Assert.False(checkpoint.SourceRows.ContainsKey("advisor"));
+        Assert.Equal(SourceState.Unavailable, ScanManifest.Build("Completed", checkpoint, 1).Sources!["advisor"].State);
+    }
+
+    [Fact]
+    public async Task Resume_SkipsCompletedSourceGroups()
+    {
+        var cts = new CancellationTokenSource();
+        var firstSink = new GovernanceSink { OnSourcePage = _ => { cts.Cancel(); return Task.CompletedTask; } };
+        var first = await new ScanEngine(Graph(GovernanceHandler()), groupSize: 1, maxParallel: 1)
+            .RunAsync(SourcesRequest(["advisor", "policy"], SubA), firstSink, ct: cts.Token);
+
+        Assert.Equal("Canceled", firstSink.Status);
+        var stored = Assert.Single(firstSink.SourcePages); // the one source group that finished
+        Assert.Contains(stored.Key, first.CompletedQueries);
+
+        var saved = ScanCheckpoint.FromJson(first.ToJson())!;
+        var pending = new[] { "inventory", "advisor", "policy" }
+            .Where(kind => !saved.CompletedQueries.Any(k => KindOfKey(k) == kind))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        Assert.NotEmpty(pending);
+
+        var handler = GovernanceHandler();
+        var sink = new GovernanceSink();
+        var resumed = await new ScanEngine(Graph(handler), groupSize: 1, maxParallel: 1)
+            .RunAsync(SourcesRequest(["advisor", "policy"], SubA), sink, resume: saved);
+
+        // Exactly the groups the interrupted run did not finish are queried.
+        Assert.Equal(pending, handler.RequestBodies.Select(KindOf).Order(StringComparer.Ordinal).ToArray());
+        Assert.DoesNotContain(handler.RequestBodies, b => KindOf(b) == stored.Source);
+        Assert.Equal("Completed", sink.Status);
+        Assert.Equal(3, resumed.CompletedQueries.Count);
+        Assert.Equal(new Dictionary<string, int> { ["advisor"] = 1, ["policy"] = 1 }, resumed.SourceRows);
+        Assert.All(ScanManifest.Build("Completed", resumed, 1).Sources!.Where(s => s.Key != "defender"),
+            s => Assert.Equal(SourceState.Collected, s.Value.State));
+    }
+
+    private static string KindOfKey(string key) => key.Contains(':') ? key[..key.IndexOf(':')] : "inventory";
+
+    [Fact]
+    public async Task Resume_KeepsTheSourcesTheScanStartedWith()
+    {
+        var first = await new ScanEngine(Graph(GovernanceHandler((kind, _) => kind == "advisor" ? Forbidden() : null)), groupSize: 1)
+            .RunAsync(SourcesRequest(["advisor"], SubA), new GovernanceSink());
+        Assert.Single(first.FailedSourceGroups);
+
+        var handler = GovernanceHandler();
+        var resumed = await new ScanEngine(Graph(handler), groupSize: 1)
+            .RunAsync(SourcesRequest(GovernanceSourcesAll, SubA), new GovernanceSink(), resume: ScanCheckpoint.FromJson(first.ToJson()));
+
+        // The interrupted scan asked for Advisor only; resuming finishes that scan, it does not
+        // widen it.
+        Assert.Equal(["advisor"], resumed.RequestedSources);
+        Assert.Equal(["advisor"], handler.RequestBodies.Select(KindOf).ToArray());
+    }
+
+    [Fact]
+    public async Task Resume_RetrySucceeds_ClearsFailure()
+    {
+        var firstSink = new GovernanceSink();
+        var first = await new ScanEngine(Graph(GovernanceHandler((kind, sub) => kind == "policy" && sub == SubB ? Forbidden() : null)), groupSize: 1)
+            .RunAsync(SourcesRequest(["policy"], SubA, SubB), firstSink);
+        Assert.Equal("Completed", firstSink.Status);
+        Assert.Single(first.FailedSourceGroups);
+        Assert.Equal(SourceState.Unavailable, ScanManifest.Build("Completed", first, 2).Sources!["policy"].State);
+
+        var handler = GovernanceHandler();
+        var sink = new GovernanceSink();
+        var resumed = await new ScanEngine(Graph(handler), groupSize: 1)
+            .RunAsync(SourcesRequest(["policy"], SubA, SubB), sink, resume: ScanCheckpoint.FromJson(first.ToJson()));
+
+        var body = Assert.Single(handler.RequestBodies);
+        Assert.Equal("policy", KindOf(body));
+        Assert.Equal(SubB, SubOf(body));
+        Assert.Empty(resumed.FailedSourceGroups);
+        // The stored checkpoint no longer names the failure either.
+        Assert.Empty(Assert.Single(sink.SourcePages).Stored.FailedSourceGroups);
+        Assert.Equal(2, resumed.SourceRows["policy"]);
+        Assert.Equal(new SourceState(SourceState.Collected, 2, null), ScanManifest.Build("Completed", resumed, 2).Sources!["policy"]);
+    }
+
+    [Fact]
+    public async Task ContentHashAndResourceCount_UnchangedBySources()
+    {
+        var plain = await new ScanEngine(Graph(GovernanceHandler()), groupSize: 1)
+            .RunAsync(SourcesRequest(null, SubA, SubB), new GovernanceSink());
+        var withSourcesSink = new GovernanceSink();
+        var withSources = await new ScanEngine(Graph(GovernanceHandler((kind, sub) => kind == "policy" && sub == SubA ? Forbidden() : null)), groupSize: 1)
+            .RunAsync(SourcesRequest(GovernanceSourcesAll, SubA, SubB), withSourcesSink);
+
+        Assert.Equal("Completed", withSourcesSink.Status);
+        Assert.Equal(plain.ContentHash, withSources.ContentHash);
+        Assert.Equal(plain.Rows, withSources.Rows);
+        Assert.Equal(plain.CompletedQueries.Order(StringComparer.Ordinal), withSources.CompletedQueries.Where(k => !k.Contains(':')).Order(StringComparer.Ordinal));
+        Assert.Equal(plain.AnyTruncated, withSources.AnyTruncated);
+        Assert.Empty(withSources.FailedQueries);
+        Assert.Equal(plain.RequestKey, withSources.RequestKey); // sources are not part of the request key
+    }
+
+    [Fact]
+    public async Task Resume_OnlySourceGroupsPending_KeepsTheContentHash()
+    {
+        var uninterrupted = await new ScanEngine(Graph(GovernanceHandler()), groupSize: 1)
+            .RunAsync(SourcesRequest(["advisor"], SubA), new GovernanceSink());
+
+        var firstSink = new GovernanceSink();
+        await new ScanEngine(Graph(GovernanceHandler((kind, _) => kind == "advisor" ? Forbidden() : null)), groupSize: 1)
+            .RunAsync(SourcesRequest(["advisor"], SubA), firstSink);
+        // The checkpoint a run leaves when it is killed after storing its inventory page, while
+        // the Advisor query is still in flight: the inventory group complete, the source group
+        // neither complete nor failed, and no content hash (that is set when a run finishes).
+        var json = System.Text.Json.Nodes.JsonNode.Parse(firstSink.InventoryCheckpointJson!)!.AsObject();
+        Assert.Null(json["contentHash"]);
+        json["failedSourceGroups"] = new System.Text.Json.Nodes.JsonObject();
+
+        var handler = GovernanceHandler();
+        var resumed = await new ScanEngine(Graph(handler), groupSize: 1)
+            .RunAsync(SourcesRequest(["advisor"], SubA), new GovernanceSink(), resume: ScanCheckpoint.FromJson(json.ToJsonString()));
+
+        // No inventory worker ran, yet the hash still describes the inventory the scan holds.
+        Assert.Equal(["advisor"], handler.RequestBodies.Select(KindOf).ToArray());
+        Assert.NotNull(uninterrupted.ContentHash);
+        Assert.Equal(uninterrupted.ContentHash, resumed.ContentHash);
+        Assert.Equal(uninterrupted.Rows, resumed.Rows);
+    }
+
+    [Fact]
+    public async Task OldCheckpointWithoutSourceFields_StillResumes()
+    {
+        var first = await new ScanEngine(Graph(GovernanceHandler((kind, sub) => kind == "inventory" && sub == SubB ? Forbidden() : null)), groupSize: 1)
+            .RunAsync(SourcesRequest(null, SubA, SubB), new GovernanceSink());
+        Assert.Single(first.FailedQueries);
+
+        // The checkpoint as it was written before governance sources existed.
+        var json = System.Text.Json.Nodes.JsonNode.Parse(first.ToJson())!.AsObject();
+        foreach (var added in new[] { "requestedSources", "sourceRows", "failedSourceGroups", "defenderPlans", "totalGroups", "groupHashes" })
+            Assert.True(json.Remove(added), added);
+        var old = ScanCheckpoint.FromJson(json.ToJsonString())!;
+        Assert.Empty(old.RequestedSources);
+        Assert.Empty(old.SourceRows);
+        Assert.Empty(old.FailedSourceGroups);
+        Assert.Empty(old.DefenderPlans);
+
+        var handler = GovernanceHandler();
+        var sink = new GovernanceSink();
+        var resumed = await new ScanEngine(Graph(handler), groupSize: 1)
+            .RunAsync(SourcesRequest(GovernanceSourcesAll, SubA, SubB), sink, resume: old);
+
+        var body = Assert.Single(handler.RequestBodies);
+        Assert.Equal(("inventory", SubB), (KindOf(body), SubOf(body)));
+        Assert.Equal("Completed", sink.Status);
+        Assert.Equal(2, resumed.CompletedQueries.Count);
+        Assert.Empty(resumed.FailedQueries);
+        Assert.Empty(resumed.RequestedSources);
+        Assert.All(ScanManifest.Build("Completed", resumed, 2).Sources!.Values, s => Assert.Equal(SourceState.NotRequested, s.State));
+        // SubA's rows were stored by a run that kept no per-group hash, so they cannot be hashed
+        // again: no hash rather than one that leaves them out.
+        Assert.Null(resumed.ContentHash);
+    }
+
+    private sealed class ListProgress : IProgress<ScanProgress>
+    {
+        public readonly ConcurrentQueue<ScanProgress> Reports = new();
+        public void Report(ScanProgress value) => Reports.Enqueue(value);
+    }
+
+    [Fact]
+    public async Task Progress_TotalsIncludeSourceWorkers()
+    {
+        var progress = new ListProgress();
+        await new ScanEngine(Graph(GovernanceHandler()), groupSize: 1)
+            .RunAsync(SourcesRequest(["advisor", "defender"], SubA, SubB), new GovernanceSink(), progress: progress);
+
+        Assert.Equal(6, progress.Reports.Count); // one report per worker: 2 groups x (inventory + 2 sources)
+        Assert.All(progress.Reports, p => Assert.Equal(6, p.QueriesTotal));
+    }
+
+    [Fact]
+    public async Task UnknownSource_IsRefusedBeforeAnythingRuns()
+    {
+        var handler = GovernanceHandler();
+        var sink = new GovernanceSink();
+
+        var error = await Assert.ThrowsAsync<ArgumentException>(() => new ScanEngine(Graph(handler), groupSize: 1)
+            .RunAsync(SourcesRequest(["advisor", "attackpaths"], SubA), sink));
+
+        Assert.Contains("attackpaths", error.Message);
+        Assert.Empty(handler.RequestBodies);
+        Assert.Null(sink.Started);
+    }
+
+    [Fact]
+    public async Task Checkpoint_SourceFieldsRoundTrip()
+    {
+        var checkpoint = await new ScanEngine(Graph(GovernanceHandler((kind, sub) => kind == "policy" ? Forbidden() : null)), groupSize: 1)
+            .RunAsync(SourcesRequest(GovernanceSourcesAll, SubA, SubB), new GovernanceSink());
+
+        var restored = ScanCheckpoint.FromJson(checkpoint.ToJson())!;
+
+        Assert.Equal(checkpoint.RequestedSources, restored.RequestedSources);
+        Assert.Equal(checkpoint.SourceRows, restored.SourceRows);
+        Assert.Equal(checkpoint.FailedSourceGroups, restored.FailedSourceGroups);
+        Assert.Equal(checkpoint.DefenderPlans, restored.DefenderPlans);
+        Assert.Equal(4, restored.DefenderPlans.Count);
+        Assert.Equal(2, restored.TotalGroups);
+    }
+
+    private static readonly IReadOnlyList<string> GovernanceSourcesAll = GovernanceSources.All;
+
+    private sealed class AsyncHandler(Func<string, Task<HttpResponseMessage>> responder) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            await responder(request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken));
+    }
+
+    /// <summary>Holds each page it stores for a while and notes whether the checkpoint it was
+    /// handed changed meanwhile - a real sink serializes it then, and a failure added mid-way
+    /// broke that serialization ("Collection was modified").</summary>
+    private sealed class WatchingSink : IScanSink
+    {
+        public readonly TaskCompletionSource Persisting = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool ChangedWhileStoring;
+        public string? Status;
+
+        public Task ScanStartedAsync(ScanRequest request, ScanCheckpoint checkpoint, bool isResume, CancellationToken ct) => Task.CompletedTask;
+        public Task PagePersistedAsync(string queryKey, IReadOnlyList<InventoryItem> page, ScanCheckpoint checkpoint, CancellationToken ct) => WatchAsync(checkpoint);
+        public Task SourcePagePersistedAsync(string source, string queryKey, IReadOnlyList<GovernanceFinding> findings, ScanCheckpoint checkpoint, CancellationToken ct) => WatchAsync(checkpoint);
+
+        private async Task WatchAsync(ScanCheckpoint checkpoint)
+        {
+            var before = checkpoint.ToJson();
+            Persisting.TrySetResult();
+            for (var waited = 0; waited < 300 && !ChangedWhileStoring; waited += 10)
+            {
+                await Task.Delay(10);
+                ChangedWhileStoring = checkpoint.ToJson() != before;
+            }
+        }
+
+        public Task ScanFinishedAsync(string status, ScanCheckpoint checkpoint, CancellationToken ct)
+        {
+            Status = status;
+            return Task.CompletedTask;
+        }
+    }
+
+    [Theory]
+    [InlineData("policy")]    // a source failing while an inventory page is stored
+    [InlineData("inventory")] // an inventory group failing while a source page is stored
+    public async Task Failure_IsNotWrittenIntoACheckpointWhileTheSinkStoresIt(string failing)
+    {
+        var sink = new WatchingSink();
+        var handler = new AsyncHandler(async body =>
+        {
+            if (KindOf(body) != failing)
+                return Arg(KindOf(body) == "inventory" ? Page([$"/subscriptions/{SubA}/resourceGroups/rg-app/providers/Microsoft.Test/widgets/w1"]) : Rows(false, PolicyRow(SubA, "state1")));
+            await sink.Persisting.Task; // fail only once the other page is being stored
+            return Forbidden();
+        });
+        var engine = new ScanEngine(new ResourceGraphClient(new HttpClient(handler), new FakeCredential(), null, (_, _) => Task.CompletedTask), groupSize: 1, maxParallel: 2);
+
+        var checkpoint = await engine.RunAsync(SourcesRequest(["policy"], SubA), sink);
+
+        Assert.False(sink.ChangedWhileStoring);
+        Assert.Single(failing == "policy" ? checkpoint.FailedSourceGroups : checkpoint.FailedQueries);
+        Assert.Equal(failing == "policy" ? "Completed" : "Partial", sink.Status);
     }
 }

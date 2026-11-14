@@ -124,6 +124,18 @@ namespace AzureDesignStudio.Core.Validation
                         break;
                 }
 
+                // SKUs Azure has retired.
+                var retired = node switch
+                {
+                    PublicIpModel pip => RetiredSkus.Match("Microsoft.Network/publicIPAddresses", pip.Sku),
+                    LoadBalancerModel lb => RetiredSkus.Match("Microsoft.Network/loadBalancers", lb.Sku),
+                    AppGatewayModel gateway => RetiredSkus.Match("Microsoft.Network/applicationGateways", gateway.Tier),
+                    _ => null,
+                };
+                if (retired is not null)
+                    issues.Add(new(ValidationSeverity.Error, "retired-sku", name,
+                        $"{azure.ServiceName} '{name}' uses the {retired.Sku} SKU, which Azure retired on {retired.RetiredOn:yyyy-MM-dd}. Use {retired.Replacement}."));
+
                 // SKU/region availability.
                 if (SkuRegionRules.TryGetValue(node.GetType(), out var skuRule))
                 {
@@ -140,6 +152,7 @@ namespace AzureDesignStudio.Core.Validation
             AddDuplicateNameIssues(list, issues);
             foreach (var vnet in list.OfType<VirtualNetworkModel>())
                 AddAddressSpaceIssues(vnet, issues);
+            AddOutboundAccessIssues(list, issues);
 
             // Container Apps environment requires a delegated subnet somewhere in the design.
             if (list.OfType<ContainerAppsEnvironmentModel>().Any()
@@ -149,6 +162,45 @@ namespace AzureDesignStudio.Core.Validation
 
             return issues;
         }
+
+        /// <summary>A subnet that hosts machines needs an explicit way out: Azure is retiring
+        /// default outbound access for new virtual networks. A NAT gateway is the one path the
+        /// design models; a public IP on a machine and load balancer outbound rules are not
+        /// exported, so they are not counted.</summary>
+        private static void AddOutboundAccessIssues(List<NodeModel> nodes, List<ValidationIssue> issues)
+        {
+            foreach (var subnet in nodes.OfType<SubnetModel>())
+            {
+                if (!subnet.SupportsPrivateSubnet || !HostsMachines(subnet) || subnet.NatGateway is not null)
+                    continue;
+
+                var name = subnet.Name;
+                if (subnet.Group is VirtualNetworkModel vnet && HasFirewall(vnet))
+                    issues.Add(new(ValidationSeverity.Info, "outbound-access", name,
+                        $"Subnet '{name}' has no NAT gateway. If outbound traffic goes through the firewall, add the route table after export; this design does not model routes."));
+                else if (subnet.PrivateSubnet)
+                    issues.Add(new(ValidationSeverity.Warning, "outbound-access", name,
+                        $"Subnet '{name}' is private and has no outbound path. Its machines cannot reach the internet, including Windows activation and updates. Link a NAT gateway."));
+                else
+                    issues.Add(new(ValidationSeverity.Warning, "outbound-access", name,
+                        $"Subnet '{name}' relies on default outbound access, which Azure is retiring for new virtual networks. Link a NAT gateway, or mark the subnet private once it has an outbound path."));
+            }
+        }
+
+        private static bool HostsMachines(SubnetModel subnet) =>
+            subnet.Children.SelectMany(c => c is AvailabilitySetModel set ? set.Children : [c])
+                .Any(c => c is VirtualMachineModel or VirtualMachineScaleSetModel);
+
+        /// <summary>An Azure Firewall in this network or in one linked to it (a peering).</summary>
+        private static bool HasFirewall(VirtualNetworkModel vnet) =>
+            ContainsFirewall(vnet)
+            || vnet.Ports.SelectMany(p => p.Links)
+                .SelectMany(l => new[] { (l.Source.Model as PortModel)?.Parent, (l.Target.Model as PortModel)?.Parent })
+                .OfType<VirtualNetworkModel>()
+                .Any(peer => !ReferenceEquals(peer, vnet) && ContainsFirewall(peer));
+
+        private static bool ContainsFirewall(VirtualNetworkModel vnet) =>
+            vnet.Subnets.Any(s => s.Children.OfType<AzureFirewallModel>().Any());
 
         /// <summary>ARM refuses a template that defines one resource twice. Two nodes of the
         /// same kind with the same name are that template, and so are two firewalls left on

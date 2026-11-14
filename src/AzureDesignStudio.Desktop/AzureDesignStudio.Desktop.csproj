@@ -1,14 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
     <PropertyGroup>
-        <TargetFrameworks>net10.0-windows10.0.19041.0</TargetFrameworks>
-
-        <!-- Note for MacCatalyst:
-            The default runtime is maccatalyst-x64, except in Release config, in which case the default is maccatalyst-x64;maccatalyst-arm64.
-            When specifying both architectures, use the plural <RuntimeIdentifiers> instead of the singular <RuntimeIdentifier>.
-            The Mac App Store will NOT accept apps with ONLY maccatalyst-arm64 indicated;
-            either BOTH runtimes must be indicated or ONLY macatalyst-x64. -->
-        <!-- For example: <RuntimeIdentifiers>maccatalyst-x64;maccatalyst-arm64</RuntimeIdentifiers> -->
+        <!-- One target per host OS: Windows builds the WinUI app, macOS builds the Mac Catalyst
+             app. Each OS restores its own target only, so each has its own lock file - the
+             Windows one stays packages.lock.json (CI restores it in locked mode on windows-latest). -->
+        <TargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('osx'))">net10.0-windows10.0.19041.0</TargetFrameworks>
+        <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('osx'))">net10.0-maccatalyst</TargetFrameworks>
+        <NuGetLockFilePath Condition="$([MSBuild]::IsOSPlatform('osx'))">packages.maccatalyst.lock.json</NuGetLockFilePath>
+        <!-- The Mac Catalyst SDK names one exact Xcode (27.0 today) and refuses any other; a point
+             release of the same major (27.x) builds the same app. -->
+        <ValidateXcodeVersion Condition="$([MSBuild]::IsOSPlatform('osx'))">false</ValidateXcodeVersion>
+        <!-- No trimming in the Mac Release build: EF Core, AutoMapper and the Blazor component
+             model resolve framework types by reflection, and the Windows app ships untrimmed too. -->
+        <MtouchLink Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">None</MtouchLink>
+        <!-- Release Mac Catalyst code is AOT-compiled with dynamic code switched off, and EF Core
+             (deploy.db) then refuses to build its model at run time; AutoMapper and Blazor compile
+             expressions too. The interpreter turns dynamic code back on and runs only that code. -->
+        <UseInterpreter Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">true</UseInterpreter>
 
         <OutputType>Exe</OutputType>
         <RootNamespace>AzureDesignStudio.Desktop</RootNamespace>
@@ -30,6 +38,10 @@
         <!-- Display name -->
         <ApplicationTitle>AzureDesignStudio.Desktop</ApplicationTitle>
 
+        <!-- The bundle name Finder, the Dock and the menu bar show. Windows keeps the old title:
+             its unpackaged app-data folder is derived from it, and renaming would orphan workspace.db. -->
+        <ApplicationTitle Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">Azure Design Studio</ApplicationTitle>
+
         <!-- App Identifier -->
         <ApplicationId>com.azuredesignstudio.desktop</ApplicationId>
 
@@ -40,6 +52,7 @@
         <!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
         <WindowsPackageType>None</WindowsPackageType>
 
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">17.0</SupportedOSPlatformVersion>
         <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
         <TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
     </PropertyGroup>
@@ -63,7 +76,8 @@
     <ItemGroup>
         <PackageReference Include="Azure.Identity" />
         <PackageReference Include="Microsoft.Identity.Client" />
-        <PackageReference Include="Microsoft.Identity.Client.Broker" />
+        <!-- WAM (the Windows broker) only; macOS signs in through the system browser. -->
+        <PackageReference Include="Microsoft.Identity.Client.Broker" Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'" />
         <PackageReference Include="Microsoft.Maui.Controls" />
         <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" />
         <PackageReference Include="Microsoft.Extensions.Logging.Debug" />
@@ -72,15 +86,27 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\AzureDesignStudio\AzureDesignStudio.csproj" />
+        <!-- A universal (arm64 + x64) Mac build runs one inner build per architecture with
+             AppendRuntimeIdentifierToOutputPath=true; passed on to the web client, whose RID is
+             browser-wasm, it moves the client's static web asset manifest to obj/.../browser-wasm/,
+             where nothing ever built it. The client is built once, before those inner builds. -->
+        <ProjectReference Include="..\AzureDesignStudio\AzureDesignStudio.csproj" GlobalPropertiesToRemove="AppendRuntimeIdentifierToOutputPath" />
         <ProjectReference Include="..\AzureDesignStudio.Workspace\AzureDesignStudio.Workspace.csproj" />
         <ProjectReference Include="..\AzureDesignStudio.Discovery\AzureDesignStudio.Discovery.csproj" />
     <ProjectReference Include="..\AzureDesignStudio.Services\AzureDesignStudio.Services.csproj" />
     </ItemGroup>
 
-    <ItemGroup>
+    <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
         <Content Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
         <Content Include="..\AzureDesignStudio\wwwroot\ads-stencils.json" Link="ads-stencils.json" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <!-- macOS: appsettings.json goes to the bundle's Contents/Resources (as Content, with the Razor
+         SDK's CopyToOutputDirectory, the Apple build resolves it outside the bundle and drops it).
+         The palette is read from the client's wwwroot copy, already bundled with the web assets. -->
+    <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">
+        <Content Remove="appsettings.json;$(NuGetLockFilePath)" />
+        <BundleResource Include="appsettings.json" LogicalName="appsettings.json" />
     </ItemGroup>
 
     <!-- Analyzer donor from the referenced WASM app's Azure.Bicep.Decompiler; keep out. -->

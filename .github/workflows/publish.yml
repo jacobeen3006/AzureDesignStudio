@@ -1,9 +1,11 @@
 name: publish
 
-# Release artifacts: WASM site zip, server Docker image, Windows MSIX.
+# Release artifacts: WASM site zip, server Docker image, Windows MSIX, macOS .dmg.
 # Triggered by version tags (v*) or manually. Docker push needs registry
 # secrets/vars; MSIX signing needs the PFX secrets, otherwise the package
 # is uploaded unsigned (dev installs require trusting the signing cert).
+# The .dmg is ad-hoc signed unless the Developer ID secrets are set (see the
+# desktop-dmg job); an ad-hoc build opens only after right-click > Open.
 
 on:
   push:
@@ -120,10 +122,91 @@ jobs:
         name: ads-desktop-msix
         path: ${{ steps.find.outputs.path }}
 
+  desktop-dmg:
+    name: Package macOS .dmg
+    # The Mac Catalyst SDK in global.json's workload set (10.0.401.1 -> 27.0.10722)
+    # needs Xcode 27; the image must have one. Set the MACOS_RUNNER repository
+    # variable to move to another image without editing this file.
+    runs-on: ${{ vars.MACOS_RUNNER || 'macos-26' }}
+    env:
+      XCODE_MAJOR: '27'
+      # Optional Developer ID signing + notarization. All three signing secrets
+      # are needed to sign; the three APPLE_* secrets as well to notarize.
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # the untagged version is version.json + commit height.
+    - name: Select Xcode ${{ env.XCODE_MAJOR }}
+      run: |
+        xcode="$(find /Applications -maxdepth 1 -name "Xcode_${XCODE_MAJOR}*.app" | sort -V | tail -1)"
+        if [ -z "$xcode" ]; then
+          installed="$(find /Applications -maxdepth 1 -name 'Xcode*.app' -exec basename {} \; | sort | tr '\n' ' ')"
+          echo "::error::No Xcode ${XCODE_MAJOR} on this runner image. Installed: ${installed}"
+          exit 1
+        fi
+        sudo xcode-select -s "$xcode/Contents/Developer"
+        xcodebuild -version
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        global-json-file: global.json
+    # By project, like build.yml's Windows job: on macOS the Desktop project is the
+    # Mac Catalyst target, so this installs maui-maccatalyst from global.json's
+    # workload set. No wasm-tools: the build passes RunAOTCompilation=false for the
+    # referenced web client, which the desktop app hosts in-process.
+    - name: Restore workloads
+      run: dotnet workload restore src/AzureDesignStudio.Desktop/AzureDesignStudio.Desktop.csproj
+    - name: Import Developer ID certificate
+      if: env.MACOS_CERT_P12 != '' && env.MACOS_SIGN_IDENTITY != ''
+      run: |
+        keychain="$RUNNER_TEMP/ads-signing.keychain-db"
+        keychain_password="$(uuidgen)"
+        security create-keychain -p "$keychain_password" "$keychain"
+        security set-keychain-settings -lut 21600 "$keychain"
+        security unlock-keychain -p "$keychain_password" "$keychain"
+        echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+        security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+        rm "$RUNNER_TEMP/cert.p12"
+        security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+        # Default + first in the search list: codesign finds the identity and
+        # notarytool keeps its credential profile there.
+        existing=()
+        while IFS= read -r k; do existing+=("$k"); done < <(security list-keychains -d user | sed -e 's/^ *"//' -e 's/"$//')
+        security list-keychains -d user -s "$keychain" "${existing[@]}"
+        security default-keychain -s "$keychain"
+    - name: Store notarization credentials
+      if: env.MACOS_CERT_P12 != '' && env.MACOS_SIGN_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_PASSWORD != ''
+      run: xcrun notarytool store-credentials ads-notary --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
+    - name: Build .dmg
+      run: |
+        args=()
+        if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          v="${GITHUB_REF_NAME#v}"
+          args+=(--version "${v%%-*}") # CFBundle versions are numeric: v1.2.3-beta -> 1.2.3
+        fi
+        if [ -n "$MACOS_CERT_P12" ] && [ -n "$MACOS_SIGN_IDENTITY" ]; then
+          args+=(--sign "$MACOS_SIGN_IDENTITY")
+          if [ -n "$APPLE_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_APP_PASSWORD" ]; then
+            args+=(--notarize ads-notary)
+          fi
+        fi
+        src/BuildMacDmg.sh "${args[@]}"
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ads-desktop-dmg
+        path: artifacts/*.dmg
+        if-no-files-found: error
+
   release:
     name: GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [wasm, docker, desktop-msix]
+    needs: [wasm, docker, desktop-msix, desktop-dmg]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -138,3 +221,4 @@ jobs:
           artifacts/ads-wasm/ads-wasm.zip
           artifacts/ads-desktop-msix/*.msix
           artifacts/ads-desktop-msix/*.appx
+          artifacts/ads-desktop-dmg/*.dmg

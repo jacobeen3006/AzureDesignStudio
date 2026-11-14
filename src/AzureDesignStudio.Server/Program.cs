@@ -4,12 +4,13 @@ using Azure.Security.KeyVault.Secrets;
 using AzureDesignStudio.Services;
 using AzureDesignStudio.Services.Models;
 using AzureDesignStudio.Discovery.Iac.WhatIf;
+using AzureDesignStudio.Server.Auth;
+using AzureDesignStudio.Server.Persistence;
 using AzureDesignStudio.Server.Services;
 using AzureDesignStudio.Server.Utils;
 using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -33,15 +34,23 @@ builder.Services.Configure<JwtBearerOptions>(
     {
         options.TokenValidationParameters.NameClaimType = "name";
     });
+// Deny by default: a FallbackPolicy requires an authenticated user for any endpoint without
+// authorization metadata. The anonymous endpoints are stated where they are mapped below.
+builder.Services.AddAdsAuthorization();
 
-#if DEBUG
-builder.Services.AddDbContext<DesignDbContext>(options => options.UseInMemoryDatabase("adsdb-inmem"));
-#else
+// The one value read before Build(): the vault decision below needs it. It is resolved once and
+// carried to the DbContext registration, so the vault and the EF provider cannot diverge. Tests
+// must therefore supply Database:Provider with UseSetting, not ConfigureAppConfiguration (a late
+// source would be ignored, not silently disagree).
+var databaseKind = DatabaseProvider.Resolve(builder.Configuration);
+
 // Key Vault supplies configuration (the "ads-main" connection string among it) when one is
 // named. The checked-in appsettings.json names a placeholder, "<kv name>": building the vault
 // URL from it threw UriFormatException before anything could say what was missing.
+// Only the SQL Server provider needs a vault-supplied connection string; a Sqlite or InMemory
+// host must never make a vault round trip at boot.
 var keyVaultName = builder.Configuration["KeyVaultName"];
-if (ServiceTools.IsConfigured(keyVaultName))
+if (databaseKind == DatabaseKind.SqlServer && ServiceTools.IsConfigured(keyVaultName))
 {
     var secretClient = new SecretClient(
         new Uri($"https://{keyVaultName}.vault.azure.net/"),
@@ -49,28 +58,15 @@ if (ServiceTools.IsConfigured(keyVaultName))
     builder.Configuration.AddAzureKeyVault(secretClient, new KeyVaultSecretManager());
 }
 
-// The database: SQL Server, from the vault's "ads-main" secret or from ordinary
-// configuration (ConnectionStrings__ads-main, e.g. a Kubernetes secret). Database:Provider
-// set to InMemory runs without one - for a smoke test of the image, never for real use:
-// nothing survives a restart.
-var connectionString = builder.Configuration["ads-main"] ?? builder.Configuration.GetConnectionString("ads-main");
-if (string.Equals(builder.Configuration["Database:Provider"], "InMemory", StringComparison.OrdinalIgnoreCase))
-{
-    builder.Services.AddDbContext<DesignDbContext>(options => options.UseInMemoryDatabase("adsdb-inmem"));
-}
-else if (ServiceTools.IsConfigured(connectionString))
-{
-    builder.Services.AddDbContext<DesignDbContext>(options => options.UseSqlServer(connectionString));
-}
-else
-{
-    throw new InvalidOperationException(
-        "No database is configured. Name a Key Vault that holds an \"ads-main\" connection string (KeyVaultName), " +
-        "or set ConnectionStrings__ads-main. Database__Provider=InMemory starts the server without one, for testing only.");
-}
-#endif
+// The callback runs when the first context is built (inside the startup bootstrap, before any
+// request), so a connection string from the vault source or from late configuration is
+// honoured and a missing one still stops the host before it serves.
+DatabaseProvider.AddDesignDbContext(builder.Services, databaseKind);
 
-builder.Services.AddSingleton<ICryptoService, CryptoService>();
+// The provider is read from configuration (Crypto:Provider, default KeyVault); the real service
+// contacts the vault lazily on first use, so the host boots without one. This runs at top
+// level, so tests that need another value must supply it with UseSetting.
+CryptoProvider.Register(builder.Services, builder.Configuration, builder.Environment);
 
 builder.Services.AddSingleton<ITelemetryInitializer, AdsTelemetryInitializer>();
 builder.Services.AddApplicationInsightsTelemetry();
@@ -82,9 +78,8 @@ builder.Services.AddHttpClient("RetailPrices", client => client.Timeout = TimeSp
 
 builder.Services.AddSingleton(new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl));
 builder.Services.AddHttpClient("arm", client => client.Timeout = TimeSpan.FromSeconds(120));
-#if DEBUG
-builder.Services.AddGrpcReflection();
-#endif
+if (builder.Environment.IsDevelopment())
+    builder.Services.AddGrpcReflection();
 // For running behind an ingress
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -96,98 +91,9 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 var app = builder.Build();
 
-#if !DEBUG
-if (string.Equals(app.Configuration["Database:Provider"], "InMemory", StringComparison.OrdinalIgnoreCase))
-    app.Logger.LogWarning("Database:Provider is InMemory: designs, links and approvals are lost when the server stops. Use it for testing only.");
-#endif
-
 // The schema is brought up once, here. The gRPC services used to call EnsureCreated in
 // their constructors - a synchronous database round trip on every request.
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<DesignDbContext>();
-    db.Database.EnsureCreated();
-#if !DEBUG
-    // EnsureCreated creates a brand-new database with the full schema, and does nothing at
-    // all for one that already exists - it never adds a missing table. The guarded DDL below
-    // is what brings a database created by an earlier release up to date.
-    {
-        if (db.Database.IsRelational())
-        {
-            db.Database.ExecuteSqlRaw("""
-                IF OBJECT_ID(N'AdsPlanApprovals', N'U') IS NULL
-                CREATE TABLE AdsPlanApprovals (
-                    PlanHash nvarchar(71) NOT NULL PRIMARY KEY,
-                    PlanJson nvarchar(max) NOT NULL,
-                    Status nvarchar(20) NOT NULL,
-                    ApprovedBy nvarchar(320) NOT NULL,
-                    ApprovedByUserId nvarchar(64) NOT NULL,
-                    ApprovedAtUtc datetime2 NOT NULL DEFAULT GETUTCDATE(),
-                    RevertPlanJson nvarchar(max) NULL);
-                IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NULL
-                CREATE TABLE AdsPlanApplyEvents (
-                    Id int IDENTITY(1,1) NOT NULL PRIMARY KEY,
-                    ApplyId uniqueidentifier NOT NULL,
-                    PlanHash nvarchar(71) NOT NULL,
-                    PlanJson nvarchar(max) NOT NULL,
-                    SubscriptionId nvarchar(64) NOT NULL,
-                    ResourceGroupName nvarchar(90) NOT NULL,
-                    TargetScope nvarchar(300) NULL,
-                    DeploymentName nvarchar(64) NOT NULL,
-                    ApprovedBy nvarchar(320) NOT NULL,
-                    ApprovedByUserId nvarchar(64) NOT NULL,
-                    ApprovedAtUtc datetime2 NOT NULL,
-                    PreviewEvidence nvarchar(64) NULL,
-                    RevertPlanHash nvarchar(71) NULL,
-                    RevertPlanJson nvarchar(max) NULL,
-                    EventType nvarchar(16) NOT NULL,
-                    Detail nvarchar(1024) NULL,
-                    TimestampUtc datetime2 NOT NULL);
-                IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND INDEXPROPERTY(OBJECT_ID(N'AdsPlanApplyEvents'), N'IX_AdsPlanApplyEvents_ApplyId', 'IndexID') IS NULL
-                CREATE INDEX IX_AdsPlanApplyEvents_ApplyId ON AdsPlanApplyEvents (ApplyId);
-                IF OBJECT_ID(N'AdsPlanApprovals', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApprovals', N'RevertPlanJson') IS NULL
-                ALTER TABLE AdsPlanApprovals ADD RevertPlanJson nvarchar(max) NULL;
-                IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApplyEvents', N'RevertPlanHash') IS NULL
-                ALTER TABLE AdsPlanApplyEvents ADD RevertPlanHash nvarchar(71) NULL;
-                IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApplyEvents', N'RevertPlanJson') IS NULL
-                ALTER TABLE AdsPlanApplyEvents ADD RevertPlanJson nvarchar(max) NULL;
-                IF OBJECT_ID(N'AdsPlanApplyEvents', N'U') IS NOT NULL AND COL_LENGTH(N'AdsPlanApplyEvents', N'TargetScope') IS NULL
-                ALTER TABLE AdsPlanApplyEvents ADD TargetScope nvarchar(300) NULL;
-                IF OBJECT_ID(N'AdsGuardrailPolicies', N'U') IS NULL
-                CREATE TABLE AdsGuardrailPolicies (
-                    Id int NOT NULL PRIMARY KEY,
-                    Json nvarchar(max) NOT NULL,
-                    UpdatedBy nvarchar(320) NOT NULL,
-                    UpdatedByUserId nvarchar(64) NOT NULL,
-                    UpdatedAtUtc datetime2 NOT NULL);
-                IF OBJECT_ID(N'AdsDecomApprovals', N'U') IS NULL
-                CREATE TABLE AdsDecomApprovals (
-                    ExecutionHash nvarchar(71) NOT NULL PRIMARY KEY,
-                    WindowId nvarchar(64) NOT NULL,
-                    PlanHash nvarchar(71) NOT NULL,
-                    SubscriptionId nvarchar(64) NOT NULL,
-                    ApprovedBy nvarchar(320) NOT NULL,
-                    ApprovedByUserId nvarchar(64) NOT NULL,
-                    ApprovedAtUtc datetime2 NOT NULL);
-                IF OBJECT_ID(N'AdsDecomWindowEvents', N'U') IS NULL
-                CREATE TABLE AdsDecomWindowEvents (
-                    Id uniqueidentifier NOT NULL PRIMARY KEY,
-                    ApplyId uniqueidentifier NOT NULL,
-                    Event nvarchar(16) NOT NULL,
-                    WindowId nvarchar(64) NOT NULL,
-                    PlanHash nvarchar(71) NOT NULL,
-                    ExecutionHash nvarchar(71) NOT NULL,
-                    SubscriptionId nvarchar(64) NOT NULL,
-                    Principal nvarchar(320) NOT NULL,
-                    Detail nvarchar(1024) NULL,
-                    AtUtc datetime2 NOT NULL);
-                IF OBJECT_ID(N'AdsDecomWindowEvents', N'U') IS NOT NULL AND INDEXPROPERTY(OBJECT_ID(N'AdsDecomWindowEvents'), N'IX_AdsDecomWindowEvents_ApplyId', 'IndexID') IS NULL
-                CREATE INDEX IX_AdsDecomWindowEvents_ApplyId ON AdsDecomWindowEvents (ApplyId);
-                """);
-        }
-    }
-#endif
-}
+DatabaseBootstrapper.Initialize(app.Services);
 
 // Configure the HTTP request pipeline.
 // Forwarded headers first: behind a TLS-terminating ingress the request only reads as
@@ -217,19 +123,25 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.UseGrpcWeb();
-app.MapGrpcService<HostedDesignService>().EnableGrpcWeb();
-app.MapGrpcService<HostedDeployService>().EnableGrpcWeb();
-app.MapGrpcService<RetailPriceService>().EnableGrpcWeb();
+app.MapAdsGrpcService<HostedDesignService>();
+app.MapAdsGrpcService<HostedDeployService>();
+// The one anonymous service: Cost.GetRetailPrices (public Azure retail prices, no user data).
+app.MapAdsGrpcService<RetailPriceService>(allowAnonymous: true);
 
-#if DEBUG
 if (app.Environment.IsDevelopment())
 {
-    app.MapGrpcReflectionService();
+    // Authenticated callers only: a Development environment name that leaks onto a deployed
+    // host (a common slip) must not publish the service surface to anonymous callers.
+    app.MapGrpcReflectionService().RequireAuthorization();
 }
-#endif
 
-app.MapStaticAssets();
-app.MapRazorPages();
-app.MapFallbackToFile("index.html");
+// The Blazor client must load before any token exists, so these stay anonymous under the
+// fallback policy.
+app.MapStaticAssets().AllowAnonymous();
+app.MapRazorPages().AllowAnonymous();
+app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Run();
+
+// Exposes the entry point as the type argument of WebApplicationFactory<Program> in the server tests.
+public partial class Program { }

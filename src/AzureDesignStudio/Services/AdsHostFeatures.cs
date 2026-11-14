@@ -10,12 +10,20 @@ public class AdsHostFeatures
     /// <summary>Menu label when the host offers tenant discovery; null hides the menu item.</summary>
     public string? TenantScanLabel { get; set; }
 
+    /// <summary>Menu label when the host keeps a local workspace database it can back up and
+    /// restore (the desktop app); null hides the menu item. The browser host leaves it null.</summary>
+    public string? WorkspaceDataLabel { get; set; }
+
     /// <summary>Designs are kept on this machine (the desktop app), not in an account on a
     /// server: saving and loading them needs no sign-in.</summary>
     public bool DesignsAreLocal { get; set; }
 
     /// <summary>Opens the host's scan drawer using the current circuit's services.</summary>
     public Func<IServiceProvider, Task>? OpenTenantScan { get; set; }
+
+    /// <summary>Opens the host's workspace-data drawer (backups, restore) using the current
+    /// circuit's services. Null = feature not present.</summary>
+    public Func<IServiceProvider, Task>? OpenWorkspaceData { get; set; }
 
     /// <summary>One live name-availability answer: true = available, false = taken or
     /// refused (reason in <paramref name="Detail"/>), null = not checked (why in Detail).</summary>

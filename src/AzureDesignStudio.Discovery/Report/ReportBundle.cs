@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AzureDesignStudio.Discovery.Governance;
 
 namespace AzureDesignStudio.Discovery.Report;
 
@@ -73,16 +74,44 @@ public static class ReportBundle
                 foreach (var c in ControlsMap.For("drift-" + d.Status))
                     Csv(sb, "drift-" + d.Status, d.ResourceId, "", c, d.Operation ?? "");
 
+        if (model.Governance is { } governance)
+            foreach (var f in GovernanceStatus.Ordered(governance))
+            {
+                var kind = GovernanceKind(f);
+                foreach (var c in ControlsMap.For(kind))
+                    Csv(sb, kind, f.ResourceId, f.Severity.ToString(), c,
+                        string.IsNullOrWhiteSpace(f.Detail) ? f.Title : f.Title + " - " + f.Detail);
+            }
+
         return sb.ToString();
     }
 
+    /// <summary>The audit kind of a governance finding: <c>advisor-{category}</c> (an Advisor
+    /// recommendation without a category is <c>advisor-uncategorized</c>),
+    /// <c>policy-noncompliant</c> or <c>defender-assessment</c>. They export as UNMAPPED unless
+    /// <see cref="ControlsMap"/> maps them.</summary>
+    public static string GovernanceKind(GovernanceFinding finding) => finding.Source switch
+    {
+        GovernanceSource.Advisor => "advisor-" + (string.IsNullOrWhiteSpace(finding.Category) ? "uncategorized" : finding.Category.Trim()),
+        GovernanceSource.Policy => "policy-noncompliant",
+        GovernanceSource.Defender => "defender-assessment",
+        _ => finding.Source.ToString().ToLowerInvariant(),
+    };
+
     private static void Csv(StringBuilder sb, string kind, string resourceId, string severity, ControlMapping c, string detail) =>
-        sb.Append(Cell(kind)).Append(',').Append(Cell(resourceId)).Append(',').Append(Cell(severity))
+        sb.Append(Cell(kind)).Append(',').Append(Cell(Inert(resourceId))).Append(',').Append(Cell(severity))
             .Append(',').Append(Cell(c.Framework)).Append(',').Append(Cell(c.Control))
-            .Append(',').Append(Cell(c.Title)).Append(',').Append(Cell(detail)).Append('\n');
+            .Append(',').Append(Cell(c.Title)).Append(',').Append(Cell(Inert(detail))).Append('\n');
+
+    // Text from the tenant (policy assignment names, custom Defender assessments) must not open
+    // as a formula (OWASP CSV injection): a leading = + - @ tab or CR gets a ' so a spreadsheet
+    // shows text. Only resource_id and detail - the fixed columns stay as they are ("-" is the
+    // UNMAPPED control).
+    private static string Inert(string value) =>
+        value.Length > 0 && value[0] is '=' or '+' or '-' or '@' or '\t' or '\r' ? "'" + value : value;
 
     private static string Cell(string value) =>
-        value.Contains(',') || value.Contains('"') || value.Contains('\n')
+        value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r')
             ? "\"" + value.Replace("\"", "\"\"") + "\""
             : value;
 }

@@ -10,7 +10,7 @@ namespace AzureDesignStudio.Desktop;
 /// MSAL/WAM path consumed by the gRPC bearer handler; Azure SDK clients get ARM tokens
 /// through one chain, first winner:
 /// cached MSAL account (silent) → <c>az login</c> CLI → managed identity →
-/// service principal (secret from Windows Credential Manager, never config) →
+/// service principal (secret from the OS secret store, never config) →
 /// interactive WAM/device-code last.
 /// </summary>
 public sealed class AdsTokenBroker : TokenCredential
@@ -31,11 +31,11 @@ public sealed class AdsTokenBroker : TokenCredential
 
         var tenantId = config["ArmServicePrincipal:TenantId"];
         var clientId = config["ArmServicePrincipal:ClientId"];
-        var clientSecret = WindowsSecretStore.TryGet("ArmServicePrincipal"); // secret lives in Credential Manager
+        var clientSecret = SecretStore.TryGet("ArmServicePrincipal"); // secret lives in the OS secret store
         if (!string.IsNullOrWhiteSpace(tenantId) && !string.IsNullOrWhiteSpace(clientId) && !string.IsNullOrWhiteSpace(clientSecret))
             chain.Add(new ClientSecretCredential(tenantId, clientId, clientSecret));
         else if (clientSecret != null)
-            logger.LogWarning("Credential Manager has an ArmServicePrincipal secret but ArmServicePrincipal:TenantId/ClientId are not set; SP credential skipped.");
+            logger.LogWarning($"{SecretStore.Name} has an ArmServicePrincipal secret but ArmServicePrincipal:TenantId/ClientId are not set; SP credential skipped.");
 
         chain.Add(new MsalArmInteractiveCredential(msal)); // interactive last; unavailable when MSAL unconfigured
 

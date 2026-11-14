@@ -1,5 +1,7 @@
 using AzureDesignStudio.Core.Compute;
 using AzureDesignStudio.Core.Network;
+using Blazor.Diagrams;
+using Blazor.Diagrams.Core.Anchors;
 using Blazor.Diagrams.Core.Models;
 
 namespace AzureDesignStudio.Core.Tests
@@ -30,6 +32,13 @@ namespace AzureDesignStudio.Core.Tests
                 case VirtualMachineModel or VirtualMachineScaleSetModel or LoadBalancerModel:
                     NewSubnet().AddChild(model);
                     break;
+                case NatGatewayModel nat:
+                    {
+                        // A NAT gateway without a public IP is refused by Azure, so it is not exportable.
+                        var pip = new PublicIpModel { Name = "ads-nat-pip" };
+                        new BlazorDiagram().Links.Add(new LinkModel(new SinglePortAnchor(pip.Ports[1]), new SinglePortAnchor(nat.Ports[0])));
+                        break;
+                    }
                 case PrivateEndpointModel endpoint:
                     endpoint.TargetResourceId = SampleTargetId;
                     NewSubnet().AddChild(model);

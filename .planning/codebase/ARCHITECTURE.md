@@ -55,7 +55,7 @@ Azure Design Studio is a layered .NET 10 solution: one shared Blazor UI head (`A
 | Contracts | Protobuf service + message definitions | `src/AzureDesignStudio.SharedModels/design_view_model.proto`, `deploy_model.proto`, `cost_model.proto` |
 | Discovery engines | Read-only analysis over inventory snapshots (drift, exposure, cost, decommission, IaC) | `src/AzureDesignStudio.Discovery/` |
 | Workspace persistence | SQLite EF Core store for designs/scans/snapshots/plans | `src/AzureDesignStudio.Workspace/WorkspaceDbContext.cs` |
-| MCP server | 13 read-only tools over the workspace, stdio transport | `src/AzureDesignStudio.Mcp/Program.cs`, `src/AzureDesignStudio.Mcp/AdsMcpTools.cs` |
+| MCP server | 15 read-only tools over the workspace, stdio transport | `src/AzureDesignStudio.Mcp/Program.cs`, `src/AzureDesignStudio.Mcp/AdsMcpTools.cs` |
 
 ## Pattern Overview
 
@@ -108,14 +108,14 @@ Azure Design Studio is a layered .NET 10 solution: one shared Blazor UI head (`A
 **Persistence layer:**
 - Purpose: durable designs (server) and offline workspace (client).
 - Location: `src/AzureDesignStudio.Server/Models/DesignDbContext.cs`, `src/AzureDesignStudio.Workspace/`.
-- Contains: `AdsDesigns`, `AzureSubscriptions`, approval/audit/guardrail tables; `Designs`, `Scans`, `ResourceSnapshots`, `CostCache`, `ExecutionPlans`, `AuditRecords`, `NodePositions`, `ChangeFeed`, `DecomWindows`.
+- Contains: `AdsDesigns`, `AzureSubscriptions`, approval/audit/guardrail tables; `Designs`, `Scans`, `ResourceSnapshots`, `CostCache`, `ExecutionPlans`, `AuditRecords`, `NodePositions`, `ChangeFeed`, `DecomWindows`, `GovernanceFindings`.
 - Depends on: EF Core InMemory/SqlServer (server), EF Core SQLite (workspace), `Core` (workspace).
 - Used by: `DesignService`/`DeployService`; Desktop host and `Mcp`.
 
 **Discovery layer:**
 - Purpose: deterministic, network-optional analysis engines over inventory snapshots.
 - Location: `src/AzureDesignStudio.Discovery/`.
-- Contains: `Arm/` (transport + tenant inventory), `ResourceGraph/`, `Scan/ScanEngine.cs`, `Drift/`, `Exposure/`, `Cost/`, `Decommission/`, `Iac/`, `Security/`, `Unmanaged/`, `Naming/`, `Preflight/`, `Report/`, `Analysis/`, `Mcp/AdsToolEngine.cs`.
+- Contains: `Arm/` (transport + tenant inventory), `ResourceGraph/`, `Scan/ScanEngine.cs`, `Drift/`, `Exposure/`, `Cost/`, `Decommission/`, `Iac/`, `Security/`, `Unmanaged/`, `Naming/`, `Preflight/` (permission probes; Wave B2/B4 policy and quota preflight run by the `WhatIf` RPC), `Governance/` (Wave B3 Advisor/Policy/Defender queries and normalizer), `Report/`, `Analysis/`, `Mcp/AdsToolEngine.cs`.
 - Depends on: `Azure.Identity` package only — no project references.
 - Used by: Desktop (`MauiProgram.cs` registrations), Server (`DeployService`), MCP (`AdsMcpTools`), tests.
 

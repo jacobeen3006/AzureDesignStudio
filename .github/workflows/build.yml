@@ -116,6 +116,62 @@ jobs:
       with:
         category: '/language:csharp'
 
+  sqlserver:
+    name: SQL Server migrations (container)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: 'Y'
+          # Ephemeral credential for a container that lives only for this job; it is not a secret.
+          MSSQL_SA_PASSWORD: 'Ads_Test_Only_1!'
+        ports:
+          - 1433:1433
+
+    env:
+      # The SQL Server tests skip when this is unset. Same throwaway password as above.
+      ADS_TEST_SQLSERVER: 'Server=127.0.0.1,1433;User ID=sa;Password=Ads_Test_Only_1!;TrustServerCertificate=True;Encrypt=False;'
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # avoid shallow clone so nbgv can do its work.
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        global-json-file: global.json
+
+    - name: Restore (locked)
+      run: dotnet restore src/AzureDesignStudio.Server.Tests --locked-mode
+
+    - name: Lock files must be committed
+      run: git diff --exit-code -- '*packages.lock.json'
+
+    # Server.Tests references the Server, which hosts the WASM client: no AOT here, as in the build job.
+    - name: Build
+      run: dotnet build src/AzureDesignStudio.Server.Tests -c Release -p:RunAOTCompilation=false
+
+    - name: Wait for SQL Server
+      run: |
+        for i in $(seq 1 60); do
+          if (exec 3<>/dev/tcp/127.0.0.1/1433) 2>/dev/null; then
+            echo "port 1433 is open after $((i * 2)) s"
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "SQL Server did not open port 1433 within 120 s" >&2
+        exit 1
+
+    # Upgrade a legacy database, schema parity, concurrent migrate, backup/restore rehearsal and the
+    # bootstrapper refusals. The tests retry the first login themselves.
+    - name: Test (SQL Server migrations)
+      run: dotnet test src/AzureDesignStudio.Server.Tests -c Release --no-build -p:RunAOTCompilation=false --filter "Category=SqlServer"
+
   desktop:
     name: Desktop (windows-latest)
     runs-on: windows-latest

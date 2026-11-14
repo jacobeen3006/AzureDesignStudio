@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 
 namespace AzureDesignStudio.Core.Validation
 {
+    [JsonConverter(typeof(JsonStringEnumConverter))]
     public enum ValidationSeverity
     {
         Info,

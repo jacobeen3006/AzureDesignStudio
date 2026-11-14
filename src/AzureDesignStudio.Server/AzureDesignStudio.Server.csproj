@@ -25,7 +25,12 @@
     <PackageReference Include="Grpc.AspNetCore.Web" />
     <PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
     <PackageReference Include="Microsoft.Identity.Web" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" />
@@ -36,6 +41,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\AzureDesignStudio.Core\AzureDesignStudio.Core.csproj" />
     <ProjectReference Include="..\AzureDesignStudio.SharedModels\AzureDesignStudio.SharedModels.csproj" />
     <ProjectReference Include="..\AzureDesignStudio\AzureDesignStudio.csproj" />
     <ProjectReference Include="..\AzureDesignStudio.Discovery\AzureDesignStudio.Discovery.csproj" />

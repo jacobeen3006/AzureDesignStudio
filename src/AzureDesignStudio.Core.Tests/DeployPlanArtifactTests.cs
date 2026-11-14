@@ -23,6 +23,22 @@ public class DeployPlanArtifactTests
     }
 
     [Fact]
+    public void AStackPlanBindsTheStackBodyHashAndNeverEqualsAPlainPlan()
+    {
+        var plain = DeployPlanArtifact.Create("sub-1", "rg1", Template, "{}");
+        var stackA = DeployPlanArtifact.CreateForStack("sub-1", "rg1", Template, "{}", "sha256:aaaa");
+        var stackB = DeployPlanArtifact.CreateForStack("sub-1", "rg1", TemplateSameReordered, "{ }", "sha256:bbbb");
+
+        Assert.NotEqual(plain.PlanHash, stackA.PlanHash);
+        Assert.NotEqual(stackA.PlanHash, stackB.PlanHash);
+        Assert.Equal(stackA.PlanHash, DeployPlanArtifact.CreateForStack("sub-1", "rg1", TemplateSameReordered, "{ }", "sha256:aaaa").PlanHash);
+        Assert.True(DeployPlanArtifact.Verify(stackA.CanonicalJson, stackA.PlanHash));
+        Assert.Contains("\"stack\":\"sha256:aaaa\"", stackA.CanonicalJson);
+        Assert.DoesNotContain("\"stack\"", plain.CanonicalJson); // plain plans keep their old bytes
+        Assert.Throws<System.ArgumentException>(() => DeployPlanArtifact.CreateForStack("sub-1", "rg1", Template, "{}", " "));
+    }
+
+    [Fact]
     public void AnyDeployRelevantChange_ChangesHash()
     {
         var baseline = DeployPlanArtifact.Create("sub-1", "rg1", Template);
