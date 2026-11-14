@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Identity, Guardrails, and Offline Development
 status: executing
-stopped_at: Completed 05-05-PLAN.md
-last_updated: "2026-11-14T15:45:16.783Z"
+stopped_at: Completed 05-06-PLAN.md
+last_updated: "2026-11-14T15:52:24.455Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 05 execution started
-state_head: d5052e5b42a3ce90c68021ee43b5bcd366ddd31f
+state_head: 5c4b9546db4cec4daca0191769ccec654c80f661
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 45
-  completed_plans: 37
+  completed_plans: 38
   percent: 27
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 ## Current Position
 
 Phase: 05 (Identity, Guardrails, and Offline Development) — EXECUTING
-Plan: 6 of 11
+Plan: 7 of 11
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 05 execution started
 
@@ -83,6 +83,7 @@ Progress: [███░░░░░░░] 27%
 | Phase 05 P03 | 20min | 2 tasks | 3 files |
 | Phase 05 P04 | 45min | 3 tasks | 14 files |
 | Phase 05 P05 | 25 min | 2 tasks | 6 files |
+| Phase 05 P06 | 35min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -137,6 +138,7 @@ Progress: [███░░░░░░░] 27%
 - [Phase 05]: 05-04: TenantGuardrails SQL Server Up is five guarded commands (column, filtered unique index, two tables, events index) with no default constraint; proved in the mssql 2022 container (9 passed, 0 skipped)
 - [Phase 05]: 05-05: development crypto key-ring folder is created lazily on first use (0700 on Unix, DPAPI keys on Windows); an existing folder is never chmod-ed
 - [Phase 05]: 05-05: Crypto:Provider=Development is refused in Production before anything registers; dev1: prefix isolates development ciphertext from Key Vault blobs
+- [Phase 05]: 05-06: a gate token issued without a scope is Stale for any scoped consume and invisible to the scope-aware peek (fail closed); guardrail audit event is added inside UpsertGuardrailRowAsync so the retry path re-adds exactly one
 
 ### Pending Todos
 
@@ -160,6 +162,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T15:45:16.679Z
-Stopped at: Completed 05-05-PLAN.md
+Last session: 2026-11-14T15:52:24.346Z
+Stopped at: Completed 05-06-PLAN.md
 Resume file: None
