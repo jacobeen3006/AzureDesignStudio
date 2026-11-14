@@ -5,6 +5,7 @@ using Grpc.AspNetCore.Server;
 using Grpc.Core;
 using AzureDesignStudio.Services.Models;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -116,6 +117,46 @@ public class ServerHostTests(AdsServerFactory factory) : IClassFixture<AdsServer
         Assert.False(File.Exists(first.DbFile));
         Assert.False(File.Exists(second.DbFile));
     }
+
+    [Fact]
+    public async Task DeploySaveSubscriptionWithoutAKeyVaultAnswers503InBand()
+    {
+        // The real CryptoService with the checked-in sample vault name reports the missing
+        // vault from its first use, before any network call.
+        using var channel = factory.CreateGrpcChannel(Guid.NewGuid());
+
+        var response = await new Deploy.DeployClient(channel).SaveSubscriptionInfoAsync(NewSubscription());
+
+        Assert.Equal(503, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeploySaveSubscriptionWithAFakeCryptoServiceStoresTheLink()
+    {
+        using var withFake = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services => services.AddSingleton<ICryptoService>(new FakeCryptoService())));
+        using var channel = withFake.CreateGrpcChannel(Guid.NewGuid());
+        var deploy = new Deploy.DeployClient(channel);
+        var request = NewSubscription();
+
+        var saved = await deploy.SaveSubscriptionInfoAsync(request);
+        Assert.Equal(200, saved.StatusCode);
+
+        var loaded = await deploy.LoadSubscriptionInfoAsync(new Empty());
+        Assert.Equal(200, loaded.StatusCode);
+        var link = Assert.Single(loaded.SubscriptionData);
+        Assert.Equal(request.SubscriptionId, link.SubscriptionId);
+        Assert.Equal(request.SubscriptionName, link.SubscriptionName);
+    }
+
+    private static SubscriptionInfo NewSubscription() => new()
+    {
+        SubscriptionId = Guid.NewGuid().ToString(),
+        TenantId = Guid.NewGuid().ToString(),
+        ClientId = Guid.NewGuid().ToString(),
+        ClientSecret = "secret",
+        SubscriptionName = "crypto seam",
+    };
 
     [Fact]
     public async Task FailureAnonymousCallerIsUnauthenticated()
