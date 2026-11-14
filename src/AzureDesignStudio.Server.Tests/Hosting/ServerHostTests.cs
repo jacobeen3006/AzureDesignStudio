@@ -1,6 +1,9 @@
 using AzureDesignStudio.Services;
 using AzureDesignStudio.SharedModels.Protos;
 using Google.Protobuf.WellKnownTypes;
+using Grpc.AspNetCore.Server;
+using Grpc.Core;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -28,5 +31,60 @@ public class ServerHostTests(AdsServerFactory factory) : IClassFixture<AdsServer
         var loaded = await design.LoadAsync(new LoadDesignRequest { Name = "tracer design" });
         Assert.Equal(200, loaded.StatusCode);
         Assert.Equal("""{"nodes":[]}""", loaded.Data);
+    }
+
+    [Fact]
+    public async Task FailureAnonymousCallerIsUnauthenticated()
+    {
+        using var channel = factory.CreateGrpcChannel();
+        var design = new Design.DesignClient(channel);
+
+        var ex = await Assert.ThrowsAsync<RpcException>(() => design.GetSavedAsync(new Empty()).ResponseAsync);
+
+        Assert.Equal(StatusCode.Unauthenticated, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task FailureAuthenticatedCallerWithoutTheRequiredScopeIsPermissionDenied()
+    {
+        using var channel = factory.CreateGrpcChannel(Guid.NewGuid(), withScope: false);
+        var design = new Design.DesignClient(channel);
+        var deploy = new Deploy.DeployClient(channel);
+
+        var designEx = await Assert.ThrowsAsync<RpcException>(() => design.GetSavedAsync(new Empty()).ResponseAsync);
+        var deployEx = await Assert.ThrowsAsync<RpcException>(() => deploy.GetGuardrailPolicyAsync(new Empty()).ResponseAsync);
+
+        Assert.Equal(StatusCode.PermissionDenied, designEx.StatusCode);
+        Assert.Equal(StatusCode.PermissionDenied, deployEx.StatusCode);
+    }
+
+    [Fact]
+    public void BootsTestScopeMatchesTheConfiguredScope()
+    {
+        var configuration = factory.Services.GetRequiredService<IConfiguration>();
+
+        Assert.Equal(TestAuthHandler.ScopeValue, configuration["AzureAd:Scopes"]);
+    }
+
+    [Fact]
+    public async Task EveryServiceIsReachable()
+    {
+        var services = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .Select(e => e.Metadata.GetMetadata<GrpcMethodMetadata>())
+            .Where(m => m is not null)
+            .Select(m => m!.Method.ServiceName)
+            .Distinct()
+            .Order()
+            .ToArray();
+        Assert.Equal(["Cost", "Deploy", "Design"], services);
+
+        using var authenticated = factory.CreateGrpcChannel(Guid.NewGuid());
+        Assert.Equal(200, (await new Design.DesignClient(authenticated).GetSavedAsync(new Empty())).StatusCode);
+        Assert.Equal(200, (await new Deploy.DeployClient(authenticated).GetGuardrailPolicyAsync(new Empty())).StatusCode);
+
+        // Cost is anonymous by design; an empty request is refused before any call to the price API.
+        using var anonymous = factory.CreateGrpcChannel();
+        var prices = await new Cost.CostClient(anonymous).GetRetailPricesAsync(new RetailPriceRequest());
+        Assert.Equal(400, prices.StatusCode);
     }
 }
