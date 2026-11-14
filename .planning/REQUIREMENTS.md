@@ -9,17 +9,17 @@ Requirements for the pilot-ready milestone. Each maps to exactly one roadmap pha
 
 ### Identity & Authorization (IDA)
 
-- [ ] **IDA-01**: A caller with a missing or malformed `oid`/`tid` claim receives a typed 401 response, never a 500.
-- [ ] **IDA-02**: A caller whose token carries the legacy `.../objectidentifier` URI claim can still read their existing designs, subscriptions, and quota.
-- [ ] **IDA-03**: Every gRPC method is deny-by-default; only an explicit anonymous list is callable without authentication, proven by a reflection-based integration test.
-- [ ] **IDA-04**: Only a caller holding the `Guardrail.Admin` app role can read or mutate guardrail policy; every other authenticated caller receives 403.
-- [ ] **IDA-05**: Guardrail policies and plan approvals are tenant-scoped; two tenants cannot read or overwrite each other's records.
-- [ ] **IDA-06**: Only a caller holding `Deploy.Approver` can approve a plan, and self-approval is checked as a separate rule.
+- [x] **IDA-01**: A caller with a missing or malformed `oid`/`tid` claim receives a typed 401 response, never a 500.
+- [x] **IDA-02**: A caller whose token carries the legacy `.../objectidentifier` URI claim can still read their existing designs, subscriptions, and quota.
+- [x] **IDA-03**: Every gRPC method is deny-by-default; only an explicit anonymous list is callable without authentication, proven by a reflection-based integration test.
+- [x] **IDA-04**: Only a caller holding the `Guardrail.Admin` app role can read or mutate guardrail policy; every other authenticated caller receives 403.
+- [x] **IDA-05**: Guardrail policies and plan approvals are tenant-scoped; two tenants cannot read or overwrite each other's records.
+- [x] **IDA-06**: Only a caller holding `Deploy.Approver` can approve a plan, and self-approval is checked as a separate rule.
 
 ### Credentials (CRED)
 
-- [ ] **CRED-01**: A developer can register and exercise a subscription in DEBUG with no Key Vault and no Azure credentials.
-- [ ] **CRED-02**: Production refuses development crypto keys and still requires Key Vault.
+- [x] **CRED-01**: A developer can register and exercise a subscription in DEBUG with no Key Vault and no Azure credentials.
+- [x] **CRED-02**: Production refuses development crypto keys and still requires Key Vault.
 - [ ] **CRED-03**: No subscription client secret is stored in a form the server can recover and replay; the audit record names the credential type used.
 - [ ] **CRED-04**: Existing subscriptions migrate to the new credential model behind a dual-run flag with a documented rollback.
 - [ ] **CRED-05**: Desktop user-scoped ARM reads and writes use the desktop token broker rather than a server-stored secret.
@@ -135,14 +135,14 @@ Updated 2026-10-21 during roadmap creation. Every v1 requirement maps to exactly
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| IDA-01 | Phase 5 | Pending |
-| IDA-02 | Phase 5 | Pending |
-| IDA-03 | Phase 5 | Pending |
-| IDA-04 | Phase 5 | Pending |
-| IDA-05 | Phase 5 | Pending |
-| IDA-06 | Phase 5 | Pending |
-| CRED-01 | Phase 5 | Pending |
-| CRED-02 | Phase 5 | Pending |
+| IDA-01 | Phase 5 | Complete |
+| IDA-02 | Phase 5 | Complete |
+| IDA-03 | Phase 5 | Complete |
+| IDA-04 | Phase 5 | Complete |
+| IDA-05 | Phase 5 | Complete |
+| IDA-06 | Phase 5 | Complete |
+| CRED-01 | Phase 5 | Complete |
+| CRED-02 | Phase 5 | Complete |
 | CRED-03 | Phase 9 | Pending |
 | CRED-04 | Phase 9 | Pending |
 | CRED-05 | Phase 9 | Pending |

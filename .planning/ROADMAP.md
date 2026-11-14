@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 2: Reproducible Build and CI Baseline** - Pin the SDK, centralize and lock packages, gate Desktop on PRs, block vulnerable packages
 - [x] **Phase 3: Server Foundation and Integration Harness** - Config-selected providers, a reachable `Program`, and a real hosted-server test channel (completed 2026-11-14)
 - [x] **Phase 4: Database Durability** - Baseline migrations, WAL, integrity check, backup/restore, and read-only MCP over one workspace (completed 2026-11-14)
-- [ ] **Phase 5: Identity, Guardrails, and Offline Development** - Typed `oid`/`tid`, deny-by-default RPCs, tenant-scoped roles, and a DEV crypto provider
+- [x] **Phase 5: Identity, Guardrails, and Offline Development** - Typed `oid`/`tid`, deny-by-default RPCs, tenant-scoped roles, and a DEV crypto provider (completed 2026-11-14)
 - [ ] **Phase 6: Bounds, Payload Contract, and Health** - Per-user limits, calibrated deadlines, shared payload caps, and anonymous health endpoints
 - [ ] **Phase 7: Round 2 Shell Completion** - Zone contract, palette lifetime and keyboard path, honest status, one theme axis, link and a11y gates (parallel track)
 - [ ] **Phase 8: Verification Depth and Diagnostics** - Server, component, and E2E suites in CI, coverage and flake budgets, stable error codes, bounded logs, support bundle
@@ -179,7 +179,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. A caller without `Guardrail.Admin` receives 403 for guardrail read/mutation, two tenants cannot read or overwrite each other's policies or approvals, and approval requires `Deploy.Approver` with self-approval refused as a separate rule.
   5. A DEBUG developer registers and exercises a subscription with no Key Vault and no Azure credentials, while Production refuses development keys and still requires Key Vault.
 
-**Plans**: 11/11 plans executed
+**Plans**: 11/11 plans complete
 **Wave 1**
 - [x] 05-01-PLAN.md — Typed caller identity foundation (AdsIdentity, AdsCaller, `ServiceTools.TryGetCaller` traced through `Design.GetSaved`), in-process single-user marker, extended test helpers
 
@@ -315,7 +315,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
 | 3. Server Foundation and Integration Harness | 6/6 | Complete    | 2026-11-14 |
 | 4. Database Durability | 13/13 | Complete    | 2026-11-14 |
-| 5. Identity, Guardrails, and Offline Development | 11/11 | In Progress | - |
+| 5. Identity, Guardrails, and Offline Development | 11/11 | Complete    | 2026-11-14 |
 | 6. Bounds, Payload Contract, and Health | 0/TBD | Not started | - |
 | 7. Round 2 Shell Completion | 0/TBD | Not started | - |
 | 8. Verification Depth and Diagnostics | 0/TBD | Not started | - |
