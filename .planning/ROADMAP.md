@@ -135,7 +135,36 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Startup `quick_check` surfaces a deliberately corrupted workspace instead of opening it, and a user can take a `VACUUM INTO` backup and restore it with data verified.
   5. MCP opens a WAL workspace read-only (or reports the explicit `ReadWrite + query_only` fallback it used) and passes a cold-workspace test; the baseline adopts existing DDL, reports or dedupes rows violating new unique indexes, and documents `__EFMigrationsLock` recovery.
 
-**Plans**: TBD
+**Plans**: 13 plans
+**Wave 1**
+- [ ] 04-01-PLAN.md — Tooling and fixtures: dotnet-ef 10.0.13 root manifest, EF Design package, L1-L4 legacy workspace fixtures, loader and schema describer
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 04-02-PLAN.md — Workspace schema authority: guarded-SQL baseline migration, legacy adoption, bounded Migrate, WAL assertion
+- [ ] 04-03-PLAN.md — Server schema authority: SqlServerDesignDbContext, guarded T-SQL baseline, Migrate bootstrap with AllowCreate/Migrate switches, migration-site guard
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 04-04-PLAN.md — One connection factory: WAL without shared cache, per-open pragmas, MCP read-only ladder, `ads-mcp --self-check`, 15 s concurrency proof
+- [ ] 04-05-PLAN.md — Integrity check and `VACUUM INTO` backups: manifest, strict naming, pure retention
+- [ ] 04-06-PLAN.md — SQL Server rehearsal in a container: parity, concurrent migrate, backup/restore rollback, migration 2, CI job
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 04-07-PLAN.md — Workspace startup: corruption quarantine with notice, premigration backup before any migration
+- [ ] 04-08-PLAN.md — deploy.db under migrations (separable): SqliteDesignDbContext set, private backup, no model-creation calls outside the server bootstrapper
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 04-09-PLAN.md — Verified staged restore and the 24 h backup service
+- [ ] 04-10-PLAN.md — Unique-index dedupe (backup first, removed-rows report) and abandoned-lock recovery proof
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 04-11-PLAN.md — Desktop host: startup swap, failure page, workspace-data drawer, scheduler, `ADS_DATA_DIR`
+
+**Wave 7** *(blocked on Wave 6 completion)*
+- [ ] 04-12-PLAN.md — Operator runbook, AGENTS.md updates and a drift-guard test
+
+**Wave 8** *(blocked on Wave 7 completion)*
+- [ ] 04-13-PLAN.md — Phase gate and human verification (Mac Catalyst launch, restore drill, runbook read) — non-autonomous
+
 **Implementation note**: `src/AzureDesignStudio.Workspace/WorkspaceDbContext.cs` and the `WorkspaceDb` options/pragma factory; `src/AzureDesignStudio.Mcp/AdsWorkspace.cs`. Baseline-as-guarded-SQL: migration 1 is the existing guarded DDL via `migrationBuilder.Sql` for both providers so legacy databases receive a history row without re-creation; migrations 2+ are generated diffs. `dotnet-ef` 10.0.13, no `Cache=Shared`, `VACUUM INTO` backup, SQL Server parity in its own container job, checked-in legacy fixtures built from today's bootstrap DDL. Back up before migrating; never re-create a user database.
 
 ### Phase 5: Identity, Guardrails, and Offline Development
@@ -256,7 +285,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 | 1. Land and Stabilize | 8/8 | Complete    | 2026-10-21 |
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
 | 3. Server Foundation and Integration Harness | 6/6 | Complete    | 2026-11-14 |
-| 4. Database Durability | 0/TBD | Not started | - |
+| 4. Database Durability | 0/13 | Not started | - |
 | 5. Identity, Guardrails, and Offline Development | 0/TBD | Not started | - |
 | 6. Bounds, Payload Contract, and Health | 0/TBD | Not started | - |
 | 7. Round 2 Shell Completion | 0/TBD | Not started | - |
