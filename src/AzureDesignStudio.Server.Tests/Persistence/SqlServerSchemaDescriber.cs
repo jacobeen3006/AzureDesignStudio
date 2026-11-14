@@ -68,15 +68,16 @@ public static class SqlServerSchemaDescriber
     private static IReadOnlyList<string> Indexes(string connectionString) =>
         Query(connectionString, """
             SELECT t.name, i.name, i.is_unique,
-                   STRING_AGG(c.name, N',') WITHIN GROUP (ORDER BY ic.key_ordinal)
+                   STRING_AGG(c.name, N',') WITHIN GROUP (ORDER BY ic.key_ordinal),
+                   ISNULL(i.filter_definition, N'')
             FROM sys.indexes i
             JOIN sys.tables t ON t.object_id = i.object_id
             JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
             JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
             WHERE i.is_primary_key = 0 AND i.type > 0 AND t.name <> N'__EFMigrationsHistory'
-            GROUP BY t.name, i.name, i.is_unique
+            GROUP BY t.name, i.name, i.is_unique, i.filter_definition
             """,
-            r => $"index {r.GetString(0)}.{r.GetString(1)} unique={r.GetBoolean(2)} ({r.GetString(3)})");
+            r => $"index {r.GetString(0)}.{r.GetString(1)} unique={r.GetBoolean(2)} ({r.GetString(3)}) filter={r.GetString(4)}");
 
     private static IReadOnlyList<string> Checks(string connectionString) =>
         Query(connectionString, """
