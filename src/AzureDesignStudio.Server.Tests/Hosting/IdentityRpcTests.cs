@@ -1,3 +1,5 @@
+using AzureDesignStudio.Core.Common;
+using AzureDesignStudio.Services;
 using AzureDesignStudio.SharedModels.Protos;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.AspNetCore.Server;
@@ -126,5 +128,41 @@ public sealed class IdentityRpcTests(AdsServerFactory factory) : IClassFixture<A
         using var channel = factory.CreateGrpcChannel(Guid.NewGuid(), claims: NonGuidShortOid);
 
         Assert.Equal(401, await Rpcs[rpc](channel));
+    }
+
+    // --- the client contract: a 401 is an answer, never a reason to queue or retry ---
+
+    /// <summary>An offline store that counts how often a design is queued.</summary>
+    private sealed class CountingOfflineStore : IDesignOfflineStore
+    {
+        public int SaveCalls { get; private set; }
+
+        public Task SaveAsync(string name, string data)
+        {
+            SaveCalls++;
+            return Task.CompletedTask;
+        }
+
+        public Task<string?> TryLoadAsync(string name) => Task.FromResult<string?>(null);
+        public Task<IList<string>> ListAsync() => Task.FromResult<IList<string>>([]);
+        public Task DeleteAsync(string name) => Task.CompletedTask;
+        public Task<IList<(string Name, string Data)>> ListPendingAsync() =>
+            Task.FromResult<IList<(string Name, string Data)>>([]);
+        public Task ClearPendingAsync(string name) => Task.CompletedTask;
+    }
+
+    [Theory]
+    [InlineData(false)] // no tid
+    [InlineData(true)] // a short oid that is not a GUID
+    public async Task ADesktopWrapperOverARealHostQueuesNothingFor401(bool nonGuidOid)
+    {
+        using var channel = factory.CreateGrpcChannel(Guid.NewGuid(), claims: nonGuidOid ? NonGuidShortOid : NoTenant);
+        var store = new CountingOfflineStore();
+        var service = new DesignGrpcService(new FixedClientFactory(new Design.DesignClient(channel)), [store]);
+
+        Assert.Equal(401, await service.SaveDesign("net", "{}"));
+
+        Assert.Equal(0, store.SaveCalls);
+        Assert.False(service.LastCallWasOffline);
     }
 }

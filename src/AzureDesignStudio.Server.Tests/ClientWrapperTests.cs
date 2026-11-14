@@ -143,6 +143,21 @@ public class DesignGrpcServiceTests
     }
 
     [Fact]
+    public async Task ADesktopClientDoesNotQueueOrRetryA401InAResponse()
+    {
+        // The server answers an unusable identity in-band (status 401 in the message), not with
+        // Unauthenticated: that is an answer, not "offline", so nothing is queued for a retry loop.
+        _server.Refuse["net"] = 401;
+        var service = Desktop;
+
+        Assert.Equal(401, await service.SaveDesign("net", "{}"));
+
+        Assert.Empty(_store.Pending);
+        Assert.False(service.LastCallWasOffline);
+        Assert.Equal(["net"], _server.SaveCalls);
+    }
+
+    [Fact]
     public async Task WebClientSurvivesAPlainNetworkFailure()
     {
         _server.Failure = new HttpRequestException("connection refused");
