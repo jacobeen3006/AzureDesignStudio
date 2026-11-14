@@ -362,6 +362,32 @@ public class DeployGrpcServiceTests
         public override AsyncUnaryCall<PlanApprovalResponse> ApprovePlanAsync(PlanApprovalRequest request, CallOptions options) =>
             FakeCalls.Unary(() => Guard(() => new PlanApprovalResponse { StatusCode = Status }));
 
+        public List<Empty> TenantSettingsReads { get; } = [];
+        public List<TenantSettingsRequest> TenantSettingsWrites { get; } = [];
+        public string? SettingsError { get; set; }
+
+        public override AsyncUnaryCall<TenantSettingsResponse> GetTenantSettingsAsync(Empty request, CallOptions options) =>
+            FakeCalls.Unary(() => Guard(() =>
+            {
+                TenantSettingsReads.Add(request);
+                return new TenantSettingsResponse
+                {
+                    StatusCode = Status, ErrorMessage = SettingsError ?? "", AllowSelfApproval = Status == 200,
+                    GuardrailPolicyMode = Status == 200 ? "merge" : "", UpdatedBy = Status == 200 ? "Ada" : "",
+                };
+            }));
+
+        public override AsyncUnaryCall<TenantSettingsResponse> SetTenantSettingsAsync(TenantSettingsRequest request, CallOptions options) =>
+            FakeCalls.Unary(() => Guard(() =>
+            {
+                TenantSettingsWrites.Add(request);
+                return new TenantSettingsResponse
+                {
+                    StatusCode = Status, ErrorMessage = SettingsError ?? "",
+                    AllowSelfApproval = request.AllowSelfApproval, GuardrailPolicyMode = request.GuardrailPolicyMode,
+                };
+            }));
+
         public List<StackWhatIfRequest> StackWhatIfs { get; } = [];
 
         public override AsyncUnaryCall<StackWhatIfResponse> StackWhatIfAsync(StackWhatIfRequest request, CallOptions options) =>
@@ -464,6 +490,86 @@ public class DeployGrpcServiceTests
 
         Assert.Equal(503, await Service.LinkAzureSubscription(new SubscriptionInfo()));
         Assert.Null(await Service.ApprovePlanAsync("sha256:abc"));
+    }
+
+    // --- tenant settings (D-02, D-05): thin wrappers, the server alone decides who may call ---
+
+    [Fact]
+    public async Task GetTenantSettingsSendsAnEmptyRequestAndReturnsTheServersAnswerAsItIs()
+    {
+        var response = await Service.GetTenantSettingsAsync();
+
+        Assert.Single(_server.TenantSettingsReads);
+        Assert.Equal(new Empty(), _server.TenantSettingsReads[0]);
+        Assert.Equal(200, response!.StatusCode);
+        Assert.True(response.AllowSelfApproval);
+        Assert.Equal("merge", response.GuardrailPolicyMode);
+        Assert.Equal("Ada", response.UpdatedBy);
+    }
+
+    [Fact]
+    public async Task SetTenantSettingsSendsBothValuesInOneRequest()
+    {
+        var response = await Service.SetTenantSettingsAsync(true, "merge");
+
+        var sent = Assert.Single(_server.TenantSettingsWrites);
+        Assert.True(sent.AllowSelfApproval);
+        Assert.Equal("merge", sent.GuardrailPolicyMode);
+        Assert.Equal(200, response!.StatusCode);
+        Assert.True(response.AllowSelfApproval);
+        Assert.Equal("merge", response.GuardrailPolicyMode);
+    }
+
+    [Fact]
+    public async Task AForbiddenAnswerPassesThroughWithItsCodedTextOnBothWrappers()
+    {
+        _server.Status = 403;
+        _server.SettingsError = "TENANT_SETTINGS_ADMIN_REQUIRED: the Guardrail.Admin app role is required.";
+
+        var get = await Service.GetTenantSettingsAsync();
+        var set = await Service.SetTenantSettingsAsync(true, "replace");
+
+        Assert.Equal(403, get!.StatusCode);
+        Assert.StartsWith("TENANT_SETTINGS_ADMIN_REQUIRED", get.ErrorMessage);
+        Assert.Equal(403, set!.StatusCode);
+        Assert.StartsWith("TENANT_SETTINGS_ADMIN_REQUIRED", set.ErrorMessage);
+    }
+
+    [Theory]
+    [InlineData(400, "TENANT_SETTINGS_INVALID: guardrail_policy_mode must be 'replace' or 'merge'.")]
+    [InlineData(401, "IDENTITY_INVALID")]
+    public async Task EveryOtherServerStatusComesBackUntouched(int status, string error)
+    {
+        _server.Status = status;
+        _server.SettingsError = error;
+
+        var set = await Service.SetTenantSettingsAsync(false, "union");
+
+        Assert.Equal(status, set!.StatusCode);
+        Assert.Equal(error, set.ErrorMessage);
+    }
+
+    [Theory]
+    [InlineData(StatusCode.Unavailable)]
+    [InlineData(StatusCode.Unauthenticated)]
+    public async Task ATransportBreakAnswersNullOnBothWrappersAndNeverThrows(StatusCode code)
+    {
+        _server.Failure = FakeCalls.Rpc(code);
+
+        Assert.Null(await Service.GetTenantSettingsAsync());
+        Assert.Null(await Service.SetTenantSettingsAsync(true, "merge"));
+    }
+
+    [Fact]
+    public async Task AnInvalidOperationOrHttpFailureAlsoAnswersNull()
+    {
+        _server.Failure = new InvalidOperationException("no channel");
+        Assert.Null(await Service.GetTenantSettingsAsync());
+        Assert.Null(await Service.SetTenantSettingsAsync(true, "merge"));
+
+        _server.Failure = new HttpRequestException("down");
+        Assert.Null(await Service.GetTenantSettingsAsync());
+        Assert.Null(await Service.SetTenantSettingsAsync(false, "replace"));
     }
 
     [Fact]

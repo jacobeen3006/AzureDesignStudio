@@ -127,6 +127,43 @@ namespace AzureDesignStudio.Services
             return await _deployClient.SetGuardrailPolicyAsync(new GuardrailPolicyRequest { Json = json });
         }
 
+        /// <summary>Reads the tenant's two settings (allow self-approval, guardrail policy mode). The
+        /// server alone decides who may call it (Guardrail.Admin, a personal account or the single-user
+        /// host); a 401 or 403 comes back untouched with its coded <c>ErrorMessage</c>. Null = the server
+        /// could not be asked, not "nothing set". No screen uses this until the Phase 9 settings UI.</summary>
+        public async Task<TenantSettingsResponse?> GetTenantSettingsAsync()
+        {
+            try
+            {
+                return await _deployClient.GetTenantSettingsAsync(new Empty());
+            }
+            catch (Exception e) when (IsCallFailure(e))
+            {
+                return null;
+            }
+        }
+
+        /// <summary>Replaces both tenant settings in one request (read, edit, write back) - the server
+        /// alone decides who may call it and answers 400 <c>TENANT_SETTINGS_INVALID</c> for an unknown mode
+        /// (<c>replace</c> or <c>merge</c>). Every server status comes back untouched; null = the server
+        /// could not be asked, so nothing is known to be stored. No screen uses this until the Phase 9
+        /// settings UI.</summary>
+        public async Task<TenantSettingsResponse?> SetTenantSettingsAsync(bool allowSelfApproval, string guardrailPolicyMode)
+        {
+            try
+            {
+                return await _deployClient.SetTenantSettingsAsync(new TenantSettingsRequest
+                {
+                    AllowSelfApproval = allowSelfApproval,
+                    GuardrailPolicyMode = guardrailPolicyMode,
+                });
+            }
+            catch (Exception e) when (IsCallFailure(e))
+            {
+                return null;
+            }
+        }
+
         /// <summary>Deploys the reviewed payload as a deployment-stack (v2 12.3): the stack what-if token
         /// (<see cref="StackWhatIfAsync"/>) and plan hash the review produced; resources the stack stops managing are detached
         /// (kept in Azure) - delete is refused server-side until the Phase 13 gates ship. <paramref name="bypassOutOfSync"/> is
