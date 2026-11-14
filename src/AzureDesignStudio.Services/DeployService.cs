@@ -1184,7 +1184,12 @@ namespace AzureDesignStudio.Services
         }
         /// <summary>Everything CreateStack and StackWhatIf validate identically before the gate.</summary>
         private sealed record StackPlan(AdsCaller Caller, Guid SubscriptionId, Azure.Core.TokenCredential Credential,
-            string ParametersJson, string PlanHash, DeploymentStackBody Body, GuardrailPolicy Guardrails);
+            string ParametersJson, DeployPlanArtifact Plan, DeploymentStackBody Body, GuardrailPolicy Guardrails)
+        {
+            /// <summary>The approvable identity of this stack: scope + template + parameters + the stack body
+            /// hash, so an approval binds the unmanage policy, deny settings and bypass flag too (WR-04).</summary>
+            public string PlanHash => Plan.PlanHash;
+        }
 
         /// <summary>
         /// The request validation and guardrail-policy load shared by CreateStack and StackWhatIf:
@@ -1258,12 +1263,12 @@ namespace AzureDesignStudio.Services
 
             var parametersJson = string.IsNullOrWhiteSpace(request.Parameters) ? "{}" : request.Parameters;
 
-            // Same identity as WhatIf/ApprovePlan/CreateDeployment: scope + template + parameters.
-            string planHash;
+            // Scope + template + parameters must canonicalize before anything else is built; the stack's
+            // own approvable identity adds the stack body hash below.
             try
             {
-                planHash = DeployPlanArtifact.Create(subscriptionId.ToString(), request.ResourceGroupName,
-                    request.ArmTemplate, parametersJson).PlanHash;
+                _ = DeployPlanArtifact.Create(subscriptionId.ToString(), request.ResourceGroupName,
+                    request.ArmTemplate, parametersJson);
             }
             catch (Exception ex) when (ex is System.Text.Json.JsonException or ArgumentException)
             {
@@ -1283,6 +1288,13 @@ namespace AzureDesignStudio.Services
                 return (null, StatusCodes.Status400BadRequest, errors);
             }
 
+            // The approvable identity of a stack (WR-04): scope + template + parameters + the stack body
+            // hash. A plain what-if approval (which carries none of the unmanage policy, deny settings or
+            // bypass flag) and a stack approval with other settings both hash differently, so neither can
+            // be redeemed here by a requester who changed the settings after the approver looked.
+            var stackPlan = DeployPlanArtifact.CreateForStack(subscriptionId.ToString(), request.ResourceGroupName,
+                request.ArmTemplate, parametersJson, body.PlanHash);
+
             var (guardrailPolicy, policyError) = await LoadGuardrailPolicy(caller.ScopeId, context.CancellationToken);
             if (guardrailPolicy is null)
                 return (null, StatusCodes.Status400BadRequest, policyError ?? "The guardrail policy could not be read.");
@@ -1294,7 +1306,7 @@ namespace AzureDesignStudio.Services
             if (rg == null)
                 return (null, rgStatus, rgError);
 
-            return (new StackPlan(caller, subscriptionId, credential, parametersJson, planHash, body, guardrailPolicy),
+            return (new StackPlan(caller, subscriptionId, credential, parametersJson, stackPlan, body, guardrailPolicy),
                 StatusCodes.Status200OK, string.Empty);
         }
 
@@ -1303,7 +1315,7 @@ namespace AzureDesignStudio.Services
         /// request validation and guardrail-policy load CreateStack runs (one shared method), asks ARM for the
         /// stack's predicted resource changes (nothing is deployed; the temporary result is deleted),
         /// and issues a stack token bound to the exact stack body. The result also makes the
-        /// scope+template+parameters plan hash approvable. No token is issued when the prediction
+        /// stack plan hash (scope + template + parameters + the stack body hash) approvable. No token is issued when the prediction
         /// cannot be trusted (<c>indeterminacy_reason</c>) or a guardrail protects a touched
         /// resource: the reason comes back so the review can show it, but nothing is deployable.
         /// </summary>
@@ -1380,8 +1392,7 @@ namespace AzureDesignStudio.Services
             }
             else if (reason is null)
             {
-                var plan = DeployPlanArtifact.Create(prepared.SubscriptionId.ToString(), request.ResourceGroupName,
-                    request.ArmTemplate, prepared.ParametersJson);
+                var plan = prepared.Plan;
                 token = _whatIfGate.IssueForStack(prepared.SubscriptionId.ToString(), request.ResourceGroupName,
                     prepared.Body.PlanHash, summary.HasDelete, summary.DeleteResourceIds,
                     plan.PlanHash, plan.CanonicalJson, targets,
@@ -1457,7 +1468,7 @@ namespace AzureDesignStudio.Services
             {
                 _logger.LogWarning("Stack payload differs from approved plan {PlanHash}", planHash);
                 response.StatusCode = StatusCodes.Status400BadRequest;
-                response.ErrorMessage = "PLAN_APPROVAL_REQUIRED: the deployed payload differs from the approved plan hash. Run What-If and approve this exact template and parameters.";
+                response.ErrorMessage = "PLAN_APPROVAL_REQUIRED: the deployed payload differs from the approved plan hash. Run the stack What-If and approve this exact template, parameters and stack settings (unmanage actions, deny mode, bypass flag, stack name).";
                 return response;
             }
 

@@ -251,10 +251,86 @@ public class StackRpcTests
 
         var response = await Service.CreateStack(CreateRequest(preview, denyMode: "denyDelete"), Me);
 
+        // The stack plan hash binds the deny settings, so the approved hash no longer matches (WR-04);
+        // the stack token's own payload binding stays as the second line.
         Assert.Equal(400, response.StatusCode);
-        Assert.StartsWith("WHAT_IF_PAYLOAD_CHANGED", response.ErrorMessage);
+        Assert.StartsWith("PLAN_APPROVAL_REQUIRED", response.ErrorMessage);
         Assert.False(_arm.Called("PUT", "/deploymentStacks/ads-stack"));
         Assert.Single(_db.AdsPlanApprovals);
+    }
+
+    // --- WR-04: the approval binds the stack settings ---
+
+    [Fact]
+    public async Task TheStackPlanHashDiffersFromThePlainPlanHashAndFromOtherStackSettings()
+    {
+        var plain = DeployPlanArtifact.Create(_subscription.ToString(), ResourceGroup, Template, "{}").PlanHash;
+
+        var none = await Service.StackWhatIf(PreviewRequest(), Me);
+        var denyWrite = await Service.StackWhatIf(PreviewRequest(denyMode: "denyWriteAndDelete"), Me);
+        var bypass = PreviewRequest();
+        bypass.BypassOutOfSync = true;
+        var bypassed = await Service.StackWhatIf(bypass, Me);
+
+        Assert.NotEqual(plain, none.PlanHash);
+        Assert.NotEqual(none.PlanHash, denyWrite.PlanHash);
+        Assert.NotEqual(none.PlanHash, bypassed.PlanHash);
+        Assert.Equal(none.PlanHash, (await Service.StackWhatIf(PreviewRequest(), Me)).PlanHash);
+    }
+
+    [Fact]
+    public async Task CreateStack_AnApprovalOfThePlainWhatIfDoesNotCoverTheStack()
+    {
+        // The approver reviewed a plain What-If (no stack settings visible) and approved its hash.
+        var plan = DeployPlanArtifact.Create(_subscription.ToString(), ResourceGroup, Template, "{}");
+        _gate.Issue(_subscription.ToString(), ResourceGroup, Template, "{}",
+            new WhatIfSummary { Status = "Succeeded", Changes = [new WhatIfChange(WhatIfChangeKind.Create, "/x", null, null, 0)] },
+            plan.CanonicalJson, plan.PlanHash, scopeId: TestTenants.Contoso, requestedByUserId: _user.ToString("D"));
+        await Approve(plan.PlanHash);
+
+        // The requester then previews a stack with a deny mode nobody reviewed and tries both hashes.
+        var preview = await Service.StackWhatIf(PreviewRequest(denyMode: "denyWriteAndDelete"), Me);
+        var withStackHash = await Service.CreateStack(CreateRequest(preview, denyMode: "denyWriteAndDelete"), Me);
+        var asked = CreateRequest(preview, denyMode: "denyWriteAndDelete");
+        asked.PlanHash = plan.PlanHash;
+        var withPlainHash = await Service.CreateStack(asked, Me);
+
+        Assert.Equal(400, withStackHash.StatusCode);
+        Assert.StartsWith("PLAN_NOT_APPROVED", withStackHash.ErrorMessage);
+        Assert.Equal(400, withPlainHash.StatusCode);
+        Assert.StartsWith("PLAN_APPROVAL_REQUIRED", withPlainHash.ErrorMessage);
+        Assert.False(_arm.Called("PUT", "/deploymentStacks/ads-stack"));
+        Assert.Single(_db.AdsPlanApprovals);
+    }
+
+    [Fact]
+    public async Task CreateStack_AnApprovedStackCannotBeRedeemedWithAChangedBypassFlag()
+    {
+        var preview = await Service.StackWhatIf(PreviewRequest(), Me);
+        await Approve(preview.PlanHash);
+        var changed = PreviewRequest();
+        changed.BypassOutOfSync = true;
+        var other = await Service.StackWhatIf(changed, Me);
+
+        var request = CreateRequest(other);
+        request.BypassOutOfSync = true;
+        var response = await Service.CreateStack(request, Me);
+
+        Assert.Equal(400, response.StatusCode);
+        Assert.StartsWith("PLAN_NOT_APPROVED", response.ErrorMessage);
+        Assert.False(_arm.Called("PUT", "/deploymentStacks/ads-stack"));
+    }
+
+    [Fact]
+    public async Task APlainDeploymentCannotRedeemAStackApproval()
+    {
+        var preview = await Service.StackWhatIf(PreviewRequest(), Me);
+        await Approve(preview.PlanHash);
+
+        var stored = Assert.Single(_db.AdsPlanApprovals);
+
+        Assert.NotEqual(DeployPlanArtifact.Create(_subscription.ToString(), ResourceGroup, Template, "{}").PlanHash, stored.PlanHash);
+        Assert.True(DeployPlanArtifact.Verify(stored.PlanJson, stored.PlanHash));
     }
 
     [Fact]

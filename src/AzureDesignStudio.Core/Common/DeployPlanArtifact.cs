@@ -48,7 +48,7 @@ namespace AzureDesignStudio.Core.Common
         /// plan (whose member set keeps both ids and stays byte-identical to older approvals).
         /// </summary>
         public static DeployPlanArtifact Create(DeployPlanScopeKind kind, string? subscriptionId, string? resourceGroup,
-            string? managementGroupId, string templateJson, string parametersJson = "{}")
+            string? managementGroupId, string templateJson, string parametersJson = "{}", string? stackBodyHash = null)
         {
             var scopeMember = kind switch
             {
@@ -72,6 +72,11 @@ namespace AzureDesignStudio.Core.Common
             sb.Append("{\"parameters\":");
             AppendCanonical(sb, parameters);
             sb.Append(",\"scope\":").Append(scopeMember);
+            // A stack plan also names the exact stack body (policy, deny settings, bypass flag, stack
+            // name), so an approval of a plain deployment, or of a stack with other settings, can never
+            // stand for it. Absent for every other plan: their canonical bytes and hashes are unchanged.
+            if (!string.IsNullOrEmpty(stackBodyHash))
+                sb.Append(",\"stack\":").Append(JsonSerializer.Serialize(stackBodyHash));
             sb.Append(",\"template\":");
             AppendCanonical(sb, template);
             sb.Append('}');
@@ -90,6 +95,25 @@ namespace AzureDesignStudio.Core.Common
             // One canonical writer for every target shape; the resource-group member set is
             // byte-identical to every plan hash recorded before multi-scope targets existed.
             return Create(DeployPlanScopeKind.ResourceGroup, subscriptionId, resourceGroup, null, templateJson, parametersJson);
+        }
+
+        /// <summary>
+        /// Plan identity of a deployment stack: scope + template + parameters + the stack body hash
+        /// (<c>DeploymentStackBody.PlanHash</c>: unmanage policy, deny settings, bypass flag, stack name).
+        /// Its hash differs from <see cref="Create(string, string, string, string)"/> over the same bytes,
+        /// so approving a plain what-if never approves a stack, and approving one stack policy never
+        /// approves another (WR-04).
+        /// </summary>
+        public static DeployPlanArtifact CreateForStack(string subscriptionId, string resourceGroup, string templateJson,
+            string parametersJson, string stackBodyHash)
+        {
+            if (string.IsNullOrWhiteSpace(stackBodyHash))
+                throw new ArgumentException("A stack plan needs the stack body hash.", nameof(stackBodyHash));
+            if (string.IsNullOrWhiteSpace(subscriptionId))
+                throw new ArgumentException("A plan scope needs a subscription id.", nameof(subscriptionId));
+            if (string.IsNullOrWhiteSpace(resourceGroup))
+                throw new ArgumentException("A plan scope needs a resource group.", nameof(resourceGroup));
+            return Create(DeployPlanScopeKind.ResourceGroup, subscriptionId, resourceGroup, null, templateJson, parametersJson, stackBodyHash);
         }
 
         /// <summary>
