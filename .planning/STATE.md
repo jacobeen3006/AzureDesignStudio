@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Server Foundation and Integration Harness
 status: executing
-stopped_at: Completed 03-04-PLAN.md
-last_updated: "2026-11-14T10:30:27.746Z"
+stopped_at: Completed 03-05-PLAN.md
+last_updated: "2026-11-14T10:32:55.842Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 03 execution started
-state_head: c3107faa58ded9c971e31da79536bd1de79ded89
+state_head: 9743062005e56bc0d61b52adfbecdfa61df8471f
 progress:
   total_phases: 11
   completed_phases: 1
   total_plans: 21
-  completed_plans: 17
+  completed_plans: 18
   percent: 9
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 ## Current Position
 
 Phase: 03 (Server Foundation and Integration Harness) — EXECUTING
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 03 execution started
 
@@ -61,6 +61,7 @@ Progress: [█░░░░░░░░░] 9%
 | Phase 03 P02 | 15min | 2 tasks | 5 files |
 | Phase 03 P03 | 20min | 3 tasks | 7 files |
 | Phase 03 P04 | 15min | 3 tasks | 4 files |
+| Phase 03 P05 | 10min | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,7 @@ Progress: [█░░░░░░░░░] 9%
 - [Phase 03]: Development zero-setup is configuration (Database__Provider=InMemory in launch profiles), not compilation
 - [Phase 03]: Crypto:Provider accepts only KeyVault until Phase 5 (CRED-01/02)
 - [Phase 03]: 03-04: DesignDbContextFactory targets SQL Server on LocalDB with integrated security so the design-time model carries ADS_CHECK_JSON; never opened, no Design package added (Phase 4)
+- [Phase 03]: 03-05: no production change needed; handler faults map to StatusCode.Unknown and real CryptoService answers 503 in-band without a vault
 
 ### Pending Todos
 
@@ -104,6 +106,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T10:30:27.686Z
-Stopped at: Completed 03-04-PLAN.md
+Last session: 2026-11-14T10:32:55.778Z
+Stopped at: Completed 03-05-PLAN.md
 Resume file: None
