@@ -20,6 +20,27 @@ public static class MauiProgram
 {
     public static IServiceProvider Services { get; private set; } = null!;
 
+    /// <summary>Set when the workspace (or deploy database) could not be upgraded: the app then
+    /// shows <see cref="StartupFailurePage"/> instead of the main window and no other service runs.</summary>
+    public static Exception? StartupFailure { get; private set; }
+
+    /// <summary>The folder that holds workspace.db, deploy.db and the backups (the platform app-data
+    /// folder, or the <c>ADS_DATA_DIR</c> override).</summary>
+    public static string DataDirectory { get; private set; } = string.Empty;
+
+    private static readonly string CrashLogPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ads_desktop_crash.log");
+
+    private static void LogCrash(string label, Exception e)
+    {
+        try
+        {
+            System.IO.File.AppendAllText(CrashLogPath, $"[{DateTime.Now:O}] {label}\n{e}\n\n");
+        }
+        catch (Exception write) when (write is System.IO.IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
     public static MauiApp CreateMauiApp()
     {
         var builder = MauiApp.CreateBuilder();
@@ -60,15 +81,59 @@ public static class MauiProgram
         // SQLite workspace (plan 6.3): designs, scans, snapshots, cost cache, plans and audit
         // records in one file - everything readable with the network down. The v1 per-file
         // design cache is imported once on startup.
-        var appData =
+        // ADS_DATA_DIR redirects every database and backup to another folder. It exists so the built
+        // app can be tested against copies of a workspace (or a corrupt file) without touching the
+        // real data; normal use needs nothing and the defaults below are unchanged.
+        var dataOverride = Environment.GetEnvironmentVariable("ADS_DATA_DIR");
+        string appData;
+        if (!string.IsNullOrWhiteSpace(dataOverride))
+        {
+            appData = System.IO.Path.GetFullPath(dataOverride);
+            System.IO.Directory.CreateDirectory(appData);
+        }
+        else
+        {
+            appData =
 #if MACCATALYST
-            MacHost.AppDataDirectory;
+                MacHost.AppDataDirectory;
 #else
-            FileSystem.Current.AppDataDirectory;
+                FileSystem.Current.AppDataDirectory;
 #endif
-        var workspaceDb = new WorkspaceDb(System.IO.Path.Combine(appData, "workspace.db"));
+        }
+        DataDirectory = appData;
+
+        var workspacePath = System.IO.Path.Combine(appData, "workspace.db");
+        var backupsDirectory = System.IO.Path.Combine(appData, "backups");
+        WorkspaceStartupResult startup;
+        try
+        {
+            startup = WorkspaceStartup.Open(new WorkspaceStartupOptions(workspacePath, backupsDirectory));
+        }
+        catch (WorkspaceUpgradeException e)
+        {
+            // An interrupted or failed upgrade must not open a half-working workspace: a native page
+            // names the error and the premigration backup. Nothing else is needed to show it.
+            StartupFailure = e;
+            LogCrash("WORKSPACE STARTUP FAILED", e);
+            var failed = builder.Build();
+            Services = failed.Services;
+            return failed;
+        }
+
+        var workspaceDb = startup.Db;
         LegacyDesignImporter.ImportIfNeeded(workspaceDb, System.IO.Path.Combine(appData, "designs"));
         builder.Services.AddSingleton(workspaceDb);
+        builder.Services.AddSingleton(startup.Report);
+        var backupService = new WorkspaceBackupService(workspacePath, backupsDirectory,
+            onError: e =>
+            {
+                // The container exists by the time the scheduler ticks; the file is the fallback.
+                if (Services?.GetService<ILoggerFactory>() is { } loggers)
+                    loggers.CreateLogger("WorkspaceBackup").LogWarning(e, "A workspace backup step failed.");
+                else
+                    LogCrash("WORKSPACE BACKUP", e);
+            });
+        builder.Services.AddSingleton(backupService);
         builder.Services.AddSingleton<AzureDesignStudio.Core.Common.IDesignOfflineStore, SqliteDesignOfflineStore>();
 
         // Standalone: no server. The design, deploy and price services run in this process
