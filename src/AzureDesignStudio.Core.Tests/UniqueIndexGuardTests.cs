@@ -105,6 +105,31 @@ namespace AzureDesignStudio.Core.Tests
             Assert.Empty(Directory.GetFiles(cleanBackups, "upgrade-removed-rows-*"));
         }
 
+        [Fact]
+        public async Task TheUpgradeResult_HasALaunchMessageNamingTableCountReportAndBackup_OnlyWhenRowsWereRemoved()
+        {
+            // WR-06: the host shows this at launch; a removal must not wait for the user to open a drawer
+            var path = _temp.Path("l4-message.db");
+            WorkspaceFixtures.Load(WorkspaceFixtures.L4Duplicates, path);
+            var result = await WorkspaceSchema.UpgradeAsync(path, new WorkspaceUpgradeOptions(), CancellationToken.None);
+            SqliteConnection.ClearAllPools();
+
+            var message = result.RemovedRowsMessage;
+
+            Assert.NotNull(message);
+            Assert.Contains("Designs: 1 row(s) removed", message, StringComparison.Ordinal);
+            Assert.Contains("ChangeFeed: 2 row(s) removed", message, StringComparison.Ordinal);
+            Assert.Contains(result.UniqueIndexRepairs[0].ReportPath, message, StringComparison.Ordinal);
+            Assert.Contains(result.PremigrationBackupPath!, message, StringComparison.Ordinal);
+
+            var clean = _temp.Path("l3-message.db");
+            WorkspaceFixtures.Load(WorkspaceFixtures.L3CurrentLegacy, clean);
+            var cleanResult = await WorkspaceSchema.UpgradeAsync(
+                clean, new WorkspaceUpgradeOptions { BackupsDirectory = _temp.Path("backups-clean-message") }, CancellationToken.None);
+            SqliteConnection.ClearAllPools();
+            Assert.Null(cleanResult.RemovedRowsMessage);
+        }
+
         // ---- table-driven behaviors (hand-built tables, not the workspace schema) ----
 
         private static readonly UniqueIndexSpec ItemsSpec =

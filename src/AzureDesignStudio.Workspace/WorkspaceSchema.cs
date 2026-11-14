@@ -14,6 +14,12 @@ public sealed record WorkspaceUpgradeResult(
 {
     /// <summary>Duplicate rows the unique-index guard removed before the migration (empty when the data was clean).</summary>
     public IReadOnlyList<UniqueIndexRepair> UniqueIndexRepairs { get; init; } = [];
+
+    /// <summary>
+    /// What to tell the user at launch when the upgrade removed duplicate rows (null when it removed none):
+    /// the table, how many rows, which one was kept, where the report is and which backup still holds them.
+    /// </summary>
+    public string? RemovedRowsMessage => WorkspaceSchema.DescribeRemovedRows(UniqueIndexRepairs, PremigrationBackupPath);
 }
 
 /// <summary>The workspace database could not be brought to the current schema.</summary>
@@ -153,9 +159,13 @@ internal static class WorkspaceSchema
             }
             catch (DbException e)
             {
+                // The duplicate-row cleanup above is committed on its own, before the migration: it is not rolled back.
+                var removed = uniqueIndexRepairs.Count == 0
+                    ? string.Empty
+                    : " The duplicate rows removed just before the upgrade stay removed; " + DescribeRemovedRows(uniqueIndexRepairs, premigrationBackup);
                 throw new WorkspaceUpgradeException(
                     "The workspace upgrade failed and was rolled back (SQLite schema changes are transactional), " +
-                    $"so the database is as it was before. {e.Message} Database file: {databasePath}", e);
+                    $"so the schema is as it was before. {e.Message}{removed} Database file: {databasePath}", e);
             }
         }
 
@@ -183,6 +193,23 @@ internal static class WorkspaceSchema
         {
             UniqueIndexRepairs = uniqueIndexRepairs,
         };
+    }
+
+    internal static string? DescribeRemovedRows(IReadOnlyList<UniqueIndexRepair> repairs, string? premigrationBackupPath)
+    {
+        if (repairs.Count == 0) return null;
+
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var message = new System.Text.StringBuilder();
+        message.AppendLine("The workspace upgrade removed duplicate rows that the new unique indexes would reject. "
+            + "For each duplicated key the most recently saved row was kept:");
+        foreach (var repair in repairs)
+            message.AppendLine(string.Create(inv, $"  {repair.Table}: {repair.RowsRemoved} row(s) removed from {repair.DuplicateGroups} duplicated key(s)"));
+        message.AppendLine($"Every removed row is in the report: {repairs[0].ReportPath}");
+        message.Append(premigrationBackupPath is null
+            ? "A premigration backup holds the rows too."
+            : $"The premigration backup {premigrationBackupPath} still holds all of them.");
+        return message.ToString();
     }
 
     private static WorkspaceUpgradeException StuckUpgrade(string databasePath, WorkspaceUpgradeOptions options) =>

@@ -36,6 +36,8 @@ public partial class MainPage : ContentPage
             var report = MauiProgram.Services.GetService<WorkspaceStartupReport>();
             if (report?.Notice is { } notice)
                 await DisplayAlertAsync("Workspace recovered", notice.Message, "OK");
+            if (report?.Upgrade.RemovedRowsMessage is { } removed)
+                await DisplayAlertAsync("Duplicate rows removed", removed, "OK");
             if (report?.Restore is { Applied: true } restore)
             {
                 var kept = restore.PreRestorePath is null ? string.Empty : $"\nThe previous workspace was kept at: {restore.PreRestorePath}";

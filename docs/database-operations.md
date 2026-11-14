@@ -132,6 +132,8 @@ The statement is printed in the exception message (`src/AzureDesignStudio.Worksp
 
 The first migration adds unique indexes (design names, change-feed keys). A workspace that already holds rows that would violate them could not take the index, so before migrating, the app removes the duplicates: for each key it keeps the most recently updated row and deletes the others, all in one transaction, and only after the premigration backup exists.
 
+When rows were removed, the next launch shows a "Duplicate rows removed" alert naming the table, the number of rows, the report and the premigration backup; the Workspace data drawer lists the same repairs. The cleanup is committed before the schema migration runs and is not rolled back if that migration then fails: the failure page says so, and the report and the premigration backup still hold every removed row.
+
 Every removed row is written first to `upgrade-removed-rows-<UTC>.jsonl` in `backups/`, one JSON line per removed row with the table, the index, the key columns, the kept and removed `rowid` and the whole removed row. The file is plaintext and may hold design content, so handle it like a backup.
 
 To recover a removed row, look it up in the report (the `row` field), or open the premigration backup that was taken just before the upgrade (its name has the same UTC second) read-only with `sqlite3` and select the row by its `rowid`; the premigration backup still holds all the duplicates. A workspace without duplicates produces no report.
