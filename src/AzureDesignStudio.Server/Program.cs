@@ -58,7 +58,10 @@ if (databaseKind == DatabaseKind.SqlServer && ServiceTools.IsConfigured(keyVault
 builder.Services.AddDbContext<DesignDbContext>((serviceProvider, options) =>
     DatabaseProvider.Configure(options, serviceProvider.GetRequiredService<IConfiguration>()));
 
-builder.Services.AddSingleton<ICryptoService, CryptoService>();
+// The provider is read from configuration (Crypto:Provider, default KeyVault); the real service
+// contacts the vault lazily on first use, so the host boots without one. This runs at top
+// level, so tests that need another value must supply it with UseSetting.
+CryptoProvider.Register(builder.Services, builder.Configuration);
 
 builder.Services.AddSingleton<ITelemetryInitializer, AdsTelemetryInitializer>();
 builder.Services.AddApplicationInsightsTelemetry();
