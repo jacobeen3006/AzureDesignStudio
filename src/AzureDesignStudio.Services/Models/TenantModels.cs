@@ -29,6 +29,9 @@ namespace AzureDesignStudio.Services.Models
         public const string GuardrailPolicyChanged = "GuardrailPolicyChanged";
         public const string SelfApprovalChanged = "SelfApprovalChanged";
         public const string PolicyModeChanged = "PolicyModeChanged";
+        /// <summary>The same approver approved a plan hash that already had an approval, replacing it.
+        /// The detail names the old and new requester.</summary>
+        public const string PlanApprovalReplaced = "PlanApprovalReplaced";
     }
 
     /// <summary>Per-tenant security settings (one row per scope). A scope without a row runs on the

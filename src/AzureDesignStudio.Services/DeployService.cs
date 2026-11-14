@@ -916,7 +916,30 @@ namespace AzureDesignStudio.Services
 
             var existing = await _designContext.AdsPlanApprovals.FindAsync([caller.ScopeId, planHash], context.CancellationToken);
             if (existing != null)
+            {
+                // An approval is never silently taken over (WR-06): another approver cannot replace
+                // it - the named requester deploys it, or its own approver approves again - and the
+                // same approver replacing it leaves an audit event that names the requester change.
+                if (!AdsIdentity.SameUser(existing.ApprovedByUserId, caller.UserId))
+                {
+                    _logger.LogWarning("Plan {PlanHash} approval refused: the plan already has an approval by another principal.", planHash);
+                    response.StatusCode = StatusCodes.Status409Conflict;
+                    response.ErrorMessage = "PLAN_ALREADY_APPROVED: this plan already has an approval by another principal. The approval stays as it is: its requester deploys it, or the principal that approved it approves again.";
+                    return response;
+                }
+
                 _designContext.AdsPlanApprovals.Remove(existing);
+                _designContext.AdsSecurityEvents.Add(new SecurityEventModel
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = caller.ScopeId,
+                    EventType = SecurityEventTypes.PlanApprovalReplaced,
+                    Principal = principal,
+                    PrincipalUserId = caller.UserIdText,
+                    Detail = $"plan={planHash[..19]}; requester={existing.RequestedByUserId ?? "-"} -> {requestedByUserId ?? "-"}",
+                    AtUtc = DateTime.UtcNow,
+                });
+            }
 
             var approval = new PlanApprovalModel
             {

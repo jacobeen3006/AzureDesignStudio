@@ -170,6 +170,57 @@ public sealed class ApprovalRulesTests
         Assert.Equal(401, response.StatusCode);
         Assert.Empty(_db.AdsPlanApprovals);
     }
+
+    // --- WR-06: an approval is never silently taken over ---
+
+    [Fact]
+    public async Task AnotherApproverCannotReplaceAnExistingApproval()
+    {
+        var hash = Preview(_gate, TestTenants.Contoso, _requester);
+        var first = Guid.NewGuid();
+        Assert.Equal(200, (await Approve(hash, Organizational(first, AdsIdentity.DeployApproverRole))).StatusCode);
+
+        var second = await Approve(hash, Organizational(Guid.NewGuid(), AdsIdentity.DeployApproverRole));
+
+        Assert.Equal(409, second.StatusCode);
+        Assert.StartsWith("PLAN_ALREADY_APPROVED", second.ErrorMessage);
+        var stored = Assert.Single(_db.AdsPlanApprovals);
+        Assert.Equal(first.ToString("D"), stored.ApprovedByUserId);
+        Assert.Equal(_requester.ToString("D"), stored.RequestedByUserId);
+        Assert.Empty(_db.AdsSecurityEvents);
+    }
+
+    [Fact]
+    public async Task TheSameApproverReplacingTheirApprovalLeavesAnAuditEventNamingTheRequesterChange()
+    {
+        var hash = Preview(_gate, TestTenants.Contoso, _requester);
+        var approver = Guid.NewGuid();
+        Assert.Equal(200, (await Approve(hash, Organizational(approver, AdsIdentity.DeployApproverRole))).StatusCode);
+
+        // Another user of the same scope re-runs the What-If before the approver approves again.
+        var capturer = Guid.NewGuid();
+        Preview(_gate, TestTenants.Contoso, capturer, hash);
+        Assert.Equal(200, (await Approve(hash, Organizational(approver, AdsIdentity.DeployApproverRole))).StatusCode);
+
+        var stored = Assert.Single(_db.AdsPlanApprovals);
+        Assert.Equal(capturer.ToString("D"), stored.RequestedByUserId);
+        var audit = Assert.Single(_db.AdsSecurityEvents);
+        Assert.Equal(SecurityEventTypes.PlanApprovalReplaced, audit.EventType);
+        Assert.Equal(TestTenants.Contoso, audit.TenantId);
+        Assert.Equal(approver.ToString("D"), audit.PrincipalUserId);
+        Assert.Contains(_requester.ToString("D"), audit.Detail);
+        Assert.Contains(capturer.ToString("D"), audit.Detail);
+    }
+
+    [Fact]
+    public async Task AFirstApprovalWritesNoReplacementEvent()
+    {
+        var hash = Preview(_gate, TestTenants.Contoso, _requester);
+
+        await Approve(hash, Organizational(Guid.NewGuid(), AdsIdentity.DeployApproverRole));
+
+        Assert.Empty(_db.AdsSecurityEvents);
+    }
 }
 
 /// <summary>The role rule over the real host: the role comes from the token, the preview is seeded in
@@ -335,18 +386,20 @@ public sealed class SelfApprovalAndRequesterTests
     }
 
     [Fact]
-    public async Task ASecondApproverReplacingTheRowKeepsTheRequesterOfTheLivePreview()
+    public async Task ASecondApproverCannotReplaceTheRowSoTheRequesterOfTheFirstApprovalStands()
     {
+        // WR-06: the second approver is refused (409), the first approver's row and its requester stay.
         var requester = Guid.NewGuid();
         var first = Guid.NewGuid();
         var second = Guid.NewGuid();
         var hash = ApprovalRulesTests.Preview(_gate, TestTenants.Contoso, requester);
 
         await Service.ApprovePlan(new PlanApprovalRequest { PlanHash = hash }, Approver(first));
-        await Service.ApprovePlan(new PlanApprovalRequest { PlanHash = hash }, Approver(second));
+        var refused = await Service.ApprovePlan(new PlanApprovalRequest { PlanHash = hash }, Approver(second));
 
+        Assert.Equal(409, refused.StatusCode);
         var row = await _db.AdsPlanApprovals.AsNoTracking().SingleAsync();
-        Assert.Equal(second.ToString("D"), row.ApprovedByUserId);
+        Assert.Equal(first.ToString("D"), row.ApprovedByUserId);
         Assert.Equal(requester.ToString("D"), row.RequestedByUserId);
     }
 

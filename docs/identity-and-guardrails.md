@@ -57,9 +57,23 @@ with the code.
 | `TENANT_SETTINGS_INVALID` | 400 | `guardrail_policy_mode` is not `replace` or `merge`. | Send one of the two values. |
 | `PLAN_APPROVER_ROLE_REQUIRED` | 403 | Approving a plan needs `Deploy.Approver`. Checked first, before the plan is looked up. | Assign the role, sign in again. |
 | `PLAN_SELF_APPROVAL_REFUSED` | 403 | The principal that requested the review cannot approve it, and the tenant has not allowed self-approval. | Another `Deploy.Approver` approves it, or a `Guardrail.Admin` allows self-approval for the tenant. |
+| `PLAN_ALREADY_APPROVED` | 409 | The plan already has an approval by another principal; it is not replaced. | The named requester deploys it, or the principal that approved it approves again. |
 | `PLAN_REQUESTER_MISMATCH` | 403 | Only the principal that requested the review may deploy it (someone else approved it, and the requester deploys). | The requester starts the deployment. |
 | `PLAN_APPROVER_MISMATCH` | 403 | An approval stored without a requester can only be deployed by its approver. | The approver deploys, or approve the plan again. |
 | `DECOM_APPROVER_ROLE_REQUIRED` | 403 | Approving a decommission window needs `Deploy.Approver`. There is no self-approval rule for decommission: the approver also executes. | Assign the role, sign in again. |
+
+**Residual risk: who counts as the requester.** An approval names as requester the principal of the newest live
+What-If preview of that plan hash in the scope (the approval request carries only the hash, not a token). A
+second user of the same scope who knows the exact template and parameters can re-run What-If between the
+requester's preview and the approval, and the approval then names that user as the only one who may deploy it;
+the approver is not told that the requester changed. What limits this: the capturer needs the full payload and an
+Azure credential for the subscription of their own (the deployer still needs a linked service principal or the
+host's credential), the captured plan is exactly what the approver approved, the self-approval rule still
+needs two different principals, and the approval cannot be taken over afterwards (another approver gets
+`PLAN_ALREADY_APPROVED`; the same approver replacing it writes a `PlanApprovalReplaced` event in
+`AdsSecurityEvents` naming the old and new requester). Binding the approval to the exact preview token would
+close it completely but needs the approver to hold the requester's token or see the requester, which is a
+product decision not taken in this phase.
 
 A What-If review is visible only to the scope that created it. Approving a plan hash that only another tenant's
 review holds fails with 400 `WHAT_IF_STALE` ("no live What-If preview exists for this plan; run What-If first"),
@@ -77,8 +91,9 @@ runs on the defaults.
 
 **There is no settings screen yet.** None is planned before Phase 9, so an administrator changes the two
 settings with the call recipe below. Every change is recorded in the append-only table `AdsSecurityEvents`, one
-event per changed setting (`SelfApprovalChanged`, `PolicyModeChanged`) and one for each guardrail policy change
-(`GuardrailPolicyChanged`), written in the same commit as the change. An event holds the scope, the principal and
+event per changed setting (`SelfApprovalChanged`, `PolicyModeChanged`), one for each guardrail policy change
+(`GuardrailPolicyChanged`) and one when an approver replaces their own approval (`PlanApprovalReplaced`), written
+in the same commit as the change. An event holds the scope, the principal and
 what changed (the old and new setting values; for a policy only the length and a short hash of the new body),
 never a secret.
 
