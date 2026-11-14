@@ -180,9 +180,56 @@ public sealed class TenantIsolationTests
         var own = await Get(contoso);
 
         Assert.Equal(DefaultPolicy, inherited.Json);
-        Assert.Equal("operator", inherited.UpdatedBy);
+        Assert.True(inherited.Inherited);
         Assert.Equal(StoragePolicy, own.Json);
+        Assert.False(own.Inherited);
         Assert.Equal(2, await _db.AdsGuardrailPolicies.CountAsync());
+    }
+
+    [Fact]
+    public async Task TheInheritedDefaultNeverDisclosesItsAuthorOrTimestamp()
+    {
+        // CR-01: the pre-upgrade row was writable by any user of the old build, so its author can be
+        // another tenant's user. No caller of another scope may learn who wrote it or when.
+        var author = Guid.NewGuid();
+        _db.AdsGuardrailPolicies.Add(new GuardrailPolicyModel
+        {
+            Id = 1, TenantId = null, Json = DefaultPolicy, UpdatedBy = $"Mallory <{author}>",
+            UpdatedByUserId = author.ToString("D"), UpdatedAtUtc = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc),
+        });
+        await _db.SaveChangesAsync();
+
+        foreach (var caller in new[]
+                 {
+                     Member(Guid.NewGuid(), TestTenants.Contoso),
+                     Personal(Guid.NewGuid()),
+                     TestServerCallContext.ForUser(Guid.NewGuid(), null, TestTenants.Consumer),
+                 })
+        {
+            var response = await Get(caller);
+            Assert.Equal(200, response.StatusCode);
+            Assert.True(response.Inherited);
+            Assert.Equal("", response.UpdatedBy);
+            Assert.Equal("", response.UpdatedAt);
+            Assert.DoesNotContain(author.ToString("D"), response.ToString());
+            Assert.DoesNotContain("Mallory", response.ToString());
+            Assert.DoesNotContain("2020", response.ToString());
+        }
+    }
+
+    [Fact]
+    public async Task AScopeWithItsOwnRowStillSeesItsOwnAuthorAndTimeAndNoInheritedMarker()
+    {
+        await SeedDefault();
+        var user = Guid.NewGuid();
+        var contoso = Member(user, TestTenants.Contoso, "Ada");
+        await Set(contoso, StoragePolicy);
+
+        var own = await Get(contoso);
+
+        Assert.False(own.Inherited);
+        Assert.Equal($"Ada <{user}>", own.UpdatedBy);
+        Assert.NotEqual("", own.UpdatedAt);
     }
 
     [Fact]

@@ -162,6 +162,9 @@ message GuardrailPolicyResponse {
 	string json = 3;
 	string updated_by = 4;
 	string updated_at = 5;
+	// True when the json is the inherited default policy because the scope has no row of its own.
+	// updated_by and updated_at are then empty: the default's author and time are never disclosed.
+	bool inherited = 6;
 }
 
 message TenantSettingsRequest {

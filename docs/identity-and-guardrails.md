@@ -220,6 +220,14 @@ costly.
 - **The inherited default policy stays.** The pre-upgrade guardrail row is kept as the default (no tenant) and
   applies to every scope that has no policy of its own. A tenant's first change creates that tenant's own row
   and, under `replace`, stops inheriting.
+- **Who can read the inherited default.** A scope with no policy of its own is judged by the default, so
+  `Deploy/GetGuardrailPolicy` returns the default's body to that scope's guardrail administrators (the editor
+  and the scan drawer need the effective list) with `inherited: true`. The default's author (`updated_by`) and
+  time (`updated_at`) are always empty: the pre-upgrade row could be written by any user of the old build, so
+  its author may belong to another tenant. The body itself is still readable by every guardrail administrator,
+  and that includes every personal Microsoft account on a hosted server. Do not keep anything in the default
+  that must stay private (resource ids of another party, for example), and re-create the default from the
+  operator's own list before exposing a server to multiple tenants.
 - **One-click approve-then-deploy on a hosted server stops at approval by default.** The principal that requested
   the review cannot approve it unless self-approval is allowed, and the requester is the one who deploys. Either
   a second `Deploy.Approver` approves the shared plan (the requester then deploys it), or a `Guardrail.Admin`

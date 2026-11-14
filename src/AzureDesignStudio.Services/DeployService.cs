@@ -1832,11 +1832,17 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
+            // A scope without a row of its own is judged by the inherited default, so it may read that
+            // body (the editor and the scan drawer need the effective list). The default's author and
+            // time are never returned: the row may predate tenancy and was written by anyone then, so
+            // its UpdatedBy can name another tenant's user (CR-01). The response says it is inherited.
             var row = await FindEffectiveGuardrailRow(caller.ScopeId, context.CancellationToken);
+            var inherited = row is not null && row.TenantId is null;
             response.StatusCode = StatusCodes.Status200OK;
             response.Json = row?.Json ?? "";
-            response.UpdatedBy = row?.UpdatedBy ?? "";
-            response.UpdatedAt = row?.UpdatedAtUtc.ToString("O") ?? "";
+            response.Inherited = inherited;
+            response.UpdatedBy = inherited ? "" : row?.UpdatedBy ?? "";
+            response.UpdatedAt = inherited ? "" : row?.UpdatedAtUtc.ToString("O") ?? "";
             return response;
         }
 
