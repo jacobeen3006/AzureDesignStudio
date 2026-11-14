@@ -795,19 +795,21 @@ public sealed class TenantIsolationTests
         Assert.Equal(1, await _db.AdsPlanApprovals.CountAsync(r => r.TenantId == TestTenants.Contoso));
 
         // B previews and approves the same hash in its own scope; A's token is still not B's to spend.
-        var previewB = await rig.Service.StackWhatIf(rig.Preview(), bob);
+        var rob = Member(Guid.NewGuid(), TestTenants.Fabrikam, "Rob");
+        var previewB = await rig.Service.StackWhatIf(rig.Preview(), rob);
         Assert.Equal(previewA.PlanHash, previewB.PlanHash);
         Assert.Equal(200, (await rig.Service.ApprovePlan(new PlanApprovalRequest { PlanHash = previewB.PlanHash }, bob)).StatusCode);
         Assert.Equal(2, await _db.AdsPlanApprovals.CountAsync());
 
-        var stale = await rig.Service.CreateStack(rig.Create(previewA), bob);
+        var stale = await rig.Service.CreateStack(rig.Create(previewA), rob);
 
         Assert.Equal(400, stale.StatusCode);
         Assert.StartsWith("WHAT_IF_STALE", stale.ErrorMessage);
         Assert.Equal(2, await _db.AdsPlanApprovals.CountAsync());   // a refused call consumed nothing
 
-        // The token works for its own scope; the approval it consumed is A's and B's stays.
-        var applied = await rig.Service.CreateStack(rig.Create(previewA), ada);
+        // The token works for its own scope (the requester deploys what Ada approved); the approval it
+        // consumed is A's and B's stays.
+        var applied = await rig.Service.CreateStack(rig.Create(previewA), requester);
 
         Assert.True(applied.StatusCode == 200, applied.ErrorMessage);
         Assert.Equal(TestTenants.Fabrikam, (await _db.AdsPlanApprovals.AsNoTracking().SingleAsync()).TenantId);
@@ -818,7 +820,7 @@ public sealed class TenantIsolationTests
     {
         var rig = NewRig();
         var ada = Approver(Guid.NewGuid(), TestTenants.Contoso, "Ada");
-        var preview = await rig.Service.StackWhatIf(rig.Preview(), ada);
+        var preview = await rig.Service.StackWhatIf(rig.Preview(), Member(Guid.NewGuid(), TestTenants.Contoso, "Ray"));
         // What the TenantApprovals migration leaves for an approval that was pending at upgrade.
         _db.AdsPlanApprovals.Add(new PlanApprovalModel
         {
@@ -874,11 +876,12 @@ public sealed class TenantIsolationTests
         var service = new DeployService(_db, NullLogger<DeployService>.Instance, new FakeCryptoService(),
             new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl), arm, new AmbientCredential());
         var ada = Approver(Guid.NewGuid(), TestTenants.Contoso, "Ada");
+        var ray = Member(Guid.NewGuid(), TestTenants.Contoso, "Ray");
         var bob = Approver(Guid.NewGuid(), TestTenants.Fabrikam, "Bob");
         var whatIf = await service.WhatIf(new DeploymentRequest
         {
             SubscriptionId = subscription.ToString(), ResourceGroupName = "rg", ArmTemplate = StackTemplate, Parameters = "{}",
-        }, ada);
+        }, ray);
         Assert.True(whatIf.StatusCode == 200, whatIf.ErrorMessage);
         Assert.Equal(200, (await service.ApprovePlan(new PlanApprovalRequest { PlanHash = whatIf.PlanHash }, ada)).StatusCode);
         var request = new DeploymentRequest
@@ -901,7 +904,7 @@ public sealed class TenantIsolationTests
         await _db.SaveChangesAsync();
         var legacy = new Collector<DeploymentResponse>();
 
-        await service.CreateDeployment(request, legacy, ada);
+        await service.CreateDeployment(request, legacy, ray);
 
         Assert.StartsWith("PLAN_NOT_APPROVED", Assert.Single(legacy.Items).ErrorMessage);
     }

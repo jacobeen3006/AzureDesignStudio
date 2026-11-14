@@ -900,6 +900,18 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
+            // Self-approval is a second, independent rule with its own code (D-02, D-07). It runs after
+            // the role rule: the principal whose what-if produced the preview needs the tenant's
+            // setting (or the single-user host) to approve it.
+            if (AdsIdentity.SameUser(requestedByUserId, caller.UserId)
+                && !caller.MaySelfApprove(await IsSelfApprovalAllowedAsync(caller.ScopeId, context.CancellationToken)))
+            {
+                _logger.LogWarning("Plan {PlanHash} approval refused: the approver requested the review.", planHash);
+                response.StatusCode = StatusCodes.Status403Forbidden;
+                response.ErrorMessage = "PLAN_SELF_APPROVAL_REFUSED: the principal that requested this review cannot approve it. Another Deploy.Approver can approve it, or a Guardrail.Admin can allow self-approval for this tenant.";
+                return response;
+            }
+
             var principal = caller.Principal;
 
             var existing = await _designContext.AdsPlanApprovals.FindAsync([caller.ScopeId, planHash], context.CancellationToken);
@@ -928,6 +940,33 @@ namespace AzureDesignStudio.Services
             response.ApprovedBy = principal;
             response.ApprovedAt = approval.ApprovedAtUtc.ToString("O");
             return response;
+        }
+
+        /// <summary>Whether the scope's tenant settings allow a requester to approve their own review;
+        /// false (the default) when the scope has no settings row.</summary>
+        internal async Task<bool> IsSelfApprovalAllowedAsync(Guid scopeId, CancellationToken ct)
+        {
+            var settings = await _designContext.AdsTenantSettings.AsNoTracking()
+                .FirstOrDefaultAsync(e => e.TenantId == scopeId, ct);
+            return settings?.AllowSelfApproval ?? false;
+        }
+
+        /// <summary>
+        /// Who may deploy an approval (D-07): the principal recorded as the requester of the review, not
+        /// the approver. A row with no recorded requester (one seeded without it) keeps the old rule -
+        /// only the approver may deploy. A recorded requester that is not a usable id matches nobody.
+        /// Returns the refusal text, or null when the caller may deploy.
+        /// </summary>
+        private static string? DeployerRefusal(PlanApprovalModel approval, Guid callerUserId)
+        {
+            if (!string.IsNullOrWhiteSpace(approval.RequestedByUserId))
+                return AdsIdentity.SameUser(approval.RequestedByUserId, callerUserId)
+                    ? null
+                    : "PLAN_REQUESTER_MISMATCH: only the principal that requested this review may deploy it.";
+
+            return AdsIdentity.SameUser(approval.ApprovedByUserId, callerUserId)
+                ? null
+                : "PLAN_APPROVER_MISMATCH: only the principal that approved this plan may deploy it.";
         }
 
         public override async Task CreateDeployment(DeploymentRequest request, IServerStreamWriter<DeploymentResponse> responseStream, ServerCallContext context)
@@ -1066,11 +1105,13 @@ namespace AzureDesignStudio.Services
                 return;
             }
 
-            if (!AdsIdentity.SameUser(approval.ApprovedByUserId, caller.UserId))
+            // The requester deploys what someone else approved (D-07): any other principal is refused
+            // with PLAN_REQUESTER_MISMATCH, an approval with no requester with PLAN_APPROVER_MISMATCH.
+            if (DeployerRefusal(approval, caller.UserId) is { } deployerRefusal)
             {
                 _logger.LogWarning("Plan {PlanHash} approved by {Approver} but deployed by a different principal", planHash, approval.ApprovedBy);
                 response.StatusCode = StatusCodes.Status403Forbidden;
-                response.ErrorMessage = "PLAN_APPROVER_MISMATCH: only the principal that approved this plan may deploy it.";
+                response.ErrorMessage = deployerRefusal;
                 await responseStream.WriteAsync(response);
                 return;
             }
@@ -1428,11 +1469,12 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            if (!AdsIdentity.SameUser(approval.ApprovedByUserId, caller.UserId))
+            // Same deployer rule as CreateDeployment: PLAN_REQUESTER_MISMATCH for anyone but the requester.
+            if (DeployerRefusal(approval, caller.UserId) is { } deployerRefusal)
             {
                 _logger.LogWarning("Plan {PlanHash} approved by {Approver} but stacked by a different principal", planHash, approval.ApprovedBy);
                 response.StatusCode = StatusCodes.Status403Forbidden;
-                response.ErrorMessage = "PLAN_APPROVER_MISMATCH: only the principal that approved this plan may deploy it.";
+                response.ErrorMessage = deployerRefusal;
                 return response;
             }
 
