@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Database Durability
 status: executing
-stopped_at: Completed 04-07-PLAN.md
-last_updated: "2026-11-14T13:00:53.115Z"
+stopped_at: Completed 04-08-PLAN.md
+last_updated: "2026-11-14T13:07:35.893Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 04 execution started
-state_head: 023b702585017813f4558b3d65f266457413752b
+state_head: 161166a8bdd1e0c27420cdd58c342ad5fd2a92e2
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 34
-  completed_plans: 26
+  completed_plans: 27
   percent: 18
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 ## Current Position
 
 Phase: 04 (Database Durability) — EXECUTING
-Plan: 8 of 13
+Plan: 9 of 13
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 04 execution started
 
@@ -71,6 +71,7 @@ Progress: [██░░░░░░░░] 18%
 | Phase 04 P05 | 40min | 3 tasks | 9 files |
 | Phase 04 P06 | 95min | 3 tasks | 10 files |
 | Phase 04 P07 | 30min | 2 tasks | 4 files |
+| Phase 04 P08 | 40min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -106,6 +107,8 @@ Progress: [██░░░░░░░░] 18%
 - [Phase 04]: 04-06: rollback is the rehearsed BACKUP/RESTORE sequence (a test runs it); Down() stays empty; a generated PK name is compared as PK_<table> and generated names match {8,16} hex digits
 - [Phase 04]: 04-07: premigration backup lives in WorkspaceSchema.UpgradeAsync (after the pending-migration read, before legacy adoption), so every entry point including new WorkspaceDb(path) shares it; a backup failure aborts the upgrade
 - [Phase 04]: 04-07: startup quarantine moves main+wal+shm to workspace.corrupt-<UTC>.db[-wal|-shm] (undo on partial failure); Inconclusive integrity results throw and move nothing
+- [Phase 04]: 04-08: deploy.db backups live only in backups/deploy with stem deploy (user-only, newest 3), invisible to the workspace backup list; the SQLite migration set sits in provider-free Services with its design-time factory in the Server
+- [Phase 04]: 04-08: Migrate call-site guard ignores DeployDbStartup.Migrate(...) via lookbehind; Server.Tests compiles Desktop/DeployDbStartup.cs by a linked Compile item
 
 ### Pending Todos
 
@@ -129,6 +132,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T13:00:53.005Z
-Stopped at: Completed 04-07-PLAN.md
+Last session: 2026-11-14T13:07:35.775Z
+Stopped at: Completed 04-08-PLAN.md
 Resume file: None
