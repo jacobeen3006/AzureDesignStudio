@@ -179,29 +179,35 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. A caller without `Guardrail.Admin` receives 403 for guardrail read/mutation, two tenants cannot read or overwrite each other's policies or approvals, and approval requires `Deploy.Approver` with self-approval refused as a separate rule.
   5. A DEBUG developer registers and exercises a subscription with no Key Vault and no Azure credentials, while Production refuses development keys and still requires Key Vault.
 
-**Plans**: 9 plans
+**Plans**: 11 plans
 **Wave 1**
-- [ ] 05-01-PLAN.md — Typed caller identity (AdsIdentity, AdsCaller, in-band 401 on all 20 RPCs), legacy URI claim, in-process single-user marker, extended test helpers
+- [ ] 05-01-PLAN.md — Typed caller identity foundation (AdsIdentity, AdsCaller, `ServiceTools.TryGetCaller` traced through `Design.GetSaved`), in-process single-user marker, extended test helpers
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 05-02-PLAN.md — Deny-by-default RPC surface: fallback policy, explicit anonymous `Cost.GetRetailPrices`, reflection test
-- [ ] 05-03-PLAN.md — Guardrail role gate, tenant-scoped policy storage (`TenantGuardrails` migration on both providers), scope-aware enforcement, audit, SQL Server proof
+- [ ] 05-02-PLAN.md — Typed caller and in-band 401 on all 20 Design and Deploy RPCs, legacy URI claim proof, client no-retry contract, legacy accessor removed
+- [ ] 05-03-PLAN.md — Deny-by-default RPC surface: fallback policy, explicit anonymous `Cost.GetRetailPrices`, reflection test
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 05-04-PLAN.md — Audited tenant settings (self-approval, policy mode replace/merge) and `GuardrailPolicy.Merge`
+- [ ] 05-04-PLAN.md — Tenant-scoped guardrail policy storage and enforcement (`TenantGuardrails` migration on both providers), SQL Server proof
 - [ ] 05-05-PLAN.md — Development crypto provider on Data Protection, Production refusal, launch profiles
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 05-06-PLAN.md — Scope and requester binding in the what-if gate, scope-keyed approvals (`TenantApprovals` migration), fail-closed legacy rows, SQL Server proof
+- [ ] 05-06-PLAN.md — Guardrail role gate, policy-change audit event, what-if previews and tokens bound to scope and requester
 
 **Wave 5** *(blocked on Wave 4 completion)*
-- [ ] 05-07-PLAN.md — `Deploy.Approver` rule, self-approval as a separate rule, requester deploys, decommission approvals
+- [ ] 05-07-PLAN.md — Audited tenant settings (self-approval, policy mode replace/merge), `GuardrailPolicy.Merge`, thin non-UI client wrappers
 
 **Wave 6** *(blocked on Wave 5 completion)*
-- [ ] 05-08-PLAN.md — Service-worker precache exclusion, appRoles and operator documents, AGENTS.md, source guards
+- [ ] 05-08-PLAN.md — Scope-keyed plan and decommission approvals (`TenantApprovals` migration), fail-closed legacy rows, SQL Server proof
 
 **Wave 7** *(blocked on Wave 6 completion)*
-- [ ] 05-09-PLAN.md — Phase gate and human verification (real token claims, macOS deploy.db upgrade, documents and the policy-mode interpretation) — non-autonomous
+- [ ] 05-09-PLAN.md — `Deploy.Approver` rule, self-approval as a separate rule, requester deploys, decommission approvals
+
+**Wave 8** *(blocked on Wave 7 completion)*
+- [ ] 05-10-PLAN.md — Service-worker precache exclusion, appRoles and operator documents with the settings call recipe, AGENTS.md, source guards
+
+**Wave 9** *(blocked on Wave 8 completion)*
+- [ ] 05-11-PLAN.md — Phase gate and human verification (real token claims, macOS deploy.db upgrade, documents and the policy-mode interpretation) — non-autonomous
 
 **Implementation note**: new server `Auth/AdsIdentity.TryFrom` (accept mapped `oid` and the legacy URI claim through `Guid.TryParse`; never `sub`; never flip `MapInboundClaims`; in-band 401 rather than `RpcException`). `AdsPolicies` fallback plus `Guardrail.Admin`/`Deploy.Approver` app roles; tenant column on the guardrail and approval rows after Phase 4's migrations, with the legacy `Id=1`/NULL-tenant row retained as the inherited default. `ICryptoService` with a DPAPI/Data-Protection DEBUG implementation selected by `Crypto:Provider`; exclude `appsettings*.json` from service-worker precache so role/scope changes are not sticky.
 
@@ -309,7 +315,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
 | 3. Server Foundation and Integration Harness | 6/6 | Complete    | 2026-11-14 |
 | 4. Database Durability | 13/13 | Complete    | 2026-11-14 |
-| 5. Identity, Guardrails, and Offline Development | 0/9 | Planned | - |
+| 5. Identity, Guardrails, and Offline Development | 0/11 | Planned | - |
 | 6. Bounds, Payload Contract, and Health | 0/TBD | Not started | - |
 | 7. Round 2 Shell Completion | 0/TBD | Not started | - |
 | 8. Verification Depth and Diagnostics | 0/TBD | Not started | - |
