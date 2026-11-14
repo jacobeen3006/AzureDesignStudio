@@ -106,7 +106,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. A test that creates a design writes to a temporary SQLite file; no test touches a developer's `workspace.db` or a live tenant.
   4. `Program` is reachable from the test project, and the RPC hot path no longer calls `EnsureCreated`.
 
-**Plans**: 3/6 plans executed
+**Plans**: 4/6 plans executed
 **Wave 1**
 - [x] 03-01-PLAN.md — Restore unblock (two new AutoMapper advisories, same dated expiry), Mvc.Testing 10.0.15 / EF Core Sqlite / Core reference, only the Server and Server.Tests locks regenerated
 
@@ -117,7 +117,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 03-03-PLAN.md — Config-selected providers: `DatabaseProvider`, `DatabaseBootstrapper`, `CryptoProvider`, no preprocessor conditionals, harness on a unique temp SQLite file
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 03-04-PLAN.md — Seam unit tests (bootstrapper, provider rules, crypto rules) and the design-time `DesignDbContext` factory
+- [x] 03-04-PLAN.md — Seam unit tests (bootstrapper, provider rules, crypto rules) and the design-time `DesignDbContext` factory
 - [ ] 03-05-PLAN.md — Handler fault becomes an RPC status, temp-file lifecycle and isolation, crypto seam over RPC
 - [ ] 03-06-PLAN.md — Source guards (no `#if`, single `EnsureCreated` caller, no test auth in Server) and AGENTS.md
 
@@ -255,7 +255,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 |-------|----------------|--------|-----------|
 | 1. Land and Stabilize | 8/8 | Complete    | 2026-10-21 |
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
-| 3. Server Foundation and Integration Harness | 3/6 | In Progress | - |
+| 3. Server Foundation and Integration Harness | 4/6 | In Progress | - |
 | 4. Database Durability | 0/TBD | Not started | - |
 | 5. Identity, Guardrails, and Offline Development | 0/TBD | Not started | - |
 | 6. Bounds, Payload Contract, and Health | 0/TBD | Not started | - |
