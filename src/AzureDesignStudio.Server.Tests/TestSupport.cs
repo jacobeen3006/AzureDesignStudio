@@ -10,6 +10,14 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AzureDesignStudio.Server.Tests;
 
+/// <summary>Fixed tenants for tests. Consumer is the tenant every personal Microsoft account shares.</summary>
+internal static class TestTenants
+{
+    public static readonly Guid Contoso = new("c0a70c0a-0000-4000-8000-000000000001");
+    public static readonly Guid Fabrikam = new("fab71ca0-0000-4000-8000-000000000002");
+    public static readonly Guid Consumer = new("9188040d-6c67-4c5b-b112-36a304b66dad");
+}
+
 /// <summary>
 /// A <see cref="ServerCallContext"/> for calling a gRPC service class directly. The services
 /// read the caller from <c>UserState[ServiceTools.UserStateKey]</c>, where the server's
@@ -18,6 +26,7 @@ namespace AzureDesignStudio.Server.Tests;
 internal sealed class TestServerCallContext : ServerCallContext
 {
     private const string ObjectIdClaim = "http://schemas.microsoft.com/identity/claims/objectidentifier";
+    private const string TenantIdClaim = "http://schemas.microsoft.com/identity/claims/tenantid";
 
     private readonly Dictionary<object, object> _userState = new();
     private readonly Metadata _requestHeaders = [];
@@ -26,8 +35,38 @@ internal sealed class TestServerCallContext : ServerCallContext
     private TestServerCallContext(ClaimsPrincipal user) =>
         _userState[AzureDesignStudio.Services.ServiceTools.UserStateKey] = user;
 
-    /// <summary>A signed-in caller with the object id claim as Microsoft.Identity.Web maps it.</summary>
-    public static ServerCallContext ForUser(Guid userId, string? displayName = null)
+    /// <summary>A signed-in caller with the object id and tenant claims as Microsoft.Identity.Web
+    /// maps them, optionally with roles and the single-user host marker. The tenant defaults to
+    /// <see cref="TestTenants.Contoso"/>.</summary>
+    public static ServerCallContext ForUser(
+        Guid userId, string? displayName = null, Guid? tenantId = null,
+        IEnumerable<string>? roles = null, bool singleUserHost = false)
+    {
+        var claims = new List<Claim>
+        {
+            new(ObjectIdClaim, userId.ToString()),
+            new(TenantIdClaim, (tenantId ?? TestTenants.Contoso).ToString()),
+        };
+        if (displayName is not null)
+            claims.Add(new Claim("name", displayName));
+        foreach (var role in roles ?? [])
+            claims.Add(new Claim(ClaimTypes.Role, role));
+        var context = new TestServerCallContext(new ClaimsPrincipal(new ClaimsIdentity(claims, "test")));
+        if (singleUserHost)
+            context._userState[AzureDesignStudio.Services.ServiceTools.SingleUserHostKey] = true;
+        return context;
+    }
+
+    /// <summary>A personal Microsoft account: the shared personal-account tenant.</summary>
+    public static ServerCallContext ForPersonalAccount(Guid userId, string? displayName = null) =>
+        ForUser(userId, displayName, TestTenants.Consumer);
+
+    /// <summary>The Desktop host's caller: marked as the single-user host.</summary>
+    public static ServerCallContext ForSingleUserHost(Guid userId, string? displayName = null) =>
+        ForUser(userId, displayName, singleUserHost: true);
+
+    /// <summary>A token with an object id but no tenant claim.</summary>
+    public static ServerCallContext WithoutTenant(Guid userId, string? displayName = null)
     {
         var claims = new List<Claim> { new(ObjectIdClaim, userId.ToString()) };
         if (displayName is not null)

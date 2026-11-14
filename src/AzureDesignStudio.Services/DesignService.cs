@@ -93,15 +93,15 @@ namespace AzureDesignStudio.Services
         public override Task<GetSavedDesignResponse> GetSaved(Empty request, ServerCallContext context)
         {
             var response = new GetSavedDesignResponse();
-            // Get user id
-            var userIdClaim = ServiceTools.GetUserId(context);
-            if (string.IsNullOrEmpty(userIdClaim))
+            // A bad identity answers in-band, never with an RpcException: the client reads
+            // Unauthenticated as "offline, retry later" and would queue the call forever.
+            if (!ServiceTools.TryGetCaller(context, out var caller, out var failure))
             {
-                logger.LogWarning("Access denied. userIdClaim is empty.");
+                logger.LogWarning("Access denied. {Failure}", failure);
                 response.StatusCode = StatusCodes.Status401Unauthorized;
                 return Task.FromResult(response);
             }
-            var userId = new Guid(userIdClaim);
+            var userId = caller.UserId;
 
             var names = designContext.AdsDesigns.Where(d => d.UserId == userId).Select(d => d.Name);
             response.Names.AddRange(names);

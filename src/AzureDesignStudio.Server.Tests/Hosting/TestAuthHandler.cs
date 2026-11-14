@@ -23,6 +23,23 @@ public sealed class TestAuthHandler(
     /// <summary>What <c>ServiceTools.GetUserId</c> reads first.</summary>
     public const string ObjectIdClaimType = "http://schemas.microsoft.com/identity/claims/objectidentifier";
 
+    public const string TenantIdClaimType = "http://schemas.microsoft.com/identity/claims/tenantid";
+
+    /// <summary>Tenant GUID text for this request; default is <c>TestTenants.Contoso</c>.</summary>
+    public const string TenantHeader = "x-test-tenant";
+
+    /// <summary>Authenticated, but the token carries no tenant claim.</summary>
+    public const string NoTidHeader = "x-test-no-tid";
+
+    /// <summary>Authenticated, but the token carries no object id claim.</summary>
+    public const string NoOidHeader = "x-test-no-oid";
+
+    /// <summary>Repeatable: each value becomes a role claim.</summary>
+    public const string RoleHeader = "x-test-role";
+
+    /// <summary>Repeatable: <c>type|value</c>, split at the first '|', adds any claim.</summary>
+    public const string ClaimHeader = "x-test-claim";
+
     public const string ScopeClaimType = "http://schemas.microsoft.com/identity/claims/scope";
 
     /// <summary>The checked-in <c>AzureAd:Scopes</c>; a test ties the two together.</summary>
@@ -34,11 +51,24 @@ public sealed class TestAuthHandler(
         if (!Request.Headers.TryGetValue(UserHeader, out var user))
             return Task.FromResult(AuthenticateResult.NoResult());
 
-        var claims = new List<Claim>
+        var claims = new List<Claim> { new("name", "Tester") };
+        if (!Request.Headers.ContainsKey(NoOidHeader))
+            claims.Add(new Claim(ObjectIdClaimType, user.ToString()));
+        if (!Request.Headers.ContainsKey(NoTidHeader))
         {
-            new(ObjectIdClaimType, user.ToString()),
-            new("name", "Tester"),
-        };
+            var tenant = Request.Headers.TryGetValue(TenantHeader, out var chosen)
+                ? chosen.ToString()
+                : TestTenants.Contoso.ToString();
+            claims.Add(new Claim(TenantIdClaimType, tenant));
+        }
+        foreach (var role in Request.Headers[RoleHeader])
+            claims.Add(new Claim(ClaimTypes.Role, role!));
+        foreach (var extra in Request.Headers[ClaimHeader])
+        {
+            var split = extra!.IndexOf('|');
+            if (split > 0)
+                claims.Add(new Claim(extra[..split], extra[(split + 1)..]));
+        }
         if (!Request.Headers.ContainsKey(NoScopeHeader))
             claims.Add(new Claim(ScopeClaimType, ScopeValue));
 

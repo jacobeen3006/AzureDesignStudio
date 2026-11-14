@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.RegularExpressions;
+using AzureDesignStudio.Services.Auth;
 using Grpc.Core;
 
 namespace AzureDesignStudio.Services
@@ -13,11 +14,33 @@ namespace AzureDesignStudio.Services
         /// user. The services read the caller from here only, so they need no web host.</summary>
         public const string UserStateKey = "ads.user";
 
+        /// <summary>Where a host that serves exactly one user (the Desktop app, through its
+        /// in-process invoker) says so. Read from <c>UserState</c> only and counted only when the
+        /// stored value is the boolean true: no claim, header or request field can declare it.</summary>
+        public const string SingleUserHostKey = "ads.host.singleuser";
+
         /// <summary>The caller of this call, or an anonymous principal when the host set none.</summary>
         public static ClaimsPrincipal GetUser(ServerCallContext context) =>
             context.UserState.TryGetValue(UserStateKey, out var user) && user is ClaimsPrincipal principal
                 ? principal
                 : new ClaimsPrincipal(new ClaimsIdentity());
+
+        /// <summary>The typed caller: identity from the validated principal, the single-user
+        /// marker from the host. False, with a log-safe reason, when the principal carries no
+        /// usable object id or tenant id.</summary>
+        public static bool TryGetCaller(ServerCallContext context, out AdsCaller caller, out string failure)
+        {
+            var user = GetUser(context);
+            if (!AdsIdentity.TryFrom(user, out var identity, out failure))
+            {
+                caller = null!;
+                return false;
+            }
+
+            var singleUser = context.UserState.TryGetValue(SingleUserHostKey, out var marker) && marker is true;
+            caller = new AdsCaller(identity, singleUser, user.FindFirst("name")?.Value);
+            return true;
+        }
 
         /// <summary>The caller's Entra object id, or null when the call carries none that
         /// parses as a GUID. Every caller builds a <see cref="Guid"/> from the result, so a
