@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Identity, Guardrails, and Offline Development
 status: executing
-stopped_at: Completed 05-03-PLAN.md
-last_updated: "2026-11-14T15:33:08.742Z"
+stopped_at: Completed 05-04-PLAN.md
+last_updated: "2026-11-14T15:40:51.355Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 05 execution started
-state_head: d7beb8542ec1f800e81581b6e2922522d333f3fa
+state_head: "0b23215d33f9454789bfcd318f668e39ce55415f"
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 45
-  completed_plans: 35
+  completed_plans: 36
   percent: 27
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 ## Current Position
 
 Phase: 05 (Identity, Guardrails, and Offline Development) — EXECUTING
-Plan: 4 of 11
+Plan: 5 of 11
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 05 execution started
 
@@ -81,6 +81,7 @@ Progress: [███░░░░░░░] 27%
 | Phase 05 P01 | 25min | 2 tasks | 11 files |
 | Phase 05 P02 | 35min | 3 tasks | 10 files |
 | Phase 05 P03 | 20min | 2 tasks | 3 files |
+| Phase 05 P04 | 45min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -131,6 +132,8 @@ Progress: [███░░░░░░░] 27%
 - [Phase 05]: 05-02: one ServiceTools.IdentityInvalidMessage text; responses without an error_message field carry the 401 status only (no proto change)
 - [Phase 05]: 05-02: the caller is resolved before request validation in every RPC, including WhatIf, CreateDeployment, GetStack and the shared stack preparation
 - [Phase 05]: 05-03: Cost.GetRetailPrices is the only anonymous gRPC method (literal list in the test); FallbackPolicy requires an authenticated user; mapping helper unit-tested because Hosted [Authorize] attributes mask it on the real host
+- [Phase 05]: 05-04: guardrail policy rows keyed by caller.ScopeId; the NULL-tenant Id=1 row is the inherited default (replace semantics), never written by an RPC; an own row with an empty body is the empty policy
+- [Phase 05]: 05-04: TenantGuardrails SQL Server Up is five guarded commands (column, filtered unique index, two tables, events index) with no default constraint; proved in the mssql 2022 container (9 passed, 0 skipped)
 
 ### Pending Todos
 
@@ -154,6 +157,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T15:33:08.637Z
-Stopped at: Completed 05-03-PLAN.md
+Last session: 2026-11-14T15:40:51.253Z
+Stopped at: Completed 05-04-PLAN.md
 Resume file: None
