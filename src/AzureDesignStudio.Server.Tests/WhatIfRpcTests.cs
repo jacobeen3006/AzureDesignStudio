@@ -580,10 +580,13 @@ public class RouteTableHttpTests
     public async Task ARequestCancelledBeforeItArrives_IsStillRecorded()
     {
         // HttpClient hands the handler a request whose token has already fired, and the handler
-        // reads its in-memory body without observing that token (HttpContent buffers it into a
-        // stream that ignores the token), so the request is recorded before the hold throws. A
-        // deadline test that counts requests therefore never undercounts; if this ever fails,
-        // read the body with CancellationToken.None in RouteTableHttp.SendAsync.
+        // reads its in-memory body without observing that token, so a request that reaches the
+        // handler is always recorded before the hold throws. A request the deadline stops before
+        // it is sent - the engine starts none after its deadline, and ArmTransport waits on its
+        // gate and the credential with the same token before http.SendAsync - never reaches the
+        // harness, so a deadline test that counts requests still needs a budget wide enough for
+        // the first send. If this test ever fails, read the body with CancellationToken.None in
+        // RouteTableHttp.SendAsync.
         var routes = new RouteTableHttp().Hold(HttpMethod.Post, "/slow", new TaskCompletionSource().Task);
         using var http = routes.CreateClient("arm");
         using var cancel = new CancellationTokenSource();
