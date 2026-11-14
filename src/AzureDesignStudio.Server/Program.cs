@@ -4,6 +4,7 @@ using Azure.Security.KeyVault.Secrets;
 using AzureDesignStudio.Services;
 using AzureDesignStudio.Services.Models;
 using AzureDesignStudio.Discovery.Iac.WhatIf;
+using AzureDesignStudio.Server.Auth;
 using AzureDesignStudio.Server.Persistence;
 using AzureDesignStudio.Server.Services;
 using AzureDesignStudio.Server.Utils;
@@ -33,6 +34,9 @@ builder.Services.Configure<JwtBearerOptions>(
     {
         options.TokenValidationParameters.NameClaimType = "name";
     });
+// Deny by default: a FallbackPolicy requires an authenticated user for any endpoint without
+// authorization metadata. The anonymous endpoints are stated where they are mapped below.
+builder.Services.AddAdsAuthorization();
 
 // The one value read before Build(): the vault decision below needs it. It is resolved once and
 // carried to the DbContext registration, so the vault and the EF provider cannot diverge. Tests
@@ -119,9 +123,10 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.UseGrpcWeb();
-app.MapGrpcService<HostedDesignService>().EnableGrpcWeb();
-app.MapGrpcService<HostedDeployService>().EnableGrpcWeb();
-app.MapGrpcService<RetailPriceService>().EnableGrpcWeb();
+app.MapAdsGrpcService<HostedDesignService>();
+app.MapAdsGrpcService<HostedDeployService>();
+// The one anonymous service: Cost.GetRetailPrices (public Azure retail prices, no user data).
+app.MapAdsGrpcService<RetailPriceService>(allowAnonymous: true);
 
 if (app.Environment.IsDevelopment())
 {
@@ -130,9 +135,11 @@ if (app.Environment.IsDevelopment())
     app.MapGrpcReflectionService().RequireAuthorization();
 }
 
-app.MapStaticAssets();
-app.MapRazorPages();
-app.MapFallbackToFile("index.html");
+// The Blazor client must load before any token exists, so these stay anonymous under the
+// fallback policy.
+app.MapStaticAssets().AllowAnonymous();
+app.MapRazorPages().AllowAnonymous();
+app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Run();
 
