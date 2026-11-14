@@ -883,7 +883,7 @@ namespace AzureDesignStudio.Services
 
             // Only a preview issued for the caller's own scope is approvable (D-07). The requester it
             // names is kept for the approval row (plan 05-08) and the approver rules (plan 05-09).
-            if (!_whatIfGate.TryPeekPlan(planHash, caller.ScopeId, out var planJson, out var revertJson, out _))
+            if (!_whatIfGate.TryPeekPlan(planHash, caller.ScopeId, out var planJson, out var revertJson, out var requestedByUserId))
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
                 response.ErrorMessage = "WHAT_IF_STALE: no live What-If preview exists for this plan; run What-If first.";
@@ -892,17 +892,19 @@ namespace AzureDesignStudio.Services
 
             var principal = caller.Principal;
 
-            var existing = await _designContext.AdsPlanApprovals.FindAsync([planHash], context.CancellationToken);
+            var existing = await _designContext.AdsPlanApprovals.FindAsync([caller.ScopeId, planHash], context.CancellationToken);
             if (existing != null)
                 _designContext.AdsPlanApprovals.Remove(existing);
 
             var approval = new PlanApprovalModel
             {
+                TenantId = caller.ScopeId,
                 PlanHash = planHash,
                 PlanJson = planJson,
                 Status = PlanApprovalGate.ApprovedStatus,
                 ApprovedBy = principal,
                 ApprovedByUserId = caller.UserIdText,
+                RequestedByUserId = requestedByUserId,
                 ApprovedAtUtc = DateTime.UtcNow,
                 RevertPlanJson = revertJson,
             };
@@ -1045,7 +1047,7 @@ namespace AzureDesignStudio.Services
                 return;
             }
 
-            var approval = await _designContext.AdsPlanApprovals.FindAsync([planHash], context.CancellationToken);
+            var approval = await _designContext.AdsPlanApprovals.FindAsync([caller.ScopeId, planHash], context.CancellationToken);
             if (approval == null)
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -1408,7 +1410,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var approval = await _designContext.AdsPlanApprovals.FindAsync([planHash], context.CancellationToken);
+            var approval = await _designContext.AdsPlanApprovals.FindAsync([caller.ScopeId, planHash], context.CancellationToken);
             if (approval == null)
             {
                 response.StatusCode = StatusCodes.Status400BadRequest;
@@ -2482,12 +2484,13 @@ namespace AzureDesignStudio.Services
 
             var principal = caller.Principal;
 
-            var existing = await _designContext.AdsDecomApprovals.FindAsync([executionHash], context.CancellationToken);
+            var existing = await _designContext.AdsDecomApprovals.FindAsync([caller.ScopeId, executionHash], context.CancellationToken);
             if (existing != null)
                 _designContext.AdsDecomApprovals.Remove(existing);
 
             var approval = new DecomApprovalModel
             {
+                TenantId = caller.ScopeId,
                 ExecutionHash = executionHash,
                 WindowId = request.WindowId,
                 PlanHash = planHash,
@@ -2578,7 +2581,7 @@ namespace AzureDesignStudio.Services
                 return response;
             }
 
-            var approval = await _designContext.AdsDecomApprovals.FindAsync([executionHash], context.CancellationToken);
+            var approval = await _designContext.AdsDecomApprovals.FindAsync([caller.ScopeId, executionHash], context.CancellationToken);
             if (approval == null)
             {
                 response.StatusCode = StatusCodes.Status412PreconditionFailed;

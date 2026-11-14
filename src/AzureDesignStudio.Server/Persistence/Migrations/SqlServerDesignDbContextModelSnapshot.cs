@@ -140,6 +140,9 @@ namespace AzureDesignStudio.Server.Persistence.Migrations
 
             modelBuilder.Entity("AzureDesignStudio.Services.Models.DecomApprovalModel", b =>
                 {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("ExecutionHash")
                         .HasMaxLength(71)
                         .HasColumnType("nvarchar(71)");
@@ -172,7 +175,7 @@ namespace AzureDesignStudio.Server.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
-                    b.HasKey("ExecutionHash");
+                    b.HasKey("TenantId", "ExecutionHash");
 
                     b.ToTable("AdsDecomApprovals");
                 });
@@ -297,6 +300,9 @@ namespace AzureDesignStudio.Server.Persistence.Migrations
 
             modelBuilder.Entity("AzureDesignStudio.Services.Models.PlanApprovalModel", b =>
                 {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("PlanHash")
                         .HasMaxLength(71)
                         .HasColumnType("nvarchar(71)");
@@ -318,6 +324,10 @@ namespace AzureDesignStudio.Server.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("RequestedByUserId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("RevertPlanJson")
                         .HasColumnType("nvarchar(max)");
 
@@ -326,7 +336,7 @@ namespace AzureDesignStudio.Server.Persistence.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
-                    b.HasKey("PlanHash");
+                    b.HasKey("TenantId", "PlanHash");
 
                     b.ToTable("AdsPlanApprovals");
                 });

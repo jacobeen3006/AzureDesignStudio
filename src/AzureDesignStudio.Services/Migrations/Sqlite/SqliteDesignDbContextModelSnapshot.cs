@@ -131,6 +131,9 @@ namespace AzureDesignStudio.Services.Migrations.Sqlite
 
             modelBuilder.Entity("AzureDesignStudio.Services.Models.DecomApprovalModel", b =>
                 {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ExecutionHash")
                         .HasMaxLength(71)
                         .HasColumnType("TEXT");
@@ -163,7 +166,7 @@ namespace AzureDesignStudio.Services.Migrations.Sqlite
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
-                    b.HasKey("ExecutionHash");
+                    b.HasKey("TenantId", "ExecutionHash");
 
                     b.ToTable("AdsDecomApprovals");
                 });
@@ -282,6 +285,9 @@ namespace AzureDesignStudio.Services.Migrations.Sqlite
 
             modelBuilder.Entity("AzureDesignStudio.Services.Models.PlanApprovalModel", b =>
                 {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PlanHash")
                         .HasMaxLength(71)
                         .HasColumnType("TEXT");
@@ -303,6 +309,10 @@ namespace AzureDesignStudio.Services.Migrations.Sqlite
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("RequestedByUserId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("RevertPlanJson")
                         .HasColumnType("TEXT");
 
@@ -311,7 +321,7 @@ namespace AzureDesignStudio.Services.Migrations.Sqlite
                         .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
-                    b.HasKey("PlanHash");
+                    b.HasKey("TenantId", "PlanHash");
 
                     b.ToTable("AdsPlanApprovals");
                 });

@@ -267,6 +267,65 @@ public sealed class DeployDbMigrationTests : IDisposable
         Assert.Single(WorkspaceBackup.List(backups, "deploy"));
     }
 
+    private const string EmptyScope = "00000000-0000-0000-0000-000000000000";
+    private const string HashA = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    private static string PrimaryKeyColumns(string path, string table) =>
+        string.Join(',', ScalarList(path,
+            $"SELECT name FROM pragma_table_info('{table}') WHERE pk > 0 ORDER BY pk"));
+
+    private static List<string> ScalarList(string path, string sql)
+    {
+        using var connection = new SqliteConnection(ConnectionString(path));
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        using var reader = command.ExecuteReader();
+        var result = new List<string>();
+        while (reader.Read()) result.Add(reader.GetString(0));
+        return result;
+    }
+
+    [Fact]
+    public void PreTenantFile_KeepsItsApprovals_InTheEmptyScope_AndGainsCompositeKeys()
+    {
+        var path = NewPath();
+        var backups = Path.Combine(_dir, "backups", "deploy");
+        CreateBaselineEraFile(path, keepHistory: true);
+        Exec(path, $"""
+            INSERT INTO AdsPlanApprovals (PlanHash, PlanJson, Status, ApprovedBy, ApprovedByUserId, ApprovedAtUtc, RevertPlanJson)
+                VALUES ('{HashA}', 'plan-1', 'Approved', 'me', '11111111-1111-1111-1111-111111111111',
+                        '2026-01-01 00:00:00', 'revert-1');
+            INSERT INTO AdsDecomApprovals (ExecutionHash, WindowId, PlanHash, SubscriptionId, ApprovedBy, ApprovedByUserId, ApprovedAtUtc)
+                VALUES ('{HashA}', 'w1', '{HashA}', 'sub', 'me', '11111111-1111-1111-1111-111111111111',
+                        '2026-01-01 00:00:00');
+            """);
+        Assert.DoesNotContain("TenantId", SqliteSchemaDescriber.ColumnNames(path, "AdsPlanApprovals"));
+        Assert.Equal("PlanHash", PrimaryKeyColumns(path, "AdsPlanApprovals"));
+
+        StartupMigrate(path, backups, T0);
+
+        Assert.Equal(1, Scalar(path, $"SELECT COUNT(*) FROM AdsPlanApprovals WHERE TenantId = '{EmptyScope}' AND PlanHash = '{HashA}' AND PlanJson LIKE '%plan%' AND RevertPlanJson LIKE '%revert%' AND RequestedByUserId IS NULL"));
+        Assert.Equal(1, Scalar(path, $"SELECT COUNT(*) FROM AdsPlanApprovals WHERE TenantId = '{EmptyScope}'"));
+        Assert.Equal(1, Scalar(path, $"SELECT COUNT(*) FROM AdsDecomApprovals WHERE TenantId = '{EmptyScope}' AND WindowId = 'w1'"));
+        Assert.Equal("TenantId,PlanHash", PrimaryKeyColumns(path, "AdsPlanApprovals"));
+        Assert.Equal("TenantId,ExecutionHash", PrimaryKeyColumns(path, "AdsDecomApprovals"));
+        Assert.Equal(MigrationCount(), Scalar(path, "SELECT COUNT(*) FROM __EFMigrationsHistory"));
+
+        // The same hash can now be approved by a second scope next to the legacy row.
+        Exec(path, $"""
+            INSERT INTO AdsPlanApprovals (TenantId, PlanHash, PlanJson, Status, ApprovedBy, ApprovedByUserId, ApprovedAtUtc)
+                VALUES ('55555555-5555-5555-5555-555555555555', '{HashA}', 'x', 'Approved', 'you',
+                        '22222222-2222-2222-2222-222222222222', '2026-01-02 00:00:00');
+            """);
+        Assert.Equal(2, Scalar(path, $"SELECT COUNT(*) FROM AdsPlanApprovals WHERE PlanHash = '{HashA}'"));
+        Assert.Throws<SqliteException>(() => Exec(path, $"""
+            INSERT INTO AdsPlanApprovals (TenantId, PlanHash, PlanJson, Status, ApprovedBy, ApprovedByUserId, ApprovedAtUtc)
+                VALUES ('55555555-5555-5555-5555-555555555555', '{HashA}', 'x', 'Approved', 'you',
+                        '22222222-2222-2222-2222-222222222222', '2026-01-02 00:00:00');
+            """));
+    }
+
     [Fact]
     public void TheUniqueTenantIndex_AllowsManyNullRowsAndRefusesATenantTwice()
     {

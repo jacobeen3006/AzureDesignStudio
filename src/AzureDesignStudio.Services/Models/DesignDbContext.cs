@@ -24,6 +24,10 @@ namespace AzureDesignStudio.Services.Models
             // is the single row with Id 1 (seeded by the operator), never written by an RPC.
             modelBuilder.Entity<GuardrailPolicyModel>().HasIndex(e => e.TenantId).IsUnique();
             modelBuilder.Entity<SecurityEventModel>().HasIndex(e => e.TenantId);
+            // Approvals are keyed by (scope, hash): two scopes approve the same hash without touching each
+            // other's row. The key order matters for FindAsync([scopeId, hash]).
+            modelBuilder.Entity<PlanApprovalModel>().HasKey(e => new { e.TenantId, e.PlanHash });
+            modelBuilder.Entity<DecomApprovalModel>().HasKey(e => new { e.TenantId, e.ExecutionHash });
         }
 
         public DbSet<DesignModel> AdsDesigns { get; set; } = null!;
@@ -61,8 +65,13 @@ namespace AzureDesignStudio.Services.Models
 
     public record PlanApprovalModel
     {
+        /// <summary>The caller's scope key (tenant id, or the user's object id for a personal account),
+        /// the first half of the key. Not the Azure tenant of a linked service principal. Approvals
+        /// pending when the column was added carry the empty GUID, which no caller has, so they match
+        /// nothing and must be approved again.</summary>
+        public Guid TenantId { get; set; }
+
         /// <summary>DeployPlanArtifact hash ("sha256:" + 64 hex) the approval is bound to.</summary>
-        [Key]
         [StringLength(71, MinimumLength = 71)]
         public string PlanHash { get; set; } = null!;
 
@@ -79,6 +88,11 @@ namespace AzureDesignStudio.Services.Models
 
         [StringLength(64, MinimumLength = 36)]
         public string ApprovedByUserId { get; set; } = null!;
+
+        /// <summary>User whose what-if produced the previewed change (the gate entry's requester);
+        /// null for an approval that predates the column.</summary>
+        [StringLength(64)]
+        public string? RequestedByUserId { get; set; }
 
         public DateTime ApprovedAtUtc { get; set; }
 
@@ -122,8 +136,11 @@ namespace AzureDesignStudio.Services.Models
     /// deployment. Consumed by ExecuteDecomWindow; one execute per approval.</summary>
     public record DecomApprovalModel
     {
+        /// <summary>The caller's scope key; the first half of the key. The empty GUID marks an approval
+        /// that predates the column and matches no caller.</summary>
+        public Guid TenantId { get; set; }
+
         /// <summary>DecomExecution.ExecutionHash ("sha256:" + 64 hex) the approval is bound to.</summary>
-        [Key]
         [StringLength(71, MinimumLength = 71)]
         public string ExecutionHash { get; set; } = null!;
 
