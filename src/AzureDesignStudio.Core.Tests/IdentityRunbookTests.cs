@@ -74,7 +74,12 @@ namespace AzureDesignStudio.Core.Tests
             var text = ReadGuide();
 
             Assert.Contains("ADS_TOKEN", text, StringComparison.Ordinal);
-            Assert.Contains("Authorization: Bearer $ADS_TOKEN", text, StringComparison.Ordinal);
+            // grpcurl expands ${ADS_TOKEN} itself (-expand-headers) from a single-quoted header, so the
+            // value never reaches argv. A header the shell expands ("Bearer $ADS_TOKEN") would put the
+            // token on the command line and is refused (WR-07).
+            Assert.Contains("-expand-headers", text, StringComparison.Ordinal);
+            Assert.Contains("'Authorization: Bearer ${ADS_TOKEN}'", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Bearer $ADS_TOKEN", text, StringComparison.Ordinal);
             Assert.Contains("Environment.GetEnvironmentVariable(\"ADS_TOKEN\")", text, StringComparison.Ordinal);
 
             // Any other text after "Bearer " must be a variable or a format placeholder, never a literal value.

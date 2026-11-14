@@ -128,25 +128,27 @@ The `Deploy` service has no proto package, so the full method names are `Deploy/
 
 ### Example with grpcurl
 
-Run from the repository root so `-import-path` finds the proto file. `grpcurl` reads the header value from the
-shell variable; `-insecure` is only for a local development certificate and must not be used against a real
+Run from the repository root so `-import-path` finds the proto file. `-expand-headers` makes `grpcurl` itself
+replace `${ADS_TOKEN}` with the value of the environment variable, so the token never appears on the command line
+(and therefore never in the process list or shell history). Keep the header in **single quotes**: with double
+quotes your shell would expand `$ADS_TOKEN` first and put the value on the command line, which is exactly what
+this recipe avoids. `-insecure` is only for a local development certificate and must not be used against a real
 server. `-emit-defaults` makes it print `false` instead of omitting it.
 
 ```bash
 # Read
-grpcurl -emit-defaults -import-path src/AzureDesignStudio.SharedModels -proto deploy_model.proto \
-  -H "Authorization: Bearer $ADS_TOKEN" -d '{}' \
+grpcurl -emit-defaults -expand-headers -import-path src/AzureDesignStudio.SharedModels -proto deploy_model.proto \
+  -H 'Authorization: Bearer ${ADS_TOKEN}' -d '{}' \
   <server-host>:443 Deploy/GetTenantSettings
 
 # Write both settings back (here: allow self-approval, keep mode replace)
-grpcurl -emit-defaults -import-path src/AzureDesignStudio.SharedModels -proto deploy_model.proto \
-  -H "Authorization: Bearer $ADS_TOKEN" \
+grpcurl -emit-defaults -expand-headers -import-path src/AzureDesignStudio.SharedModels -proto deploy_model.proto \
+  -H 'Authorization: Bearer ${ADS_TOKEN}' \
   -d '{"allow_self_approval": true, "guardrail_policy_mode": "replace"}' \
   <server-host>:443 Deploy/SetTenantSettings
 ```
 
-The shell expands `$ADS_TOKEN` before `grpcurl` starts, so on a shared machine the value can be seen by other
-local users in the process list while the command runs. Use the C# example below on a shared machine.
+The C# example below does the same without `grpcurl`.
 
 ### Example in C#
 
