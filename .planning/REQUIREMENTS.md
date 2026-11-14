@@ -36,14 +36,14 @@ Requirements for the pilot-ready milestone. Each maps to exactly one roadmap pha
 
 ### Data Durability (DATA)
 
-- [ ] **DATA-01**: An existing `workspace.db` upgrades through EF migrations with designs, scans, and plans intact and row counts unchanged.
-- [ ] **DATA-02**: The server database upgrades through EF migrations, and rollback is documented and rehearsed.
-- [ ] **DATA-03**: SQLite runs WAL with `busy_timeout` and `foreign_keys`; a concurrent scan write and MCP read does not fail with `SQLITE_BUSY` or `SQLITE_LOCKED`.
-- [ ] **DATA-04**: Startup `quick_check` surfaces workspace corruption instead of silently continuing.
-- [ ] **DATA-05**: A user can create and restore a WAL-safe backup (`VACUUM INTO`), and the restore is verified.
-- [ ] **DATA-06**: MCP opens a WAL workspace read-only with an explicit, reported fallback mode and passes a cold-workspace test.
+- [x] **DATA-01**: An existing `workspace.db` upgrades through EF migrations with designs, scans, and plans intact and row counts unchanged.
+- [x] **DATA-02**: The server database upgrades through EF migrations, and rollback is documented and rehearsed.
+- [x] **DATA-03**: SQLite runs WAL with `busy_timeout` and `foreign_keys`; a concurrent scan write and MCP read does not fail with `SQLITE_BUSY` or `SQLITE_LOCKED`.
+- [x] **DATA-04**: Startup `quick_check` surfaces workspace corruption instead of silently continuing.
+- [x] **DATA-05**: A user can create and restore a WAL-safe backup (`VACUUM INTO`), and the restore is verified.
+- [x] **DATA-06**: MCP opens a WAL workspace read-only with an explicit, reported fallback mode and passes a cold-workspace test.
 - [ ] **DATA-07**: A packaged app finds or imports an existing unpackaged workspace, and MCP discovery probes both install roots.
-- [ ] **DATA-08**: The migration baseline adopts existing DDL, reports or dedupes rows that violate new unique indexes, and documents `__EFMigrationsLock` recovery.
+- [x] **DATA-08**: The migration baseline adopts existing DDL, reports or dedupes rows that violate new unique indexes, and documents `__EFMigrationsLock` recovery.
 
 ### Build & CI (BUILD)
 
@@ -153,14 +153,14 @@ Updated 2026-10-21 during roadmap creation. Every v1 requirement maps to exactly
 | BOUND-05 | Phase 6 | Pending |
 | BOUND-06 | Phase 6 | Pending |
 | BOUND-07 | Phase 6 | Pending |
-| DATA-01 | Phase 4 | Pending |
-| DATA-02 | Phase 4 | Pending |
-| DATA-03 | Phase 4 | Pending |
-| DATA-04 | Phase 4 | Pending |
-| DATA-05 | Phase 4 | Pending |
-| DATA-06 | Phase 4 | Pending |
+| DATA-01 | Phase 4 | Complete |
+| DATA-02 | Phase 4 | Complete |
+| DATA-03 | Phase 4 | Complete |
+| DATA-04 | Phase 4 | Complete |
+| DATA-05 | Phase 4 | Complete |
+| DATA-06 | Phase 4 | Complete |
 | DATA-07 | Phase 11 | Pending |
-| DATA-08 | Phase 4 | Pending |
+| DATA-08 | Phase 4 | Complete |
 | BUILD-01 | Phase 2 | Complete |
 | BUILD-02 | Phase 2 | Pending |
 | BUILD-03 | Phase 2 | Pending |

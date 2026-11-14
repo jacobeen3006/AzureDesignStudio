@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Land and Stabilize** - Commit the working slice in reviewable chunks, remove tracked blobs and scratch, fix the stale pointer zone, correct docs, decide the publisher (completed 2026-10-21)
 - [ ] **Phase 2: Reproducible Build and CI Baseline** - Pin the SDK, centralize and lock packages, gate Desktop on PRs, block vulnerable packages
 - [x] **Phase 3: Server Foundation and Integration Harness** - Config-selected providers, a reachable `Program`, and a real hosted-server test channel (completed 2026-11-14)
-- [ ] **Phase 4: Database Durability** - Baseline migrations, WAL, integrity check, backup/restore, and read-only MCP over one workspace
+- [x] **Phase 4: Database Durability** - Baseline migrations, WAL, integrity check, backup/restore, and read-only MCP over one workspace (completed 2026-11-14)
 - [ ] **Phase 5: Identity, Guardrails, and Offline Development** - Typed `oid`/`tid`, deny-by-default RPCs, tenant-scoped roles, and a DEV crypto provider
 - [ ] **Phase 6: Bounds, Payload Contract, and Health** - Per-user limits, calibrated deadlines, shared payload caps, and anonymous health endpoints
 - [ ] **Phase 7: Round 2 Shell Completion** - Zone contract, palette lifetime and keyboard path, honest status, one theme axis, link and a11y gates (parallel track)
@@ -135,7 +135,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Startup `quick_check` surfaces a deliberately corrupted workspace instead of opening it, and a user can take a `VACUUM INTO` backup and restore it with data verified.
   5. MCP opens a WAL workspace read-only (or reports the explicit `ReadWrite + query_only` fallback it used) and passes a cold-workspace test; the baseline adopts existing DDL, reports or dedupes rows violating new unique indexes, and documents `__EFMigrationsLock` recovery.
 
-**Plans**: 13/13 plans executed
+**Plans**: 13/13 plans complete
 **Wave 1**
 - [x] 04-01-PLAN.md — Tooling and fixtures: dotnet-ef 10.0.13 root manifest, EF Design package, L1-L4 legacy workspace fixtures, loader and schema describer
 
@@ -285,7 +285,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 | 1. Land and Stabilize | 8/8 | Complete    | 2026-10-21 |
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
 | 3. Server Foundation and Integration Harness | 6/6 | Complete    | 2026-11-14 |
-| 4. Database Durability | 13/13 | In Progress | - |
+| 4. Database Durability | 13/13 | Complete    | 2026-11-14 |
 | 5. Identity, Guardrails, and Offline Development | 0/TBD | Not started | - |
 | 6. Bounds, Payload Contract, and Health | 0/TBD | Not started | - |
 | 7. Round 2 Shell Completion | 0/TBD | Not started | - |
