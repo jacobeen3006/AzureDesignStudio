@@ -35,7 +35,8 @@ public sealed record WorkspaceNotice(string Message, string QuarantinePath, IRea
 
 /// <summary>What startup did, for the host to surface.</summary>
 public sealed record WorkspaceStartupReport(
-    WorkspaceStartupOutcome Outcome, WorkspaceNotice? Notice, WorkspaceUpgradeResult Upgrade);
+    WorkspaceStartupOutcome Outcome, WorkspaceNotice? Notice, WorkspaceUpgradeResult Upgrade,
+    RestoreOutcome? Restore = null);
 
 /// <summary>The opened workspace plus the report of how it was opened.</summary>
 public sealed record WorkspaceStartupResult(WorkspaceDb Db, WorkspaceStartupReport Report);
@@ -65,6 +66,10 @@ public static class WorkspaceStartup
 
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+
+        // Step 0: a staged restore is applied before any connection exists. The steps below then run on the
+        // restored file: integrity check, premigration backup of an older candidate, migration, WAL assertion.
+        var restore = await RestoreStaging.ApplyPendingAsync(path, directory ?? ".", clock, ct).ConfigureAwait(false);
 
         // The file work is synchronous; run it off the caller's thread so an async caller is not blocked by it.
         var check = await Task.Run(
@@ -97,7 +102,7 @@ public static class WorkspaceStartup
         var notice = quarantined is null ? null : BuildNotice(quarantined, path, backups);
         return new WorkspaceStartupResult(
             new WorkspaceDb(path, alreadyUpgraded: true),
-            new WorkspaceStartupReport(outcome, notice, upgrade));
+            new WorkspaceStartupReport(outcome, notice, upgrade, restore));
     }
 
     /// <summary>
