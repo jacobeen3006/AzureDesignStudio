@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Land and Stabilize** - Commit the working slice in reviewable chunks, remove tracked blobs and scratch, fix the stale pointer zone, correct docs, decide the publisher (completed 2026-10-21)
 - [ ] **Phase 2: Reproducible Build and CI Baseline** - Pin the SDK, centralize and lock packages, gate Desktop on PRs, block vulnerable packages
-- [ ] **Phase 3: Server Foundation and Integration Harness** - Config-selected providers, a reachable `Program`, and a real hosted-server test channel
+- [x] **Phase 3: Server Foundation and Integration Harness** - Config-selected providers, a reachable `Program`, and a real hosted-server test channel (completed 2026-11-14)
 - [ ] **Phase 4: Database Durability** - Baseline migrations, WAL, integrity check, backup/restore, and read-only MCP over one workspace
 - [ ] **Phase 5: Identity, Guardrails, and Offline Development** - Typed `oid`/`tid`, deny-by-default RPCs, tenant-scoped roles, and a DEV crypto provider
 - [ ] **Phase 6: Bounds, Payload Contract, and Health** - Per-user limits, calibrated deadlines, shared payload caps, and anonymous health endpoints
@@ -106,7 +106,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. A test that creates a design writes to a temporary SQLite file; no test touches a developer's `workspace.db` or a live tenant.
   4. `Program` is reachable from the test project, and the RPC hot path no longer calls `EnsureCreated`.
 
-**Plans**: 6/6 plans executed
+**Plans**: 6/6 plans complete
 **Wave 1**
 - [x] 03-01-PLAN.md — Restore unblock (two new AutoMapper advisories, same dated expiry), Mvc.Testing 10.0.15 / EF Core Sqlite / Core reference, only the Server and Server.Tests locks regenerated
 
@@ -255,7 +255,7 @@ Phase 7 runs as a parallel track from Phase 2 and must be verified before Phase 
 |-------|----------------|--------|-----------|
 | 1. Land and Stabilize | 8/8 | Complete    | 2026-10-21 |
 | 2. Reproducible Build and CI Baseline | 0/TBD | Not started | - |
-| 3. Server Foundation and Integration Harness | 6/6 | In Progress | - |
+| 3. Server Foundation and Integration Harness | 6/6 | Complete    | 2026-11-14 |
 | 4. Database Durability | 0/TBD | Not started | - |
 | 5. Identity, Guardrails, and Offline Development | 0/TBD | Not started | - |
 | 6. Bounds, Payload Contract, and Health | 0/TBD | Not started | - |
