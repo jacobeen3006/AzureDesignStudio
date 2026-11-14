@@ -144,6 +144,25 @@ namespace AzureDesignStudio.Core.Tests
         private string ReportsDirectory => _temp.Path("reports");
 
         [Fact]
+        public void KeepNewest_OrdersByTheInstant_NotByTheTextOfTheOffsetTimestamp()
+        {
+            // WR-05: as text '...01:30:00+02:00' sorts after '...01:10:00+01:00', yet it is the OLDER instant
+            // (23:30Z the day before versus 00:10Z)
+            var db = NewDb(
+                "CREATE TABLE Designs (Id TEXT PRIMARY KEY, Name TEXT NOT NULL, Data TEXT NOT NULL, SavedAt TEXT NOT NULL);" +
+                "CREATE TABLE ChangeFeed (Id INTEGER PRIMARY KEY AUTOINCREMENT, TargetResourceId TEXT NOT NULL, ChangeKey TEXT NOT NULL, ChangeTime TEXT NOT NULL);" +
+                "INSERT INTO Designs VALUES ('older', 'd', '{}', '2024-10-27 01:30:00.1234567+02:00');" +
+                "INSERT INTO Designs VALUES ('newer', 'd', '{}', '2024-10-27 01:10:00.0000000+01:00');" +
+                "INSERT INTO ChangeFeed (TargetResourceId, ChangeKey, ChangeTime) VALUES ('r', 'k', '2024-10-27 01:30:00.0000000+02:00');" +
+                "INSERT INTO ChangeFeed (TargetResourceId, ChangeKey, ChangeTime) VALUES ('r', 'k', '2024-10-27 01:10:00.0000000+01:00');");
+
+            Assert.Equal(2, Repair(db, [.. UniqueIndexGuard.Specs]).Count);
+
+            Assert.Equal("newer", Rows(db, "SELECT Id FROM Designs").Single()[0]);
+            Assert.Equal(2L, Rows(db, "SELECT Id FROM ChangeFeed").Single()[0]);   // the later instant, inserted second
+        }
+
+        [Fact]
         public void NoDuplicates_ChangesNothing_WritesNoReport_AndReturnsNoRepair()
         {
             var db = NewDb(ItemsTable +

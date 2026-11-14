@@ -36,8 +36,12 @@ public static class UniqueIndexGuard
     /// <summary>The unique indexes of the shipped model.</summary>
     public static IReadOnlyList<UniqueIndexSpec> Specs { get; } =
     [
-        new("Designs", "IX_Designs_Name", ["Name"], "SavedAt DESC, rowid DESC"),
-        new("ChangeFeed", "IX_ChangeFeed_TargetResourceId_ChangeKey", ["TargetResourceId", "ChangeKey"], "ChangeTime DESC, rowid DESC"),
+        // DateTimeOffset is stored as text with its own UTC offset ("2024-03-31 01:30:00+01:00"), which does not
+        // sort chronologically across offsets (a DST change, a trip). julianday() orders by the instant; the
+        // text and rowid break the ties and keep an unparseable value (NULL) deterministic.
+        new("Designs", "IX_Designs_Name", ["Name"], "julianday(SavedAt) DESC, SavedAt DESC, rowid DESC"),
+        new("ChangeFeed", "IX_ChangeFeed_TargetResourceId_ChangeKey", ["TargetResourceId", "ChangeKey"],
+            "julianday(ChangeTime) DESC, ChangeTime DESC, rowid DESC"),
     ];
 
     private const string ReportPrefix = "upgrade-removed-rows-";
