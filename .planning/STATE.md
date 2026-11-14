@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Identity, Guardrails, and Offline Development
 status: executing
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-11-14T15:28:43.995Z"
+stopped_at: Completed 05-03-PLAN.md
+last_updated: "2026-11-14T15:33:08.742Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 05 execution started
-state_head: 1ddb91318d51e32bb26068b13e89cc22d3812fcf
+state_head: d7beb8542ec1f800e81581b6e2922522d333f3fa
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 45
-  completed_plans: 34
+  completed_plans: 35
   percent: 27
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 ## Current Position
 
 Phase: 05 (Identity, Guardrails, and Offline Development) — EXECUTING
-Plan: 3 of 11
+Plan: 4 of 11
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 05 execution started
 
@@ -80,6 +80,7 @@ Progress: [███░░░░░░░] 27%
 | Phase 04 P13 | n/a (human checkpoints) | 4 tasks | 0 files |
 | Phase 05 P01 | 25min | 2 tasks | 11 files |
 | Phase 05 P02 | 35min | 3 tasks | 10 files |
+| Phase 05 P03 | 20min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -129,6 +130,7 @@ Progress: [███░░░░░░░] 27%
 - [Phase 05]: Single-user host marker is set only by InProcessServerCallContext via UserState, counted only as boolean true (D-04)
 - [Phase 05]: 05-02: one ServiceTools.IdentityInvalidMessage text; responses without an error_message field carry the 401 status only (no proto change)
 - [Phase 05]: 05-02: the caller is resolved before request validation in every RPC, including WhatIf, CreateDeployment, GetStack and the shared stack preparation
+- [Phase 05]: 05-03: Cost.GetRetailPrices is the only anonymous gRPC method (literal list in the test); FallbackPolicy requires an authenticated user; mapping helper unit-tested because Hosted [Authorize] attributes mask it on the real host
 
 ### Pending Todos
 
@@ -152,6 +154,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T15:28:43.685Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-11-14T15:33:08.637Z
+Stopped at: Completed 05-03-PLAN.md
 Resume file: None
