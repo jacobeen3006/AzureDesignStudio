@@ -7,6 +7,7 @@ using AzureDesignStudio.SharedModels.Protos;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 using AzureDesignStudio.Discovery.Iac.WhatIf;
@@ -343,5 +344,114 @@ public sealed class TenantIsolationTests
         Assert.Equal(200, free.StatusCode);
         Assert.False(free.GuardrailBlocked);
         Assert.NotEqual("", free.WhatIfToken);
+    }
+
+    // --- the audit trail of a policy change (D-15) ---
+
+    [Fact]
+    public async Task EachSetAppendsOneEventForTheWritersScopeWithThePrincipal()
+    {
+        var contosoUser = Guid.NewGuid();
+        var fabrikamUser = Guid.NewGuid();
+        var contoso = Member(contosoUser, TestTenants.Contoso, "Ada");
+        var fabrikam = Member(fabrikamUser, TestTenants.Fabrikam, "Bob");
+
+        await Set(contoso, StoragePolicy);
+        await Set(fabrikam, KeyVaultPolicy);
+        await Set(contoso, SqlPolicy);
+
+        var events = await _db.AdsSecurityEvents.OrderBy(e => e.AtUtc).ToListAsync();
+        Assert.Equal(3, events.Count);
+        Assert.All(events, e => Assert.Equal(SecurityEventTypes.GuardrailPolicyChanged, e.EventType));
+        Assert.Equal(2, events.Count(e => e.TenantId == TestTenants.Contoso));
+        var theirs = Assert.Single(events, e => e.TenantId == TestTenants.Fabrikam);
+        Assert.Equal($"Bob <{fabrikamUser}>", theirs.Principal);
+        Assert.Equal(fabrikamUser.ToString("D"), theirs.PrincipalUserId);
+        Assert.All(events.Where(e => e.TenantId == TestTenants.Contoso), e =>
+        {
+            Assert.Equal($"Ada <{contosoUser}>", e.Principal);
+            Assert.Equal(contosoUser.ToString("D"), e.PrincipalUserId);
+        });
+    }
+
+    [Fact]
+    public async Task ThePersonalAccountScopeIsTheEventsTenant()
+    {
+        var user = Guid.NewGuid();
+
+        await Set(Personal(user), StoragePolicy);
+
+        Assert.Equal(user, (await _db.AdsSecurityEvents.SingleAsync()).TenantId);
+    }
+
+    [Fact]
+    public async Task AGetAppendsNoEvent()
+    {
+        var contoso = Member(Guid.NewGuid(), TestTenants.Contoso);
+        await Set(contoso, StoragePolicy);
+
+        await Get(contoso);
+        await Get(contoso);
+
+        Assert.Single(_db.AdsSecurityEvents);
+    }
+
+    [Fact]
+    public async Task ARefusedOrMalformedSetAppendsNoEvent()
+    {
+        var roleless = TestServerCallContext.ForUser(Guid.NewGuid(), tenantId: TestTenants.Contoso);
+        var admin = Member(Guid.NewGuid(), TestTenants.Contoso);
+
+        Assert.Equal(403, (await Set(roleless, StoragePolicy)).StatusCode);
+        Assert.Equal(400, (await Set(admin, "{ not json")).StatusCode);
+        Assert.Equal(400, (await Set(admin, "{\"types\":[\"" + new string('x', 70000) + "\"]}")).StatusCode);
+
+        Assert.Empty(_db.AdsSecurityEvents);
+        Assert.Empty(_db.AdsGuardrailPolicies);
+    }
+
+    [Fact]
+    public async Task TheEventDetailHoldsALengthAndAHashPrefixNeverThePolicy()
+    {
+        await Set(Member(Guid.NewGuid(), TestTenants.Contoso), StoragePolicy);
+
+        var detail = (await _db.AdsSecurityEvents.SingleAsync()).Detail!;
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(StoragePolicy);
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))[..16].ToLowerInvariant();
+        Assert.Equal($"bytes={bytes.Length}; sha256={hash}", detail);
+        Assert.DoesNotContain("Microsoft.Storage", detail);
+        Assert.DoesNotContain("types", detail);
+        Assert.DoesNotContain("{", detail);
+    }
+
+    /// <summary>Fails the save that carries a security event, to prove the event and the row are one commit.</summary>
+    private sealed class FailOnSecurityEvent : SaveChangesInterceptor
+    {
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context!.ChangeTracker.Entries<SecurityEventModel>().Any(e => e.State == EntityState.Added))
+                throw new InvalidOperationException("audit insert failed");
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheAuditInsertFailsThePolicyRowIsNotStored()
+    {
+        var store = Guid.NewGuid().ToString();
+        await using var failing = new DesignDbContext(new DbContextOptionsBuilder<DesignDbContext>()
+            .UseInMemoryDatabase(store).AddInterceptors(new FailOnSecurityEvent()).Options);
+        var service = new DeployService(failing, NullLogger<DeployService>.Instance, new FakeCryptoService(),
+            new WhatIfTokenGate(WhatIfTokenGate.DefaultTtl), new ScriptedHttp(_ => null));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SetGuardrailPolicy(
+            new GuardrailPolicyRequest { Json = StoragePolicy }, Member(Guid.NewGuid(), TestTenants.Contoso)));
+
+        await using var verify = new DesignDbContext(new DbContextOptionsBuilder<DesignDbContext>()
+            .UseInMemoryDatabase(store).Options);
+        Assert.Empty(verify.AdsGuardrailPolicies);
+        Assert.Empty(verify.AdsSecurityEvents);
     }
 }

@@ -20,6 +20,8 @@ using Azure;
 using Azure.ResourceManager.Resources.Deployments;
 using Azure.ResourceManager.Resources.Deployments.Models;
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace AzureDesignStudio.Services
@@ -1840,6 +1842,22 @@ namespace AzureDesignStudio.Services
             row.UpdatedBy = caller.Principal;
             row.UpdatedByUserId = caller.UserIdText;
             row.UpdatedAtUtc = DateTime.UtcNow;
+
+            // The audit event rides in the same SaveChanges as the row (D-15): one commit, so a
+            // change never exists without its record. The detail is a size and a hash prefix of
+            // the body - never the body, which is the tenant's own do-not-touch list.
+            var bytes = Encoding.UTF8.GetBytes(json);
+            var hashPrefix = Convert.ToHexString(SHA256.HashData(bytes))[..16].ToLowerInvariant();
+            _designContext.AdsSecurityEvents.Add(new SecurityEventModel
+            {
+                Id = Guid.NewGuid(),
+                TenantId = caller.ScopeId,
+                EventType = SecurityEventTypes.GuardrailPolicyChanged,
+                Principal = caller.Principal,
+                PrincipalUserId = caller.UserIdText,
+                Detail = $"bytes={bytes.Length}; sha256={hashPrefix}",
+                AtUtc = row.UpdatedAtUtc,
+            });
             await _designContext.SaveChangesAsync(ct);
             return row.UpdatedAtUtc;
         }
