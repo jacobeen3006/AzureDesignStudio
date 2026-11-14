@@ -8,7 +8,9 @@ namespace AzureDesignStudio.Workspace;
 /// <param name="Created">The file did not exist (or was empty), so this run created it.</param>
 /// <param name="AppliedMigrations">Ids of the migrations this run applied, oldest first.</param>
 /// <param name="JournalMode">The journal mode SQLite reported after the upgrade (expected <c>wal</c>).</param>
-public sealed record WorkspaceUpgradeResult(bool Created, IReadOnlyList<string> AppliedMigrations, string JournalMode);
+/// <param name="PremigrationBackupPath">The backup written before the schema change, or null when none was needed.</param>
+public sealed record WorkspaceUpgradeResult(
+    bool Created, IReadOnlyList<string> AppliedMigrations, string JournalMode, string? PremigrationBackupPath = null);
 
 /// <summary>The workspace database could not be brought to the current schema.</summary>
 public sealed class WorkspaceUpgradeException : Exception
@@ -23,6 +25,12 @@ internal sealed class WorkspaceUpgradeOptions
 {
     /// <summary>How long <c>MigrateAsync</c> may run before the upgrade is reported as stuck.</summary>
     public TimeSpan MigrateTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Where the premigration backup goes; null means a <c>backups</c> folder beside the database.</summary>
+    public string? BackupsDirectory { get; init; }
+
+    /// <summary>The clock that stamps the premigration backup.</summary>
+    public TimeProvider Clock { get; init; } = TimeProvider.System;
 }
 
 /// <summary>

@@ -88,6 +88,9 @@ public sealed class WorkspaceDb
 
     public string ConnectionString { get; }
 
+    /// <summary>The workspace database file this instance opens.</summary>
+    public string DatabasePath => _databasePath;
+
     public WorkspaceDb(string databasePath)
     {
         _databasePath = databasePath;
@@ -96,6 +99,14 @@ public sealed class WorkspaceDb
         // The thread-pool hop keeps a UI synchronization context from deadlocking the blocking wait.
         Task.Run(() => WorkspaceSchema.UpgradeAsync(databasePath, new WorkspaceUpgradeOptions(), CancellationToken.None))
             .GetAwaiter().GetResult();
+    }
+
+    /// <summary>For a file <see cref="WorkspaceStartup"/> has already brought to the current schema: no upgrade runs.</summary>
+    internal WorkspaceDb(string databasePath, bool alreadyUpgraded)
+    {
+        _ = alreadyUpgraded;
+        _databasePath = databasePath;
+        ConnectionString = WorkspaceConnection.WriterConnectionString(databasePath);
     }
 
     public WorkspaceDbContext CreateContext()
