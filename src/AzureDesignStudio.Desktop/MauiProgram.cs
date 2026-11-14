@@ -285,11 +285,29 @@ public static class MauiProgram
         // deploy.db is under EF migrations: a new file gets the baseline, a file an earlier build
         // created from the model adopts it, and an existing file is backed up (privately, in
         // backups/deploy) before any pending migration. A later schema change is a migration.
-        using (var scope = app.Services.CreateScope())
+        // A failed backup stops that upgrade; the same native page as the workspace shows why.
+        try
+        {
+            using var scope = app.Services.CreateScope();
             DeployDbStartup.Migrate(
                 scope.ServiceProvider.GetRequiredService<AzureDesignStudio.Services.Models.DesignDbContext>(),
                 System.IO.Path.Combine(appData, "deploy.db"),
                 System.IO.Path.Combine(appData, "backups", "deploy"));
+        }
+        catch (InvalidOperationException e)
+        {
+            StartupFailure = e;
+            LogCrash("DEPLOY DATABASE STARTUP FAILED", e);
+        }
+
+        if (StartupFailure is null)
+        {
+            // Daily workspace backups for the life of the process; the loop reports its own tick
+            // failures through the service's error callback and ends quietly when cancelled.
+            var backupLoop = new CancellationTokenSource();
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => backupLoop.Cancel();
+            _ = Task.Run(() => backupService.RunLoopAsync(backupLoop.Token));
+        }
         return app;
     }
 
