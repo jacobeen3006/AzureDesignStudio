@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 2
-current_phase_name: Reproducible Build and CI Baseline
+current_phase: 05
+current_phase_name: Identity, Guardrails, and Offline Development
 status: executing
-stopped_at: Phase 04 complete, ready to execute Phase 2
-last_updated: "2026-11-14T14:02:07.629Z"
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-11-14T15:23:38.328Z"
 last_activity: 2026-11-14
-last_activity_desc: Phase 04 complete, transitioned to Phase 2
-state_head: 6326c5fc98cec95a65b3dcd463d30072bd428a8c
+last_activity_desc: Phase 05 execution started
+state_head: 49b47783c584c930ef8e27cc3f7bb1afa9f20981
 progress:
   total_phases: 11
   completed_phases: 3
-  total_plans: 34
-  completed_plans: 32
+  total_plans: 45
+  completed_plans: 33
   percent: 27
 ---
 
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-21)
 
 **Core value:** Design, observe, and change Azure from one workspace — canvas fidelity, live tenant truth, and gated execution are all first-class.
-**Current focus:** Phase 04 — Database Durability
+**Current focus:** Phase 05 — Identity, Guardrails, and Offline Development
 
 ## Current Position
 
-Phase: 2 — Reproducible Build and CI Baseline
-Plan: 6
+Phase: 05 (Identity, Guardrails, and Offline Development) — EXECUTING
+Plan: 2 of 11
 Status: Ready to execute
-Last activity: 2026-11-14 — Phase 04 complete, transitioned to Phase 2
+Last activity: 2026-11-14 — Phase 05 execution started
 
 Progress: [███░░░░░░░] 27%
 
@@ -78,6 +78,7 @@ Progress: [███░░░░░░░] 27%
 | Phase 04 P11 | 35min | 3 tasks | 10 files |
 | Phase 04 P12 | 45min | 3 tasks | 3 files |
 | Phase 04 P13 | n/a (human checkpoints) | 4 tasks | 0 files |
+| Phase 05 P01 | 25min | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -123,6 +124,8 @@ Progress: [███░░░░░░░] 27%
 - [Phase 04]: 04-11: ADS_DATA_DIR redirects the Desktop data root (workspace.db, deploy.db, backups) for testing only; VerifyDesktopWorkspace.sh polls workspace.db with a normal connection because -readonly cannot open a WAL database without an -shm file
 - [Phase 04]: 04-12: the runbook documents the real gaps (deploy.db migration not time-bounded; only a failed deploy.db premigration backup reaches the failure page) instead of describing intended behavior
 - [Phase 04]: 04-12: DatabaseRunbookTests guards the runbook (required statements, cited src/ paths, no credentials) and the AGENTS.md link
+- [Phase 05]: AdsIdentity lives in Services (no ASP.NET Core type); scope key = tid, or the user's oid for the personal-account tenant (D-11, D-17)
+- [Phase 05]: Single-user host marker is set only by InProcessServerCallContext via UserState, counted only as boolean true (D-04)
 
 ### Pending Todos
 
@@ -146,6 +149,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T13:42:16.316Z
-Stopped at: Phase 04 complete, ready to execute Phase 2
+Last session: 2026-11-14T15:23:38.227Z
+Stopped at: Completed 05-01-PLAN.md
 Resume file: None
