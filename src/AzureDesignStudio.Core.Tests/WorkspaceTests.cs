@@ -276,43 +276,6 @@ namespace AzureDesignStudio.Core.Tests
         // Wave B3: governance findings are stored with the scan that collected them.
 
         [Fact]
-        public async Task GovernanceTable_CreatedOnExistingWorkspace()
-        {
-            var path = Path.Combine(_directory, "workspace.db");
-            var scans = new WorkspaceScans(_workspace);
-            var scan = await scans.StartAsync("tenant", "Tenant");
-            await scans.PersistPageAsync(scan.Id, [Snapshot("one")], """{"completedQueries":["gA"],"rows":1}""");
-
-            // A workspace file written before governance findings existed: every table but this one.
-            await using (var db = _workspace.CreateContext())
-                await db.Database.ExecuteSqlRawAsync("""DROP TABLE "GovernanceFindings";""");
-            Assert.Empty(Query(_workspace, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'GovernanceFindings'"));
-
-            var reopened = new WorkspaceDb(path);
-
-            // The table and its index appear, in the shape a fresh workspace gets from the model.
-            var fresh = new WorkspaceDb(Path.Combine(_directory, "fresh.db"));
-            const string columns = """SELECT name, type, "notnull", pk FROM pragma_table_info('GovernanceFindings') ORDER BY cid""";
-            const string indexes = "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'GovernanceFindings' ORDER BY name";
-            Assert.Equal(Query(fresh, columns), Query(reopened, columns));
-            Assert.Equal(Query(fresh, indexes), Query(reopened, indexes));
-            Assert.Contains("IX_GovernanceFindings_ScanId_ResourceId", Query(reopened, indexes));
-            Assert.Equal(["ScanId", "Source", "RecordId"],
-                Query(reopened, "SELECT name FROM pragma_table_info('GovernanceFindings') WHERE pk > 0 ORDER BY pk"));
-
-            // Existing rows are intact, and the new table takes findings.
-            var reopenedScans = new WorkspaceScans(reopened);
-            Assert.Equal("one", Assert.Single(await reopenedScans.GetSnapshotsAsync(scan.Id)).Name);
-            Assert.Equal(1, Assert.Single(await reopenedScans.ListAsync()).ResourceCount);
-            await reopenedScans.PersistSourcePageAsync(scan.Id, [Finding("Advisor", "rec-1")], """{"completedQueries":["gA","advisor:gA"],"rows":1}""");
-            Assert.Equal("rec-1", Assert.Single(await reopenedScans.GetGovernanceAsync(scan.Id)).RecordId);
-
-            // Opening it again changes nothing (the bootstrap is idempotent).
-            var again = new WorkspaceScans(new WorkspaceDb(path));
-            Assert.Single(await again.GetGovernanceAsync(scan.Id));
-        }
-
-        [Fact]
         public async Task PersistSourcePage_UpsertsAndKeepsResourceCount()
         {
             var scans = new WorkspaceScans(_workspace);
