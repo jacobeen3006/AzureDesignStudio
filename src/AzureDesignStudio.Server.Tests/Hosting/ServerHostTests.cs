@@ -79,6 +79,34 @@ public class ServerHostTests(AdsServerFactory factory) : IClassFixture<AdsServer
     }
 
     [Fact]
+    public async Task FailureHandlerFaultIsAnUnknownStatusAndTheHostKeepsServing()
+    {
+        // Owns its host: the shared class fixture must not be damaged.
+        using var ownFactory = new AdsServerFactory();
+        _ = ownFactory.Services; // starts the host; the bootstrapper creates the schema
+
+        using var channel = ownFactory.CreateGrpcChannel(Guid.NewGuid());
+        var design = new Design.DesignClient(channel);
+
+        using (var scope = ownFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<DesignDbContext>();
+            await db.Database.ExecuteSqlRawAsync("DROP TABLE AdsDesigns");
+        }
+
+        var ex = await Assert.ThrowsAsync<RpcException>(() =>
+            design.SaveAsync(new SaveDesignRequest { Name = "a", Data = "{}" }).ResponseAsync);
+        Assert.Equal(StatusCode.Unknown, ex.StatusCode);
+
+        // The host survived: other services on the same host still answer.
+        Assert.Equal(200, (await new Deploy.DeployClient(channel).GetGuardrailPolicyAsync(new Empty())).StatusCode);
+
+        using var anonymous = ownFactory.CreateGrpcChannel();
+        var prices = await new Cost.CostClient(anonymous).GetRetailPricesAsync(new RetailPriceRequest());
+        Assert.Equal(400, prices.StatusCode);
+    }
+
+    [Fact]
     public void BootsTestScopeMatchesTheConfiguredScope()
     {
         var configuration = factory.Services.GetRequiredService<IConfiguration>();
